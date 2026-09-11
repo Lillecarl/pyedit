@@ -22,12 +22,15 @@ _MISSING = object()
 
 _GLOB_CACHE: dict[str, re.Pattern] = {}
 
+# captured at import time, before the VFS layer patches os.stat: the
+# disk-truth helpers must never observe staged content
+_REAL_STAT = os.stat
+
 
 def _disk_stat(path: Path):
-    # os.stat is never patched by the VFS layer, so disk checks here stay
-    # loop-free even while Path.exists/is_file/is_dir are patched
+    # deliberately not the patched os.stat
     try:
-        return os.stat(path)
+        return _REAL_STAT(path)
     except OSError:
         return None
 
@@ -110,14 +113,20 @@ class EditSession:
         max_bytes: int | None = None,
         max_files: int | None = None,
         respect_gitignore: bool = True,
+        root: Path | None = None,
     ) -> None:
         self._max_bytes = max_bytes
         self._max_files = max_files
         self._respect_gitignore = respect_gitignore
+        self._root = (root or Path.cwd()).resolve()
         self._ignore_filter: IgnoreFilter | None = None
         self._staged: dict[Path, str | bytes | None] = {}
         self._bytes_used = 0
         self._files_used = 0
+
+    @property
+    def root(self) -> Path:
+        return self._root
 
     def filter_ignored(self, paths) -> list[Path]:
         """Drop paths excluded by .gitignore rules (discovery only)."""
@@ -194,7 +203,10 @@ class EditSession:
                 raise FileNotFoundError(f"file is deleted in this session: {p}")
             return content
         content = _slurp(p)
-        self._stage(p, content)
+        if p.is_relative_to(self._root):
+            # only project files are cached in the overlay; external
+            # reads (stdlib, dependencies, /etc) would be junk
+            self._stage(p, content)
         return content
 
     def write(self, path: str | Path, content: str | bytes) -> None:
@@ -237,6 +249,37 @@ class EditSession:
         from pyedit import udiff
 
         return udiff.apply_unified_diff(self, text)
+
+    def rename_symbol(
+        self,
+        path: str | Path,
+        line: int,
+        column: int,
+        old_name: str,
+        new_name: str,
+    ) -> list[Path]:
+        """LSP-grade rename of the symbol at (line, column). `old_name`
+        must match what the position resolves to. Stages every changed
+        file."""
+        from pyedit import lsp
+
+        return lsp.rename_symbol(self, path, line, column, old_name, new_name)
+
+    def rename_module(self, path: str | Path, old_name: str, new_name: str) -> list[Path]:
+        """Rename a module file or package folder (`old_name` is the
+        module's current name); stages the move and importer updates."""
+        from pyedit import lsp
+
+        return lsp.rename_module(self, path, old_name, new_name)
+
+    def references(
+        self, path: str | Path, line: int, column: int, name: str
+    ) -> list["Reference"]:
+        """Every occurrence of the symbol at (line, column); `name` must
+        match the identifier there. Lines are 1-based."""
+        from pyedit import lsp
+
+        return lsp.references(self, path, line, column, name)
 
     # --- engine ---
 
@@ -303,7 +346,9 @@ class EditSession:
 
     @staticmethod
     def canon(path: str | Path) -> Path:
-        return Path(path).resolve()
+        # lexical normalization only: no syscalls, so it stays loop-free
+        # even while os.stat/os.lstat are patched (symlinks are not chased)
+        return Path(os.path.abspath(path))
 
 
 def display_path(path: Path) -> str:

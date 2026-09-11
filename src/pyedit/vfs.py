@@ -16,7 +16,7 @@ import shutil
 from pathlib import Path
 from typing import Callable
 
-from pyedit.session import EditSession, _MISSING, glob_re
+from pyedit.session import EditSession, _MISSING, _content_size, glob_re
 
 
 class _StagedTextIO(io.StringIO):
@@ -118,6 +118,12 @@ def install(session: EditSession) -> Callable[[], None]:
     os_path_exists = os.path.exists
     os_path_isfile = os.path.isfile
     os_path_isdir = os.path.isdir
+    os_path_getmtime = os.path.getmtime
+    os_path_getsize = os.path.getsize
+    os_path_getatime = os.path.getatime
+    os_path_getctime = os.path.getctime
+    os_stat = os.stat
+    os_lstat = os.lstat
     sh_copyfile = shutil.copyfile
     sh_copy = shutil.copy
     sh_copy2 = shutil.copy2
@@ -126,7 +132,9 @@ def install(session: EditSession) -> Callable[[], None]:
     sh_rmtree = shutil.rmtree
 
     def resolve(path) -> Path:
-        return Path(path).resolve()
+        # syscall-free: pathlib.resolve() would recurse into the patched
+        # os.lstat, so everything goes through the session's lexical canon
+        return session.canon(path)
 
     def staged(path):
         return session.staged_content(resolve(path))
@@ -331,6 +339,65 @@ def install(session: EditSession) -> Callable[[], None]:
     def _os_path_isdir(path):
         return session.is_dir(path)
 
+    def _staged_state(path):
+        """MISSING (never staged), None (staged deletion) or content."""
+        return session.staged_content(session.canon(path))
+
+    def _fake_stat(content):
+        return os.stat_result(
+            (0o100644, 0, 0, 1, 0, 0, _content_size(content), 0, 0, 0)
+        )
+
+    def _os_stat(path, *args, **kwargs):
+        content = _staged_state(path)
+        if content is _MISSING:
+            return os_stat(path, *args, **kwargs)
+        if content is None:
+            raise FileNotFoundError(str(resolve(path)))
+        return _fake_stat(content)
+
+    def _os_lstat(path, *args, **kwargs):
+        content = _staged_state(path)
+        if content is _MISSING:
+            return os_lstat(path, *args, **kwargs)
+        if content is None:
+            raise FileNotFoundError(str(resolve(path)))
+        return _fake_stat(content)
+
+    def _os_path_getsize(path):
+        content = _staged_state(path)
+        if content is _MISSING:
+            return os_path_getsize(path)
+        if content is None:
+            raise FileNotFoundError(str(resolve(path)))
+        return _content_size(content)
+
+    def _os_path_getmtime(path):
+        # rope's resource observer validates staged-only files through this;
+        # report a fixed mtime for anything that only exists in the overlay
+        content = _staged_state(path)
+        if content is _MISSING:
+            return os_path_getmtime(path)
+        if content is None:
+            raise FileNotFoundError(str(resolve(path)))
+        return 0.0
+
+    def _os_path_getatime(path):
+        content = _staged_state(path)
+        if content is _MISSING:
+            return os_path_getatime(path)
+        if content is None:
+            raise FileNotFoundError(str(resolve(path)))
+        return 0.0
+
+    def _os_path_getctime(path):
+        content = _staged_state(path)
+        if content is _MISSING:
+            return os_path_getctime(path)
+        if content is None:
+            raise FileNotFoundError(str(resolve(path)))
+        return 0.0
+
     def _os_rename(src, dst, /, *args, **kwargs):
         _move(resolve(src), resolve(dst))
 
@@ -414,9 +481,15 @@ def install(session: EditSession) -> Callable[[], None]:
         (os, "makedirs", _os_makedirs),
         (os, "listdir", _os_listdir),
         (os, "walk", _os_walk),
+        (os, "stat", _os_stat),
+        (os, "lstat", _os_lstat),
         (os.path, "exists", _os_path_exists),
         (os.path, "isfile", _os_path_isfile),
         (os.path, "isdir", _os_path_isdir),
+        (os.path, "getmtime", _os_path_getmtime),
+        (os.path, "getsize", _os_path_getsize),
+        (os.path, "getatime", _os_path_getatime),
+        (os.path, "getctime", _os_path_getctime),
         (shutil, "copyfile", _shutil_copyfile),
         (shutil, "copy", _shutil_copy),
         (shutil, "copy2", _shutil_copy2),

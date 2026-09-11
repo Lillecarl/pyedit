@@ -115,6 +115,16 @@ Any Python you know how to write works. No special DSL required.
     pyedit.delete(path)              stage deletion
     pyedit.rename(old, new)          stage move (content kept, source
                                      deleted)
+    pyedit.rename_symbol(path,       LSP-grade rename of the symbol at
+                line, column,        (1-based line, 0-based column);
+                old_name, new_name)  old_name must match what the
+                                     position resolves to; stages every
+                                     changed file
+    pyedit.rename_module(path,       rename a module file or package
+                old_name, new_name)  folder; stages the move and the
+                                     importer updates
+    pyedit.references(path,          every occurrence of the symbol at
+                line, column, name)  the position
     pyedit.apply_patch(text)         stage an OpenAI apply_patch (V4A)
                                      envelope; returns the operations
     pyedit.apply_unified_diff(text)  stage a unified diff; returns the
@@ -184,8 +194,9 @@ Create, move and prune with stdlib tools:
 - `shutil.copy2` does not preserve metadata; mode bits are not staged.
 - Binary files stage as bytes; their diffs are one-line summaries, not
   hunks (the diff file is then not `git apply`-compatible).
-- `Path.stat()` and `os.stat()` on files created during the run raise;
-  `exists()`, `is_file()` and listings are overlay-aware.
+- `Path.stat()`, `os.stat()`, `os.lstat()` and `os.path.getmtime/size/`
+  `atime/ctime` are overlay-aware: staged-only files report a synthetic
+  stat (regular file, staged size), deleted files raise.
 """
 
 SOURCE_SECTION = """\
@@ -212,6 +223,9 @@ Module map:
   the session (newline-tolerant matching, EOF newline markers).
 - `gitignore.py`: pathspec-based .gitignore filtering for discovery
   globs.
+- `lsp.py`: semantic editing via rope (the engine pylsp uses for
+  rename), reading through the VFS: position-based rename_symbol,
+  rename_module (file moves) and references.
 - `vendor/apply_diff.py`: the V4A string applier, vendored from
   openai-agents-python (MIT).
 - `skill.py`: this document.

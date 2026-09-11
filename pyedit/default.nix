@@ -3,6 +3,7 @@
   hatchling,
   unidiff,
   pathspec,
+  rope,
   pytestCheckHook,
   buildPythonApplication,
   buildPythonPackage,
@@ -38,6 +39,7 @@ let
     dependencies = [
       unidiff
       pathspec
+      rope
     ];
 
     nativeCheckInputs = [ pytestCheckHook ];
