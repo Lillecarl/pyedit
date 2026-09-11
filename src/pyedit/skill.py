@@ -35,8 +35,12 @@ Options:
   paths (repeatable)
 - `-U, --context N`: diff context lines (default 3)
 - `--no-gitignore`: do not exclude .gitignore paths from glob discovery
+- `--timeout SECONDS`: kill the run after SECONDS and dump all thread
+  stacks to the pyedit state directory (default 300; 0 disables)
 
-Exit codes: 0 ok, 1 input failed (nothing written), 2 usage error.
+Exit codes: 0 ok, 1 input failed (nothing written), 2 usage error,
+124 watchdog timeout (thread stacks in
+`$XDG_STATE_HOME/pyedit/dumps`, default `~/.local/state/pyedit/dumps`).
 Diffs are git-style (`a/`, `b/`, `/dev/null`); the output pipes to
 `git apply` or `patch -p1`.
 

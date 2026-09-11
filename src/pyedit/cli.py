@@ -122,6 +122,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="do not exclude .gitignore paths from glob discovery",
     )
     parser.add_argument(
+        "--timeout",
+        type=float,
+        default=300.0,
+        metavar="SECONDS",
+        help=(
+            "kill the run after SECONDS and dump all thread stacks to the "
+            "pyedit state directory (default: 300; 0 disables)"
+        ),
+    )
+    parser.add_argument(
         "--max-materialized-bytes",
         type=int,
         default=256 * 1024 * 1024,
@@ -236,6 +246,10 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = build_parser()
     args = parser.parse_args(tokens)
+
+    from pyedit import watchdog
+
+    watchdog.start(args.timeout)
 
     text, mode, filename = read_input(args)
     session = EditSession(
