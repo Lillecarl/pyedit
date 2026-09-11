@@ -24,9 +24,10 @@ Options:
 - `-s, --script FILE`: edit script (default: stdin; `-` is stdin)
 - `-p, --patch [FILE]`: OpenAI apply_patch (V4A) envelope; input starting
   with `*** Begin Patch` on stdin is auto-detected
-- `-d, --diff [FILE]`: unified diff; input starting with `diff --git` or
-  `--- a/` on stdin is auto-detected
-- `-a, --apply`: write staged changes to disk (default: dry-run)
+- `-d, --diff [FILE]`: unified diff; input starting with `diff --git`,
+  `--- a/` or a pyedit dry-run comment on stdin is auto-detected
+- `-a, --apply`: write staged changes to disk (default: dry-run); with a
+  dry-run id, `--apply ID` applies that stored diff
 - `-o, --output FILE`: write the diff to FILE instead of stdout
 - `-i, --include GLOB` / `-x, --exclude GLOB`: limit shown and applied
   paths (repeatable)
@@ -36,6 +37,24 @@ Options:
 Exit codes: 0 ok, 1 input failed (nothing written), 2 usage error.
 Diffs are git-style (`a/`, `b/`, `/dev/null`); the output pipes to
 `git apply` or `patch -p1`.
+
+## Dry-run ids
+
+Every dry-run with changes stores its diff under a short id and prints
+it as a comment at the start and end of the diff:
+
+    # pyedit dry-run ab12cd34 (pyedit --apply ab12cd34 to apply)
+    ... diff ...
+    # pyedit dry-run ab12cd34 (pyedit --apply ab12cd34 to apply)
+
+Apply a stored dry-run later without resending the script or diff:
+
+    pyedit --apply ab12cd34
+
+Iterate by feeding the commented output back on stdin: the comments
+parse as diff comments and a fresh dry-run prints a fresh id. Stored
+diffs live in a temp directory the OS reaps; ids are not stable across
+reboots.
 
 ## OpenAI apply_patch (V4A)
 

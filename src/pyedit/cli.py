@@ -4,7 +4,9 @@ Input is a Python edit script (-s/--script), an OpenAI apply_patch (V4A)
 envelope (-p/--patch) or a unified diff (-d/--diff); bare stdin is
 auto-detected between the three. Input runs against an in-memory
 overlay: the result prints as a unified diff and nothing is written to
-disk unless --apply is given.
+disk unless --apply is given. A dry-run's diff is also saved under a
+short id in a temp store, printed as a comment around the diff, so the
+id alone can apply it later (--apply ID).
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ import traceback
 from pathlib import Path
 
 import pyedit
+from pyedit import store
 from pyedit import vfs
 from pyedit.diff import unified_diffs
 from pyedit.session import EditSession, display_path
@@ -70,8 +73,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "-a",
         "--apply",
-        action="store_true",
-        help="write staged changes to disk (default: dry-run)",
+        nargs="?",
+        const=True,
+        default=False,
+        metavar="ID",
+        help=(
+            "write staged changes to disk (default: dry-run); with a "
+            "dry-run id, apply that stored diff instead"
+        ),
     )
     parser.add_argument(
         "-o",
@@ -135,9 +144,23 @@ def build_parser() -> argparse.ArgumentParser:
 
 def read_input(args: argparse.Namespace) -> tuple[str, str, str]:
     """Return (input text, mode, filename for tracebacks); mode is 'patch', 'diff' or 'script'."""
+    if isinstance(args.apply, str):
+        if args.script or args.patch is not None or args.diff is not None:
+            raise SystemExit("pyedit: --apply ID takes no other input")
+        stored = store.resolve(args.apply)
+        if stored is None:
+            raise SystemExit(
+                f"pyedit: no stored dry-run {args.apply!r}; ids are printed "
+                "by earlier dry-runs"
+            )
+        return stored.read_text(), "diff", stored.as_posix()
     for mode, option in (("patch", args.patch), ("diff", args.diff)):
         if option is not None and option != "-":
             path = Path(option)
+            if not path.is_file() and mode == "diff":
+                stored = store.resolve(option)
+                if stored is not None:
+                    path = stored
             return path.read_text(), mode, path.as_posix()
     if args.script and args.script != "-":
         path = Path(args.script)
@@ -151,7 +174,9 @@ def read_input(args: argparse.Namespace) -> tuple[str, str, str]:
     stripped = text.lstrip()
     if stripped.startswith("*** Begin Patch"):
         mode = "patch"
-    elif stripped.startswith("diff --git ") or stripped.startswith("--- "):
+    elif stripped.startswith("# pyedit dry-run") or stripped.startswith(
+        "diff --git "
+    ) or stripped.startswith("--- "):
         mode = "diff"
     else:
         mode = "script"
@@ -263,8 +288,16 @@ def main(argv: list[str] | None = None) -> int:
         diff for _, diff in unified_diffs(staged, context=args.context)
     )
 
+    # dry-runs store the diff so the printed id alone can apply it later
+    stored_id = store.save(diff_text) if staged and not args.apply else None
+    marker = (
+        f"# pyedit dry-run {stored_id} (pyedit --apply {stored_id} to apply)\n"
+        if stored_id
+        else ""
+    )
+
     if args.output == "-":
-        sys.stdout.write(diff_text)
+        sys.stdout.write(marker + diff_text + marker)
     else:
         out = Path(args.output)
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -272,6 +305,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if not staged:
         print("pyedit: no changes", file=sys.stderr)
+    elif stored_id:
+        print(
+            f"pyedit: dry-run saved as {stored_id} "
+            f"(pyedit --apply {stored_id} to apply)",
+            file=sys.stderr,
+        )
 
     if args.apply:
         apply_changes(staged)

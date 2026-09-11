@@ -1,4 +1,5 @@
 import io
+import re
 import sys
 from pathlib import Path
 
@@ -6,6 +7,15 @@ import pytest
 
 import pyedit
 from pyedit import cli
+from pyedit import store
+
+
+@pytest.fixture(autouse=True)
+def dryrun_store(tmp_path, monkeypatch):
+    """Keep dry-run artifacts inside each test's tmp."""
+    root = tmp_path / "store"
+    monkeypatch.setattr(store, "store_dir", lambda: (root.mkdir(exist_ok=True), root)[1])
+    return root
 
 
 @pytest.fixture
@@ -38,6 +48,79 @@ def test_dry_run_prints_diff_and_writes_nothing(project, script, capsys):
     assert "--- a/src/a.py" in out
     assert "+ALPHA = 1" in out
     assert (project / "src" / "a.py").read_text() == before
+
+
+def test_dry_run_prints_id_comments_and_stores_pure_diff(
+    project, script, capsys, dryrun_store
+):
+    assert run(project, script=script) == 0
+    out, err = capsys.readouterr()
+    lines = out.splitlines()
+    match = re.fullmatch(
+        r"# pyedit dry-run ([0-9a-f]{8}) \(pyedit --apply \1 to apply\)", lines[0]
+    )
+    assert match, lines[0]
+    token = match.group(1)
+    assert lines[-1] == lines[0]
+    stored = dryrun_store / f"{token}.diff"
+    text = stored.read_text()
+    assert text.startswith("--- a/src/a.py")
+    assert "# pyedit" not in text
+    assert f"saved as {token}" in err
+
+
+def test_apply_from_stored_id(project, script, capsys):
+    assert run(project, script=script) == 0
+    out = capsys.readouterr().out
+    token = re.search(r"# pyedit dry-run ([0-9a-f]{8})", out).group(1)
+    assert run(project, "--apply", token) == 0
+    assert (project / "src" / "a.py").read_text() == "ALPHA = 1\n"
+    out = capsys.readouterr().out
+    assert "+ALPHA = 1" in out
+    assert "# pyedit dry-run" not in out
+
+
+def test_diff_flag_resolves_stored_id(project, script, capsys):
+    assert run(project, script=script) == 0
+    out = capsys.readouterr().out
+    token = re.search(r"# pyedit dry-run ([0-9a-f]{8})", out).group(1)
+    # re-rendering the stored diff chains a fresh dry-run with a fresh id
+    assert run(project, "-d", token) == 0
+    out = capsys.readouterr().out
+    assert out.count("# pyedit dry-run") == 2
+    assert re.search(r"# pyedit dry-run ([0-9a-f]{8})", out).group(1) != token
+
+
+def test_commented_stdin_round_trips(project, script, capsys, monkeypatch):
+    assert run(project, script=script) == 0
+    out = capsys.readouterr().out
+    monkeypatch.setattr(sys, "stdin", io.StringIO(out))
+    assert run(project, "--apply") == 0
+    assert (project / "src" / "a.py").read_text() == "ALPHA = 1\n"
+
+
+def test_output_file_keeps_pure_diff(project, script, capsys):
+    target = project / "changes.diff"
+    assert run(project, "--output", target, script=script) == 0
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert "# pyedit" not in target.read_text()
+    assert re.search(r"saved as ([0-9a-f]{8})", err)
+
+
+def test_apply_unknown_id_errors(project, capsys):
+    with pytest.raises(SystemExit, match="no stored dry-run"):
+        run(project, "--apply", "ffffffff")
+
+
+def test_no_changes_stores_nothing(project, capsys, dryrun_store):
+    quiet = project / "noop.py"
+    quiet.write_text("pass\n")
+    assert run(project, script=quiet) == 0
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert "no changes" in err
+    assert not dryrun_store.exists()
 
 
 def test_apply_writes_changes(project, script, capsys):
