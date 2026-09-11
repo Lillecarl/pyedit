@@ -89,18 +89,12 @@ class LanguageRules:
 
 
 _PLAIN = [
-    ("tree_sitter_javascript", (".js", ".jsx", ".mjs", ".cjs"), ("variable_declarator",)),
+    ("tree_sitter_javascript", (".js", ".jsx", ".mjs", ".cjs"), ("variable_declarator", "command")),
     ("tree_sitter_typescript", (".ts", ".mts", ".cts"), ("variable_declarator",)),
     ("tree_sitter_tsx", (".tsx",), ("variable_declarator",)),
     ("tree_sitter_go", (".go",), ("parameter_declaration", "field_declaration")),
     ("tree_sitter_rust", (".rs",), ("field_declaration",)),
-    ("tree_sitter_c", (".c", ".h"), ("field_declaration", "parameter_declaration")),
-    (
-        "tree_sitter_cpp",
-        (".cpp", ".cc", ".cxx", ".hpp", ".hh", ".hxx"),
-        ("field_declaration", "parameter_declaration"),
-    ),
-    ("tree_sitter_bash", (".sh", ".bash"), ()),
+    ("tree_sitter_bash", (".sh", ".bash"), ("command",)),
     ("tree_sitter_json", (".json",), ()),
     ("tree_sitter_yaml", (".yaml", ".yml"), ()),
     ("tree_sitter_toml", (".toml",), ()),
@@ -112,10 +106,11 @@ _PLAIN = [
 
 
 def _rules_by_suffix() -> dict[str, LanguageRules]:
+    from pyedit.syntax.c import C, Cpp
     from pyedit.syntax.nix import Nix
     from pyedit.syntax.python import Python
 
-    special = (*_PLAIN, Python, Nix)
+    special = (*_PLAIN, C, Cpp, Python, Nix)
     table: dict[str, LanguageRules] = {}
     for entry in special:
         rules = entry() if isinstance(entry, type) else LanguageRules(*entry)
