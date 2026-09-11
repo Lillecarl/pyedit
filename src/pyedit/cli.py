@@ -83,6 +83,11 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--force",
+        action="store_true",
+        help="with --apply, write even when staged files have syntax problems",
+    )
+    parser.add_argument(
         "-o",
         "--output",
         default="-",
@@ -286,10 +291,12 @@ def main(argv: list[str] | None = None) -> int:
 
     # staged text is parsed: syntax problems surface here, in the same
     # run that shows the diff they would produce
+    problems: list[tuple[Path, object]] = []
     for path in sorted(staged):
         if not isinstance(staged[path], str):
             continue
         for problem in session.check(path):
+            problems.append((path, problem))
             print(
                 f"pyedit: syntax: {display_path(path)}:"
                 f"{problem.line}:{problem.column}: {problem.message}",
@@ -310,7 +317,8 @@ def main(argv: list[str] | None = None) -> int:
     else:
         marker = ""
 
-    if args.apply:
+    undo_id = None
+    if args.apply and (not problems or args.force):
         undo_id, skipped = _prepare_undo(staged, args.context)
         if undo_id:
             marker = f"# pyedit undo {undo_id} (pyedit --apply {undo_id} to revert)\n"
@@ -341,6 +349,18 @@ def main(argv: list[str] | None = None) -> int:
             f"(pyedit --apply {undo_id} to revert)",
             file=sys.stderr,
         )
+
+    # a dry-run warns; an apply of known-broken syntax refuses to write
+    # unless --force, in which case the problems are on record anyway
+    if args.apply and problems and args.force:
+        print("pyedit: applying with syntax problems (--force)", file=sys.stderr)
+    if args.apply and problems and not args.force:
+        print(
+            "pyedit: syntax check failed; nothing was written "
+            "(fix the files, or write them without pyedit)",
+            file=sys.stderr,
+        )
+        return EXIT_SCRIPT_ERROR
 
     if args.apply:
         apply_changes(staged)

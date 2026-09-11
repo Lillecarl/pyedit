@@ -28,6 +28,8 @@ Options:
   `--- a/` or a pyedit dry-run comment on stdin is auto-detected
 - `-a, --apply`: write staged changes to disk (default: dry-run); with a
   dry-run id, `--apply ID` applies that stored diff
+- `--force`: with `--apply`, write even when staged files have syntax
+  problems
 - `-o, --output FILE`: write the diff to FILE instead of stdout
 - `-i, --include GLOB` / `-x, --exclude GLOB`: limit shown and applied
   paths (repeatable)
@@ -195,8 +197,11 @@ servers may need a moment after startup before results are complete.
 
 Staged text is parsed before it is shown: syntax problems print to
 stderr as `pyedit: syntax: FILE:LINE:COL: message` (compile() for
-Python, tree-sitter grammars for others) and never block a run.
-Position queries run on staged content:
+Python, tree-sitter grammars for others). A dry-run warns and still
+shows the diff; an `--apply` with syntax problems refuses to write and
+exits 1 -- override with `--force`, which keeps the problems on
+record and the write revertible. Position queries run on staged
+content:
 
     pyedit.node_at(path, line, column)   what is at a position: kind,
                                          name, span, source text and

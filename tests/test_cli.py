@@ -152,6 +152,46 @@ def test_binary_changes_cannot_be_undone(project, capsys):
     assert (project / "data.bin").read_bytes() == b"\x00\x01\x02"
 
 
+def test_broken_syntax_warns_on_dry_run(project, capsys):
+    broken = project / "bad.py"
+    broken.write_text('pyedit.write("src/broken.py", "def (:\\n")\n')
+    assert run(project, script=broken) == 0
+    out, err = capsys.readouterr()
+    assert "pyedit: syntax: src/broken.py:1:" in err
+    assert "+def (:" in out  # the diff still shows what was staged
+
+
+def test_broken_syntax_aborts_apply(project, capsys):
+    broken = project / "bad.py"
+    broken.write_text('pyedit.write("src/broken.py", "def (:\\n")\n')
+    assert run(project, "--apply", script=broken) == 1
+    out, err = capsys.readouterr()
+    assert "pyedit: syntax: src/broken.py:1:" in err
+    assert "nothing was written" in err
+    assert "+++ b/src/broken.py" in out  # the rejected diff still shows
+    assert not (project / "src" / "broken.py").exists()
+
+
+def test_broken_tree_sitter_language_aborts_apply(project, capsys):
+    broken = project / "bad.py"
+    broken.write_text('pyedit.write("src/mod.go", "func broken(:\\n")\n')
+    assert run(project, "--apply", script=broken) == 1
+    err = capsys.readouterr().err
+    assert "pyedit: syntax: src/mod.go:1:" in err
+    assert not (project / "src" / "mod.go").exists()
+
+
+def test_force_applies_broken_syntax_with_undo(project, capsys):
+    broken = project / "bad.py"
+    broken.write_text('pyedit.write("src/broken.py", "def (:\\n")\n')
+    assert run(project, "--force", "--apply", script=broken) == 0
+    out, err = capsys.readouterr()
+    assert (project / "src" / "broken.py").read_text() == "def (:\n"
+    assert "applying with syntax problems (--force)" in err
+    assert "pyedit: syntax: src/broken.py:1:" in err  # still on record
+    assert "# pyedit undo" in out  # the forced write is still revertible
+
+
 def test_diff_flag_resolves_stored_id(project, script, capsys):
     assert run(project, script=script) == 0
     out = capsys.readouterr().out
