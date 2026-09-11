@@ -46,10 +46,12 @@ let
 
     pythonImportsCheck = [ "pyedit" ];
 
-    meta = {
-      description = "Scripted multi-file edits with dry-run diffs for AI agents";
-      mainProgram = "pyedit";
-    };
+  meta = {
+    description = "Scripted multi-file edits with dry-run diffs for AI agents";
+    license = lib.licenses.asl20;
+    maintainers = [ lib.maintainers.lillecarl ];
+    mainProgram = "pyedit";
+  };
   };
 in
 (
