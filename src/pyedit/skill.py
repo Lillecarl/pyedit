@@ -51,16 +51,15 @@ Apply a stored dry-run later without resending the script or diff:
 
     pyedit --apply ab12cd34
 
-Iterate by feeding the commented output back on stdin: the comments
-parse as diff comments and a fresh dry-run prints a fresh id. Stored
-diffs live in a temp directory the OS reaps; ids are not stable across
-reboots.
+`-d ab12cd34` also accepts a stored id and re-renders the diff as a
+fresh dry-run with a fresh id. Iterate by feeding the commented output
+back on stdin: the comments parse as diff comments and a fresh dry-run
+prints a fresh id. Stored diffs live in a temp directory the OS reaps;
+ids are not stable across reboots.
 
 Every `--apply` run stores the reverse diff the same way and prints it
 as a comment, so a second-guessed apply can be reverted:
 
-    # pyedit undo ef01ab23 (pyedit --apply ef01ab23 to revert)
-    ... applied diff ...
     # pyedit undo ef01ab23 (pyedit --apply ef01ab23 to revert)
 
     pyedit --apply ef01ab23   # reverts what was applied
@@ -203,13 +202,6 @@ Targeted replacement across files:
     for p in pyedit.glob("**/*.py"):
         pyedit.edit(p, "old_name", "new_name")
 
-Ordinary Python is equivalent:
-
-    from pathlib import Path
-    for p in Path("src").glob("*.py"):
-        text = p.read_text()
-        p.write_text(text.replace("old", "new"))
-
 Create, move and prune with stdlib tools:
 
     Path("src/new.py").write_text("def main(): ...\\n")
@@ -220,11 +212,15 @@ Create, move and prune with stdlib tools:
 
 ## Workflow
 
-1. Dry-run: `pyedit < plan.py` - read the diff.
-2. Scope it if needed: `--include`/`--exclude`.
-3. Apply by rerunning the same script with `--apply`. The script runs
-   again from scratch against the on-disk state, so keep it
-   deterministic.
+1. Dry-run: `pyedit < plan.py` - read the diff; its first and last
+   lines carry the dry-run id.
+2. Apply without rerunning: `pyedit --apply <id>`. Rerunning the
+   script with `--apply` also works; a script runs from scratch
+   against disk, so keep it deterministic.
+3. Filter a wide diff with `--include`/`--exclude`; several
+   independent edits in one script go through scopes (below).
+4. Second-guessed an apply? Its diff carries an undo id;
+   `pyedit --apply <undo-id>` reverts.
 
 ## Behavior notes
 
@@ -253,4 +249,4 @@ at https://github.com/lillecarl/pyedit
 
 def render_skill() -> str:
     source = Path(__file__).resolve().parent
-    return SKILL + SOURCE_SECTION.format(source=source)
+    return SKILL + "\n" + SOURCE_SECTION.format(source=source)
