@@ -38,7 +38,7 @@ Exit codes: 0 ok, 1 input failed (nothing written), 2 usage error.
 Diffs are git-style (`a/`, `b/`, `/dev/null`); the output pipes to
 `git apply` or `patch -p1`.
 
-## Dry-run ids
+## Dry-run ids and undo
 
 Every dry-run with changes stores its diff under a short id and prints
 it as a comment at the start and end of the diff:
@@ -55,6 +55,20 @@ Iterate by feeding the commented output back on stdin: the comments
 parse as diff comments and a fresh dry-run prints a fresh id. Stored
 diffs live in a temp directory the OS reaps; ids are not stable across
 reboots.
+
+Every `--apply` run stores the reverse diff the same way and prints it
+as a comment, so a second-guessed apply can be reverted:
+
+    # pyedit undo ef01ab23 (pyedit --apply ef01ab23 to revert)
+    ... applied diff ...
+    # pyedit undo ef01ab23 (pyedit --apply ef01ab23 to revert)
+
+    pyedit --apply ef01ab23   # reverts what was applied
+
+The undo is a patch against the disk exactly as this run left it:
+apply it before anything else touches the files, and undo the latest
+apply first. Binary changes cannot be undone (they are skipped with a
+note on stderr); undoing an undo just reapplies the original diff.
 
 ## OpenAI apply_patch (V4A)
 

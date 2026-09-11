@@ -26,12 +26,20 @@ def original(path: Path) -> str | bytes | None:
 
 
 def unified_diffs(
-    staged: dict[Path, str | bytes | None], context: int = 3
+    staged: dict[Path, str | bytes | None],
+    context: int = 3,
+    base: dict[Path, str | bytes | None] | None = None,
 ) -> list[tuple[str, str]]:
-    """Return (display path, diff text) for every staged change."""
+    """Return (display path, diff text) for every staged change.
+
+    The old side comes from `base` when given (a value of None means
+    the file was not there), otherwise from disk truth. Reversing a
+    diff means swapping the maps: undo = unified_diffs(pre_apply,
+    base=post_apply).
+    """
     results: list[tuple[str, str]] = []
     for path, new in sorted(staged.items()):
-        old = original(path)
+        old = base.get(path) if base is not None else original(path)
         if new is None and old is None:
             continue
         rel = display_path(path)

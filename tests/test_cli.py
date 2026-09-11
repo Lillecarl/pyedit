@@ -80,6 +80,78 @@ def test_apply_from_stored_id(project, script, capsys):
     assert "# pyedit dry-run" not in out
 
 
+def undo_token(out: str) -> str:
+    match = re.search(r"# pyedit undo ([0-9a-f]{8})", out)
+    assert match, out
+    return match.group(1)
+
+
+def test_apply_prints_undo_comment(project, script, capsys, dryrun_store):
+    assert run(project, "--apply", script=script) == 0
+    out, err = capsys.readouterr()
+    lines = out.splitlines()
+    token = undo_token(out)
+    assert lines[0] == lines[-1] == f"# pyedit undo {token} (pyedit --apply {token} to revert)"
+    undo_text = (dryrun_store / f"{token}.diff").read_text()
+    assert "-ALPHA = 1" in undo_text
+    assert "+alpha = 1" in undo_text
+    assert "undo saved as" in err
+
+
+def test_undo_reverts_an_apply(project, script, capsys):
+    original = (project / "src" / "a.py").read_text()
+    assert run(project, "--apply", script=script) == 0
+    out = capsys.readouterr().out
+    token = undo_token(out)
+    assert (project / "src" / "a.py").read_text() == "ALPHA = 1\n"
+    assert run(project, "--apply", token) == 0
+    assert (project / "src" / "a.py").read_text() == original
+
+
+def test_undo_recreates_a_deleted_file(project, capsys):
+    victim = project / "src" / "b.py"
+    assert victim.read_text() == "beta = 2\n"
+    deleter = project / "del.py"
+    deleter.write_text('pyedit.delete("src/b.py")\n')
+    assert run(project, "--apply", script=deleter) == 0
+    assert not victim.exists()
+    token = undo_token(capsys.readouterr().out)
+    assert run(project, "--apply", token) == 0
+    assert victim.read_text() == "beta = 2\n"
+
+
+def test_undo_removes_a_created_file(project, capsys):
+    creator = project / "new.py"
+    creator.write_text('pyedit.write("src/fresh.txt", "made\\n")\n')
+    assert run(project, "--apply", script=creator) == 0
+    assert (project / "src" / "fresh.txt").read_text() == "made\n"
+    token = undo_token(capsys.readouterr().out)
+    assert run(project, "--apply", token) == 0
+    assert not (project / "src" / "fresh.txt").exists()
+
+
+def test_undo_reverses_a_rename(project, capsys):
+    mover = project / "mv.py"
+    mover.write_text('pyedit.rename("src/a.py", "src/renamed.py")\n')
+    assert run(project, "--apply", script=mover) == 0
+    assert not (project / "src" / "a.py").exists()
+    assert (project / "src" / "renamed.py").read_text() == "alpha = 1\n"
+    token = undo_token(capsys.readouterr().out)
+    assert run(project, "--apply", token) == 0
+    assert (project / "src" / "a.py").read_text() == "alpha = 1\n"
+    assert not (project / "src" / "renamed.py").exists()
+
+
+def test_binary_changes_cannot_be_undone(project, capsys):
+    binary = project / "bin.py"
+    binary.write_text('pyedit.write("data.bin", b"\\x00\\x01\\x02")\n')
+    assert run(project, "--apply", script=binary) == 0
+    out, err = capsys.readouterr()
+    assert "# pyedit undo" not in out
+    assert "binary changes cannot be undone" in err
+    assert (project / "data.bin").read_bytes() == b"\x00\x01\x02"
+
+
 def test_diff_flag_resolves_stored_id(project, script, capsys):
     assert run(project, script=script) == 0
     out = capsys.readouterr().out

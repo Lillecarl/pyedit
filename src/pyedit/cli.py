@@ -20,7 +20,7 @@ from pathlib import Path
 import pyedit
 from pyedit import store
 from pyedit import vfs
-from pyedit.diff import unified_diffs
+from pyedit.diff import unified_diffs, original
 from pyedit.session import EditSession, display_path
 from pyedit.skill import render_skill
 
@@ -174,7 +174,7 @@ def read_input(args: argparse.Namespace) -> tuple[str, str, str]:
     stripped = text.lstrip()
     if stripped.startswith("*** Begin Patch"):
         mode = "patch"
-    elif stripped.startswith("# pyedit dry-run") or stripped.startswith(
+    elif stripped.startswith("# pyedit") or stripped.startswith(
         "diff --git "
     ) or stripped.startswith("--- "):
         mode = "diff"
@@ -288,13 +288,25 @@ def main(argv: list[str] | None = None) -> int:
         diff for _, diff in unified_diffs(staged, context=args.context)
     )
 
-    # dry-runs store the diff so the printed id alone can apply it later
+    # dry-runs store the diff so the printed id alone can apply it later;
+    # applies store the reverse diff so the printed id alone can revert
     stored_id = store.save(diff_text) if staged and not args.apply else None
-    marker = (
-        f"# pyedit dry-run {stored_id} (pyedit --apply {stored_id} to apply)\n"
-        if stored_id
-        else ""
-    )
+    if stored_id:
+        marker = (
+            f"# pyedit dry-run {stored_id} (pyedit --apply {stored_id} to apply)\n"
+        )
+    else:
+        marker = ""
+
+    if args.apply:
+        undo_id, skipped = _prepare_undo(staged, args.context)
+        if undo_id:
+            marker = f"# pyedit undo {undo_id} (pyedit --apply {undo_id} to revert)\n"
+        if skipped:
+            print(
+                "pyedit: binary changes cannot be undone: " + ", ".join(skipped),
+                file=sys.stderr,
+            )
 
     if args.output == "-":
         sys.stdout.write(marker + diff_text + marker)
@@ -311,8 +323,42 @@ def main(argv: list[str] | None = None) -> int:
             f"(pyedit --apply {stored_id} to apply)",
             file=sys.stderr,
         )
+    elif args.apply and undo_id:
+        print(
+            f"pyedit: changes applied; undo saved as {undo_id} "
+            f"(pyedit --apply {undo_id} to revert)",
+            file=sys.stderr,
+        )
 
     if args.apply:
         apply_changes(staged)
 
     return EXIT_OK
+
+
+def _prepare_undo(
+    staged: dict[Path, str | bytes | None], context: int
+) -> tuple[str | None, list[str]]:
+    """Render the reverse of what is about to be applied, and store it.
+
+    Returns (stored id or None, binary paths that cannot be undone).
+    The undo diff must be rendered before the staged state reaches the
+    disk: its old side is the post-apply state, its new side the
+    pre-apply disk truth.
+    """
+    pre: dict[Path, str | bytes | None] = {}
+    skipped: list[str] = []
+    for path, applied in staged.items():
+        before = original(path)
+        if isinstance(before, bytes) or isinstance(applied, bytes):
+            skipped.append(display_path(path))
+        else:
+            pre[path] = before
+    if not pre:
+        return None, skipped
+    undo_text = "".join(
+        diff for _, diff in unified_diffs(pre, context=context, base=staged)
+    )
+    if not undo_text:
+        return None, skipped
+    return store.save(undo_text), skipped
