@@ -1,3 +1,4 @@
+import io
 import subprocess
 import sys
 from pathlib import Path
@@ -199,6 +200,120 @@ def test_import_and_global_session_are_equivalent(project, capsys):
     assert run(project, script=script) == 0
     out = capsys.readouterr().out
     assert "+ALPHA = 1" in out
+
+
+def test_patch_file_mode(project, capsys):
+    patch = project / "plan.patch"
+    patch.write_text(
+        "*** Begin Patch\n"
+        "*** Update File: src/a.py\n"
+        "@@\n"
+        "-alpha = 1\n"
+        "+alpha = 42\n"
+        "*** End Patch\n"
+    )
+    assert run(project, "--patch", patch) == 0
+    out = capsys.readouterr().out
+    assert "+alpha = 42" in out
+    assert (project / "src" / "a.py").read_text() == "alpha = 1\n"
+
+
+def test_patch_stdin_auto_detect(project, capsys, monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "stdin",
+        io.StringIO(
+            "*** Begin Patch\n"
+            "*** Add File: notes/todo.txt\n"
+            "+write tests\n"
+            "*** End Patch\n"
+        ),
+    )
+    assert run(project) == 0
+    out = capsys.readouterr().out
+    assert "+++ b/notes/todo.txt" in out
+    assert not (project / "notes" / "todo.txt").exists()
+
+
+def test_patch_apply_writes(project, capsys):
+    patch = project / "plan.patch"
+    patch.write_text(
+        "*** Begin Patch\n"
+        "*** Delete File: src/b.py\n"
+        "*** End Patch\n"
+    )
+    assert run(project, "--patch", patch, "--apply") == 0
+    assert not (project / "src" / "b.py").exists()
+
+
+def test_diff_file_mode(project, capsys):
+    diff = project / "plan.diff"
+    diff.write_text(
+        "--- a/src/a.py\n"
+        "+++ b/src/a.py\n"
+        "@@ -1 +1 @@\n"
+        "-alpha = 1\n"
+        "+alpha = 42\n"
+    )
+    assert run(project, "--diff", diff) == 0
+    out = capsys.readouterr().out
+    assert "+alpha = 42" in out
+    assert (project / "src" / "a.py").read_text() == "alpha = 1\n"
+
+
+def test_diff_stdin_auto_detect(project, capsys, monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "stdin",
+        io.StringIO(
+            "diff --git a/src/a.py b/src/a.py\n"
+            "--- a/src/a.py\n"
+            "+++ b/src/a.py\n"
+            "@@ -1 +1 @@\n"
+            "-alpha = 1\n"
+            "+alpha = 42\n"
+        ),
+    )
+    assert run(project) == 0
+    assert "+alpha = 42" in capsys.readouterr().out
+
+
+def test_diff_apply_writes(project, capsys):
+    diff = project / "plan.diff"
+    diff.write_text(
+        "--- /dev/null\n+++ b/src/fresh.txt\n@@ -0,0 +1 @@\n+new\n"
+    )
+    assert run(project, "--diff", diff, "--apply") == 0
+    assert (project / "src" / "fresh.txt").read_text() == "new\n"
+
+
+def test_patch_inline_from_script(project, capsys):
+    script = project / "edit.py"
+    script.write_text(
+        'pyedit.apply_patch("*** Begin Patch\\n"\n'
+        '                 "*** Update File: src/a.py\\n"\n'
+        '                 "@@ alpha\\n"\n'
+        '                 "-alpha = 1\\n"\n'
+        '                 "+alpha = 7\\n"\n'
+        '                 "*** End Patch\\n")\n'
+    )
+    assert run(project, script=script) == 0
+    assert "+alpha = 7" in capsys.readouterr().out
+
+
+def test_patch_failure_returns_1(project, capsys):
+    patch = project / "plan.patch"
+    patch.write_text(
+        "*** Begin Patch\n"
+        "*** Update File: src/missing.py\n"
+        "@@\n"
+        "-x\n"
+        "+y\n"
+        "*** End Patch\n"
+    )
+    assert run(project, "--patch", patch) == 1
+    _, err = capsys.readouterr()
+    assert "nothing was written" in err
 
 
 def test_skill_prints_markdown(capsys):

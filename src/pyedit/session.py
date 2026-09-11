@@ -160,6 +160,18 @@ class EditSession:
         self._staged[src] = None
         self._staged[self.canon(new)] = content
 
+    def apply_patch(self, text: str) -> list["PatchOperation"]:
+        """Stage an OpenAI apply_patch (V4A) envelope on this session."""
+        from pyedit import patch
+
+        return patch.apply_patch(self, text)
+
+    def apply_unified_diff(self, text: str) -> list["AppliedFile"]:
+        """Stage a unified diff (git-style) on this session."""
+        from pyedit import udiff
+
+        return udiff.apply_unified_diff(self, text)
+
     # --- engine ---
 
     def staged(self) -> dict[Path, str | bytes | None]:

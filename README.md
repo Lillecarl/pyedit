@@ -19,6 +19,11 @@ pyedit [OPTIONS] < plan.py
 ```
 
 - `-s, --script FILE`: edit script (default: stdin)
+- `-p, --patch [FILE]`: apply an OpenAI apply_patch (V4A) envelope
+  instead of a script; `*** Begin Patch` input on stdin is
+  auto-detected
+- `-d, --diff [FILE]`: apply a unified diff instead of a script;
+  `diff --git` / `--- a/` input on stdin is auto-detected
 - `-a, --apply`: write staged changes to disk (default: dry-run)
 - `-o, --output FILE`: write the diff to FILE instead of stdout
 - `-i, --include GLOB` / `-x, --exclude GLOB`: filter what is shown

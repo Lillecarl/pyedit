@@ -32,6 +32,8 @@ py.buildPythonApplication {
 
   build-system = [ py.hatchling ];
 
+  dependencies = [ py.unidiff ];
+
   nativeCheckInputs = [ py.pytestCheckHook ];
 
   pythonImportsCheck = [ "pyedit" ];

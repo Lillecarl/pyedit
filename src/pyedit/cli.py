@@ -33,11 +33,37 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         epilog="Run 'pyedit skill' for the agent-facing usage guide.",
     )
-    parser.add_argument(
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument(
         "-s",
         "--script",
         metavar="FILE",
         help="edit script to run (default: read from stdin, '-' is stdin)",
+    )
+    source.add_argument(
+        "-p",
+        "--patch",
+        nargs="?",
+        const="-",
+        default=None,
+        metavar="FILE",
+        help=(
+            "apply an OpenAI apply_patch (V4A) envelope from FILE instead of "
+            "running a script ('-' is stdin; bare '*** Begin Patch' input on "
+            "stdin is auto-detected)"
+        ),
+    )
+    source.add_argument(
+        "-d",
+        "--diff",
+        nargs="?",
+        const="-",
+        default=None,
+        metavar="FILE",
+        help=(
+            "apply a unified diff from FILE instead of running a script "
+            "('-' is stdin; git-style diffs on stdin are auto-detected)"
+        ),
     )
     parser.add_argument(
         "-a",
@@ -80,16 +106,29 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def read_script(args: argparse.Namespace) -> tuple[str, str]:
-    """Return (script text, filename for tracebacks)."""
+def read_input(args: argparse.Namespace) -> tuple[str, str, str]:
+    """Return (input text, mode, filename for tracebacks); mode is 'patch', 'diff' or 'script'."""
+    for mode, option in (("patch", args.patch), ("diff", args.diff)):
+        if option is not None and option != "-":
+            path = Path(option)
+            return path.read_text(), mode, path.as_posix()
     if args.script and args.script != "-":
         path = Path(args.script)
-        return path.read_text(), path.as_posix()
+        return path.read_text(), "script", path.as_posix()
     if sys.stdin.isatty():
         raise SystemExit(
-            "pyedit: no edit script: pipe a script on stdin or pass --script FILE"
+            "pyedit: no input: pipe a script, patch or diff on stdin, or pass "
+            "--script FILE / --patch FILE / --diff FILE"
         )
-    return sys.stdin.read(), "<stdin>"
+    text = sys.stdin.read()
+    stripped = text.lstrip()
+    if stripped.startswith("*** Begin Patch"):
+        mode = "patch"
+    elif stripped.startswith("diff --git ") or stripped.startswith("--- "):
+        mode = "diff"
+    else:
+        mode = "script"
+    return text, mode, "<stdin>"
 
 
 def allowed(
@@ -140,28 +179,46 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(tokens)
 
-    script, filename = read_script(args)
+    text, mode, filename = read_input(args)
     session = EditSession()
     pyedit.session = session
 
-    previous_dont_write = sys.dont_write_bytecode
-    sys.dont_write_bytecode = True
-    try:
+    if mode == "patch":
         try:
-            restore = vfs.install(session)
-            try:
-                exec(
-                    compile(script, filename, "exec"),
-                    {"pyedit": session, "__name__": "__main__"},
-                )
-            finally:
-                restore()
+            session.apply_patch(text)
         except Exception:
             traceback.print_exc()
-            print("pyedit: edit script failed; nothing was written", file=sys.stderr)
+            print("pyedit: patch failed; nothing was written", file=sys.stderr)
             return EXIT_SCRIPT_ERROR
-    finally:
-        sys.dont_write_bytecode = previous_dont_write
+    elif mode == "diff":
+        try:
+            session.apply_unified_diff(text)
+        except Exception:
+            traceback.print_exc()
+            print("pyedit: unified diff failed; nothing was written", file=sys.stderr)
+            return EXIT_SCRIPT_ERROR
+    else:
+        previous_dont_write = sys.dont_write_bytecode
+        sys.dont_write_bytecode = True
+        try:
+            try:
+                restore = vfs.install(session)
+                try:
+                    exec(
+                        compile(text, filename, "exec"),
+                        {"pyedit": session, "__name__": "__main__"},
+                    )
+                finally:
+                    restore()
+            except Exception:
+                traceback.print_exc()
+                print(
+                    "pyedit: edit script failed; nothing was written",
+                    file=sys.stderr,
+                )
+                return EXIT_SCRIPT_ERROR
+        finally:
+            sys.dont_write_bytecode = previous_dont_write
 
     session.prune_unchanged()
     staged = {

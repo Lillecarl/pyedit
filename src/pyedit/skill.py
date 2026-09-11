@@ -8,12 +8,20 @@ Nothing touches disk unless you pass `--apply`.
 
 ## Invocation
 
-    pyedit [OPTIONS]            # edit script on stdin
-    pyedit -s SCRIPT [OPTIONS]
+    pyedit [OPTIONS]            # script, patch or diff on stdin
+    pyedit -s SCRIPT [OPTIONS]  # python script from a file
+    pyedit -p PATCH [OPTIONS]   # OpenAI apply_patch envelope from a file
+    pyedit -d DIFF [OPTIONS]    # unified diff from a file
 
 Options:
 
 - `-s, --script FILE`: edit script (default: stdin; `-` is stdin)
+- `-p, --patch [FILE]`: apply an OpenAI apply_patch (V4A) envelope from
+  FILE instead of running a script (`-` is stdin). Input starting with
+  `*** Begin Patch` on stdin is auto-detected as a patch.
+- `-d, --diff [FILE]`: apply a unified diff (git-style) from FILE
+  instead of running a script (`-` is stdin). Input starting with
+  `diff --git` or `--- a/` on stdin is auto-detected as a diff.
 - `-a, --apply`: write staged changes to disk (default: dry-run)
 - `-o, --output FILE`: write the diff to FILE instead of stdout
 - `-i, --include GLOB`: only show and apply matching paths (repeatable)
@@ -27,6 +35,42 @@ in the diff.
 Exit codes: 0 ok, 1 script failed (nothing written), 2 usage error.
 Diffs are git-style (`a/`, `b/`, `/dev/null`); text output pipes to
 `git apply` or `patch -p1`.
+
+## OpenAI apply_patch (V4A)
+
+Feed a standard `*** Begin Patch` envelope with `--patch` (or just pipe
+it in; it is auto-detected). Create, update, delete and `*** Move to:`
+renames are supported; context hunks match with the same fuzzing as
+Codex. The patch stages into the same overlay, so a dry-run shows the
+unified diff and `--apply` writes it.
+
+    *** Begin Patch
+    *** Update File: src/app.py
+    @@ def greet():
+    -print("Hi")
+    +print("Hello, world!")
+    *** Add File: docs/new.md
+    +# New
+    *** Delete File: obsolete.txt
+    *** End Patch
+
+Python scripts can also stage a patch inline with `pyedit.apply_patch(text)`
+(returns the parsed operations). For string-level V4A application without
+any filesystem: `pyedit.apply_diff(content, diff)` (alias `apply_4va`),
+vendored from the OpenAI agents SDK.
+
+## Unified diffs
+
+`--diff` (or auto-detected `diff --git` / `--- a/` input) reads a normal
+unified diff and stages it the same way. Create (`--- /dev/null`), delete
+(`+++ /dev/null`), pure renames, `\ No newline at end of file` markers and
+trailing-whitespace fuzz in context are handled. Binary patches and git
+extended headers beyond rename are not.
+
+    pyedit --diff changes.diff          # dry-run diff of the diff
+    pyedit --diff changes.diff --apply  # write it
+
+Scripts stage diffs inline with `pyedit.apply_unified_diff(text)`.
 
 ## Writing scripts
 
@@ -61,6 +105,10 @@ Any Python you know how to write works. No special DSL required.
     pyedit.delete(path)              stage deletion
     pyedit.rename(old, new)          stage move (content kept, source
                                      deleted)
+    pyedit.apply_patch(text)         stage an OpenAI apply_patch (V4A)
+                                     envelope; returns the operations
+    pyedit.apply_unified_diff(text)  stage a unified diff; returns the
+                                     patched files
 
 Paths may be absolute or relative to the invocation directory.
 

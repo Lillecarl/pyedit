@@ -1,6 +1,13 @@
 """pyedit: scripted multi-file edits with dry-run diffs for AI agents."""
 
+from pyedit.vendor.apply_diff import apply_diff
+
 __version__ = "0.1.0"
+
+__all__ = ["apply_diff", "apply_4va", "__version__"]
+
+# the V4A string applier, under its ecosystem name and an alias
+apply_4va = apply_diff
 
 
 def __getattr__(name: str):
