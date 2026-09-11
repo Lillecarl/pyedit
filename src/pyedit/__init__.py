@@ -1,14 +1,39 @@
 """pyedit: scripted multi-file edits with dry-run diffs for AI agents."""
 
+from collections.abc import Sequence
+
+from pyedit._version import __version__
+from pyedit.lsp_client import LspSession
 from pyedit.merge import Collision, VFS
 from pyedit.vendor.apply_diff import apply_diff
 
-__version__ = "0.1.0"
-
-__all__ = ["apply_diff", "apply_4va", "Collision", "VFS", "__version__"]
+__all__ = [
+    "LspSession",
+    "apply_diff",
+    "apply_4va",
+    "Collision",
+    "VFS",
+    "__version__",
+    "lsp",
+]
 
 # the V4A string applier, under its ecosystem name and an alias
 apply_4va = apply_diff
+
+
+def lsp(command: Sequence[str]) -> LspSession:
+    """Bind a language server to the live edit session.
+
+    The command runs from PATH or absolute, e.g. ["rust-analyzer"].
+    Library callers holding their own EditSession construct
+    LspSession(session, command) directly.
+    """
+    session = globals().get("session")
+    if session is None:
+        raise AttributeError(
+            "no edit session is running: construct LspSession(session, command) directly"
+        )
+    return LspSession(session, list(command))
 
 
 def __getattr__(name: str):

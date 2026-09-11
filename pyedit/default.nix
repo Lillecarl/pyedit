@@ -5,6 +5,9 @@
   pathspec,
   rope,
   pygit2,
+  pygls,
+  lsprotocol,
+  pyright,
   cacert,
   pytestCheckHook,
   buildPythonApplication,
@@ -43,13 +46,15 @@ let
       pathspec
       rope
       pygit2
+      pygls
+      lsprotocol
     ];
 
     # pygit2 performs TLS setup at import; without certificates to load
     # it fails - same workaround as nixpkgs uses for pygit2's own tests
     env.SSL_CERT_FILE = "${cacert}/etc/ssl/certs/ca-bundle.crt";
 
-    nativeCheckInputs = [ pytestCheckHook ];
+    nativeCheckInputs = [ pytestCheckHook pyright ];
 
     pythonImportsCheck = [ "pyedit" ];
 

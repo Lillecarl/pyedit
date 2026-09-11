@@ -6,6 +6,7 @@ rec {
 
   shell = pkgs.mkShell {
     packages = [
+      pkgs.pyright
       (pkgs.python3.withPackages (p: [
         p.pytest
         (pyedit.passthru.library.overrideAttrs {

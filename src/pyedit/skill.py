@@ -94,6 +94,23 @@ read-your-writes holds. Anything you can write in Python works.
 
 Paths may be absolute or relative to the invocation directory.
 
+## Other languages: language servers
+
+`rename_symbol`, `rename_module` and `references` above are
+rope-backed and Python-only. Other languages go through their language
+server, which pyedit never downloads: the command comes from PATH or
+is absolute.
+
+    with pyedit.lsp(["rust-analyzer"]) as lsp:
+        lsp.rename_symbol(path, line, column, old_name, new_name)
+        lsp.references(path, line, column, name)
+
+Same position-based API as the rope functions. The server sees staged
+content (files reach it as didOpen/didChange), so renames account for
+earlier edits in the session; returned edits are staged like any other
+edit. `old_name`/`name` must match the token at the position. Heavy
+servers may need a moment after startup before results are complete.
+
 ## Independent scopes: several edits, merged by context
 
 Wrap independent edits in their own scopes; each sees the pristine
