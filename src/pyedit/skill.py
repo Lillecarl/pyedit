@@ -132,6 +132,30 @@ Any Python you know how to write works. No special DSL required.
 
 Paths may be absolute or relative to the invocation directory.
 
+## Independent scopes: several edits, merged by context
+
+Wrap each edit in its own scope when the edits are independent; each
+sees the pristine tree and merges on exit, so an edit never has to
+account for lines another edit moved:
+
+    with pyedit.VFS() as root:      # collector
+        with pyedit.VFS(root) as fs:
+            fs.edit("a.py", old_a, new_a)
+        with pyedit.VFS(root) as fs:
+            fs.edit("b.py", old_b, new_b)
+        # both merged here; inside the block the collector holds the
+        # merged state and `fs` scopes see disk truth, not each other
+
+Merging re-anchors hunks by context (line numbers are ignored, context
+shrinks when needed, like `git apply` fuzz). It refuses instead of
+guessing: `pyedit.Collision` is raised when a hunk cannot find its
+context, matches several places, or two scopes changed the same region
+incompatibly (including delete/edit, double-create and binary
+conflicts). A collision leaves the collector with only the earlier
+successful merges; if the exception escapes the collector's with-body,
+everything is discarded. `root.apply()` writes the merged state to
+disk; `root.diff()` renders it.
+
 Both access patterns work identically: the injected `pyedit` global and
 `import pyedit` followed by `pyedit.glob(...)` (the module forwards to
 the live session).
@@ -231,6 +255,10 @@ Module map:
   where `s` is an untyped parameter) are left alone — the dry-run
   diff shows exactly which files changed; catch stragglers with
   pyedit.replace.
+- `merge.py`: independent edit scopes (`pyedit.VFS`) with contextual
+  merging: each scope is a fresh overlay over disk truth, exits as
+  hunks anchored by context alone, and merges onto the parent state;
+  `pyedit.Collision` aborts ambiguous or conflicting merges.
 - `vendor/apply_diff.py`: the V4A string applier, vendored from
   openai-agents-python (MIT).
 - `skill.py`: this document.
