@@ -287,6 +287,29 @@ def test_diff_apply_writes(project, capsys):
     assert (project / "src" / "fresh.txt").read_text() == "new\n"
 
 
+def test_file_budget_aborts_run(project, capsys):
+    script = project / "edit.py"
+    script.write_text(
+        'for i in range(3):\n    pyedit.write(f"src/gen_{i}.py", "x\\n")\n'
+    )
+    before = set((project / "src").iterdir())
+    assert run(project, "--max-materialized-files", "2", script=script) == 1
+    _, err = capsys.readouterr()
+    assert "file budget" in err
+    assert "nothing was written" in err
+    assert set((project / "src").iterdir()) == before
+
+
+def test_file_budget_zero_disables(project, capsys):
+    script = project / "edit.py"
+    script.write_text(
+        'for i in range(30):\n    pyedit.write(f"src/gen_{i}.py", "x\\n")\n'
+    )
+    assert run(project, "--max-materialized-files", "0", script=script) == 0
+    out = capsys.readouterr().out
+    assert out.count("+++ b/src/gen_") == 30
+
+
 def test_patch_inline_from_script(project, capsys):
     script = project / "edit.py"
     script.write_text(

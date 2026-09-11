@@ -101,6 +101,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="lines of context in the diff (default: 3)",
     )
     parser.add_argument(
+        "--max-materialized-bytes",
+        type=int,
+        default=256 * 1024 * 1024,
+        metavar="BYTES",
+        help=(
+            "memory budget for content staged in the overlay "
+            "(default: 268435456; 0 disables the limit)"
+        ),
+    )
+    parser.add_argument(
+        "--max-materialized-files",
+        type=int,
+        default=20000,
+        metavar="N",
+        help=(
+            "file count budget for the overlay (default: 20000; "
+            "0 disables the limit)"
+        ),
+    )
+    parser.add_argument(
         "--version", action="version", version=f"pyedit {pyedit.__version__}"
     )
     return parser
@@ -180,7 +200,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(tokens)
 
     text, mode, filename = read_input(args)
-    session = EditSession()
+    session = EditSession(
+        max_bytes=args.max_materialized_bytes or None,
+        max_files=args.max_materialized_files or None,
+    )
     pyedit.session = session
 
     if mode == "patch":

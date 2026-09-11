@@ -195,15 +195,15 @@ class EditSession:
         p = self.canon(path)
         if p not in self._staged and not _disk_is_file(p):
             raise FileNotFoundError(f"no such file: {p}")
-        self._staged[p] = None
+        self._stage(p, None)
 
     def rename(self, old: str | Path, new: str | Path) -> None:
         src = self.canon(old)
         if src not in self._staged and not _disk_is_file(src):
             raise FileNotFoundError(f"no such file: {src}")
         content = self.read(src)
-        self._staged[src] = None
-        self._staged[self.canon(new)] = content
+        self._stage(src, None)
+        self._stage(self.canon(new), content)
 
     def apply_patch(self, text: str) -> list["PatchOperation"]:
         """Stage an OpenAI apply_patch (V4A) envelope on this session."""
@@ -235,6 +235,8 @@ class EditSession:
                 continue
             if same:
                 del self._staged[path]
+                self._bytes_used -= _content_size(content)
+                self._files_used -= 1
 
     # --- overlay-aware filesystem views (used by the stdlib patches) ---
 
