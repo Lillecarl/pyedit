@@ -8,6 +8,7 @@ import pytest
 import pyedit
 from pyedit import cli
 from pyedit import store
+from syntax_corpus import LANGUAGES
 
 
 @pytest.fixture(autouse=True)
@@ -161,24 +162,40 @@ def test_broken_syntax_warns_on_dry_run(project, capsys):
     assert "+def (:" in out  # the diff still shows what was staged
 
 
-def test_broken_syntax_aborts_apply(project, capsys):
+def test_broken_syntax_warns_on_dry_run(project, capsys):
     broken = project / "bad.py"
     broken.write_text('pyedit.write("src/broken.py", "def (:\\n")\n')
-    assert run(project, "--apply", script=broken) == 1
+    assert run(project, script=broken) == 0
     out, err = capsys.readouterr()
     assert "pyedit: syntax: src/broken.py:1:" in err
+    assert "+def (:" in out  # the diff still shows what was staged
+
+
+@pytest.mark.parametrize(
+    "name,suffix,correct,broken,names",
+    LANGUAGES,
+    ids=[entry[0] for entry in LANGUAGES],
+)
+def test_broken_syntax_gate_refuses_then_force_applies(
+    name, suffix, correct, broken, names, project, capsys
+):
+    target = f"src/sample{suffix}"
+    script = project / "bad.py"
+    script.write_text(f"pyedit.write({target!r}, {broken!r})\n")
+
+    # the gate refuses the apply of known-broken syntax
+    assert run(project, "--apply", script=script) == 1
+    out, err = capsys.readouterr()
+    assert f"pyedit: syntax: {target}:1:" in err, f"{name}: gate silent"
     assert "nothing was written" in err
-    assert "+++ b/src/broken.py" in out  # the rejected diff still shows
-    assert not (project / "src" / "broken.py").exists()
+    assert not (project / target).exists()
 
-
-def test_broken_tree_sitter_language_aborts_apply(project, capsys):
-    broken = project / "bad.py"
-    broken.write_text('pyedit.write("src/mod.go", "func broken(:\\n")\n')
-    assert run(project, "--apply", script=broken) == 1
-    err = capsys.readouterr().err
-    assert "pyedit: syntax: src/mod.go:1:" in err
-    assert not (project / "src" / "mod.go").exists()
+    # --force writes anyway, and the write stays revertible
+    assert run(project, "--force", "--apply", script=script) == 0
+    out, err = capsys.readouterr()
+    assert (project / target).read_text() == broken
+    assert "applying with syntax problems (--force)" in err
+    assert "# pyedit undo" in out, f"{name}: forced write has no undo id"
 
 
 def test_force_applies_broken_syntax_with_undo(project, capsys):
