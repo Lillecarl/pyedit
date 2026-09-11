@@ -2,13 +2,15 @@
 
 The session is injected into edit scripts as the global name ``pyedit``.
 State is a plain dict keyed by resolved path: str or bytes content,
-None for deletions. Every write lands in this dict; disk is touched
-only when the caller applies the staged changes. Reads see staged
-content, so scripts get read-your-writes semantics.
+None for deletions. First reads proxy through to the filesystem and
+materialize the full content in the dict; writes land in memory and
+reach disk only when the caller applies. Unchanged entries are pruned
+before diffing, so plain reads never show up in the diff.
 """
 
 from __future__ import annotations
 
+import glob as glob_module
 import os
 import re
 import stat
@@ -42,6 +44,26 @@ def _disk_is_dir(path: Path) -> bool:
     return info is not None and stat.S_ISDIR(info.st_mode)
 
 
+def _slurp(path: Path) -> str | bytes:
+    """Read the whole file from disk through raw os calls.
+
+    The pathlib read helpers are patched during a run; this must never
+    go through them or materializing reads would recurse.
+    """
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        chunks = []
+        while chunk := os.read(fd, 1 << 20):
+            chunks.append(chunk)
+    finally:
+        os.close(fd)
+    data = b"".join(chunks)
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data
+
+
 def glob_re(pattern: str) -> re.Pattern:
     """Compile a glob where * does not cross '/' and '**' does."""
     cached = _GLOB_CACHE.get(pattern)
@@ -73,18 +95,28 @@ def glob_re(pattern: str) -> re.Pattern:
 
 
 class EditSession:
-    def __init__(self, files: list[Path]) -> None:
-        self._files = sorted({self.canon(f) for f in files})
+    def __init__(self) -> None:
         self._staged: dict[Path, str | bytes | None] = {}
 
-    # --- input set ---
-
-    def files(self) -> list[Path]:
-        return list(self._files)
+    # --- input discovery ---
 
     def glob(self, pattern: str) -> list[Path]:
+        """Files matching a filesystem glob (recursive with **): disk
+        matches minus staged deletions, plus files staged this run."""
         rx = glob_re(pattern)
-        return [p for p in self._files if rx.match(self.relpath(p))]
+        found: set[Path] = set()
+        for match in glob_module.glob(pattern, recursive=True):
+            p = self.canon(match)
+            if self.staged_content(p) is None:
+                continue
+            if self.is_file(p):
+                found.add(p)
+        for staged_path, content in self._staged.items():
+            if content is None or staged_path in found:
+                continue
+            if rx.match(self.relpath(staged_path)):
+                found.add(staged_path)
+        return sorted(found)
 
     # --- overlay IO ---
 
@@ -95,7 +127,9 @@ class EditSession:
             if content is None:
                 raise FileNotFoundError(f"file is deleted in this session: {p}")
             return content
-        return self.current(p)
+        content = _slurp(p)
+        self._staged[p] = content
+        return content
 
     def write(self, path: str | Path, content: str | bytes) -> None:
         if not isinstance(content, (str, bytes)):
@@ -139,28 +173,13 @@ class EditSession:
             if content is None or not _disk_is_file(path):
                 continue
             try:
-                if isinstance(content, bytes):
-                    same = path.read_bytes() == content
-                else:
-                    same = path.read_text() == content
-            except (OSError, UnicodeDecodeError):
+                same = _slurp(path) == content
+            except OSError:
                 continue
             if same:
                 del self._staged[path]
 
     # --- overlay-aware filesystem views (used by the stdlib patches) ---
-
-    def current(self, path: str | Path) -> str | bytes:
-        p = self.canon(path)
-        content = self._staged.get(p, _MISSING)
-        if content is not _MISSING and content is not None:
-            return content
-        if not _disk_is_file(p):
-            raise FileNotFoundError(str(p))
-        try:
-            return p.read_text()
-        except UnicodeDecodeError:
-            return p.read_bytes()
 
     def exists(self, path: str | Path) -> bool:
         content = self.staged_content(path)

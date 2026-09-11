@@ -123,14 +123,19 @@ def test_dry_run_does_not_delete(project, capsys):
     assert (project / "src" / "a.py").exists()
 
 
-def test_glob_positional_selects_files(project, script, capsys):
-    assert run(project, "src/*.py", script=script) == 0
-    assert "--- a/src/a.py" in capsys.readouterr().out
+def test_script_can_touch_any_path(project, script, capsys):
+    script.write_text(
+        'pyedit.write("outside/the_input.py", "anywhere\\n")\n'
+    )
+    assert run(project, script=script) == 0
+    out = capsys.readouterr().out
+    assert "+++ b/outside/the_input.py" in out
+    assert not (project / "outside").exists()
 
 
 def test_stdin_script_end_to_end(project):
     result = subprocess.run(
-        [sys.executable, "-m", "pyedit", "src"],
+        [sys.executable, "-m", "pyedit"],
         input='pyedit.edit("src/a.py", "alpha", "ALPHA")\n',
         capture_output=True,
         text=True,
@@ -152,7 +157,7 @@ def test_ordinary_python_script_is_captured(project, capsys):
         "shutil.copy('src/a.py', 'src/a.py.bak')\n"
         "os.remove('src/b.py')\n"
     )
-    assert run(project, "src", script=script) == 0
+    assert run(project, script=script) == 0
     out = capsys.readouterr().out
     assert "+ALPHA = 1" in out
     assert "src/a.py.bak" in out
@@ -167,7 +172,7 @@ def test_ordinary_python_apply_writes(project, capsys):
         "from pathlib import Path\n"
         "Path('src/brand_new/f.txt').write_text('fresh\\n')\n"
     )
-    assert run(project, "src", "--apply", script=script) == 0
+    assert run(project, "--apply", script=script) == 0
     assert (project / "src" / "brand_new" / "f.txt").read_text() == "fresh\n"
 
 
@@ -177,20 +182,23 @@ def test_binary_apply_writes_bytes(project, capsys):
         "from pathlib import Path\n"
         "Path('src/data.bin').write_bytes(bytes([0, 1, 2]))\n"
     )
-    assert run(project, "src", "--apply", script=script) == 0
+    assert run(project, "--apply", script=script) == 0
     assert (project / "src" / "data.bin").read_bytes() == bytes([0, 1, 2])
     out = capsys.readouterr().out
     assert "Binary file src/data.bin created (3 bytes)" in out
 
 
-def test_session_module_attr_reachable_from_import(project, capsys):
+def test_import_and_global_session_are_equivalent(project, capsys):
     script = project / "edit.py"
     script.write_text(
         "import pyedit\n"
-        "pyedit.session.write('src/a.py', 'via module\\n')\n"
+        "assert pyedit.session is not None\n"
+        "pyedit.glob('**/*.py')\n"
+        "pyedit.session.edit('src/a.py', 'alpha', 'ALPHA')\n"
     )
-    assert run(project, "src", script=script) == 0
-    assert "+via module" in capsys.readouterr().out
+    assert run(project, script=script) == 0
+    out = capsys.readouterr().out
+    assert "+ALPHA = 1" in out
 
 
 def test_skill_prints_markdown(capsys):

@@ -2,9 +2,10 @@
 
 Scripted multi-file edits with dry-run diffs, built for AI agents.
 
-pyedit runs a Python edit script against a set of input files, captures
-every write in an in-memory overlay, and prints the result as a unified
-diff. Disk is touched only with `--apply`.
+pyedit runs a Python edit script; every file the script touches is
+captured in an in-memory overlay (first reads proxy through to the
+filesystem and cache the full content, writes stay in memory) and the
+result prints as a unified diff. Disk is touched only with `--apply`.
 
 The edit script is plain Python: writes through `open()`, `pathlib`,
 `os` and `shutil` are monkeypatched into the overlay, and reads see
@@ -14,7 +15,7 @@ the global `pyedit`.
 ## Run
 
 ```
-pyedit [OPTIONS] [PATH_OR_GLOB ...] < plan.py
+pyedit [OPTIONS] < plan.py
 ```
 
 - `-s, --script FILE`: edit script (default: stdin)
@@ -24,8 +25,8 @@ pyedit [OPTIONS] [PATH_OR_GLOB ...] < plan.py
   and applied (repeatable)
 - `-U, --context N`: diff context lines (default 3)
 
-Positional arguments are files, directories or glob patterns defining
-the input file set.
+There are no input path arguments: the script works on any path, and
+files read but left unchanged never appear in the diff.
 
 `pyedit skill` prints the full agent-facing manual as markdown
 (`pyedit skill FILE` writes it to a file). That document is the
@@ -35,8 +36,8 @@ workflow, and limitations.
 ## Example
 
 ```
-printf 'for p in Path("src").glob("*.py"):\n    p.write_text(p.read_text().replace("foo", "bar"))\n' \
-  | pyedit 'src/**/*.py'
+printf 'from pathlib import Path\nfor p in Path("src").glob("*.py"):\n    p.write_text(p.read_text().replace("foo", "bar"))\n' \
+  | pyedit
 ```
 
 Inspect the diff, then rerun with `--apply` to write.

@@ -1,23 +1,34 @@
 import pytest
 
-from pyedit.cli import expand_inputs
 from pyedit.session import EditSession
 
 
 @pytest.fixture
 def session(project):
-    return EditSession(expand_inputs(["src"]))
-
-
-def test_files_lists_sorted_input(session, project):
-    assert session.files() == [project / "src" / "a.py", project / "src" / "b.py"]
+    return EditSession()
 
 
 def test_glob_matches_relative_paths(session):
     assert [p.name for p in session.glob("src/*.py")] == ["a.py", "b.py"]
     assert [p.name for p in session.glob("**/*.py")] == ["a.py", "b.py"]
-    assert session.glob("*.py") == []
     assert session.glob("*.txt") == []
+
+
+def test_glob_merges_staged_files(session, project):
+    session.write("src/new.py", "x\n")
+    session.delete("src/a.py")
+    assert [p.name for p in session.glob("src/*.py")] == ["b.py", "new.py"]
+
+
+def test_read_materializes_disk_content(session, project):
+    assert session.read("src/a.py") == "alpha = 1\nbeta = 2\n"
+    assert session.staged()[project / "src" / "a.py"] == "alpha = 1\nbeta = 2\n"
+
+
+def test_prune_drops_materialized_reads(session, project):
+    session.read("src/a.py")
+    session.prune_unchanged()
+    assert session.staged() == {}
 
 
 def test_read_sees_disk_content(session, project):
@@ -45,7 +56,8 @@ def test_edit_replaces_and_counts(session, project):
 def test_edit_missing_pattern_raises(session, project):
     with pytest.raises(ValueError):
         session.edit("src/a.py", "missing", "x")
-    assert session.staged() == {}
+    # the read materialized the original content; the edit staged nothing
+    assert session.staged()[project / "src" / "a.py"] == "alpha = 1\nbeta = 2\n"
 
 
 def test_delete_and_rename(session, project):

@@ -12,7 +12,7 @@ from pyedit.session import EditSession
 
 @pytest.fixture
 def session(project):
-    return EditSession([project / "src" / "a.py", project / "src" / "b.py"])
+    return EditSession()
 
 
 @pytest.fixture

@@ -11,16 +11,13 @@ from __future__ import annotations
 import difflib
 from pathlib import Path
 
-from pyedit.session import _disk_is_file, display_path
+from pyedit.session import _disk_is_file, _slurp, display_path
 
 
 def original(path: Path) -> str | bytes | None:
     if not _disk_is_file(path):
         return None
-    try:
-        return path.read_text()
-    except UnicodeDecodeError:
-        return path.read_bytes()
+    return _slurp(path)
 
 
 def unified_diffs(

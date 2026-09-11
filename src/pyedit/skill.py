@@ -8,8 +8,8 @@ Nothing touches disk unless you pass `--apply`.
 
 ## Invocation
 
-    pyedit [OPTIONS] [PATH_OR_GLOB ...]   # edit script on stdin
-    pyedit -s SCRIPT [OPTIONS] [PATH_OR_GLOB ...]
+    pyedit [OPTIONS]            # edit script on stdin
+    pyedit -s SCRIPT [OPTIONS]
 
 Options:
 
@@ -20,9 +20,9 @@ Options:
 - `-x, --exclude GLOB`: skip matching paths (repeatable)
 - `-U, --context N`: diff context lines (default 3)
 
-Positional arguments are files, directories (walked recursively, hidden
-entries skipped) or glob patterns. They define the input file set.
-Default: `.`
+There are no input path arguments. The script works on any path; every
+file it touches is captured. Files read but left unchanged never appear
+in the diff.
 
 Exit codes: 0 ok, 1 script failed (nothing written), 2 usage error.
 Diffs are git-style (`a/`, `b/`, `/dev/null`); text output pipes to
@@ -40,19 +40,21 @@ The script is plain Python, run in-process. Two things are set up:
    (`remove`, `unlink`, `rename`, `replace`, `mkdir`, `makedirs`,
    `listdir`, `walk`, `os.path.exists/isfile/isdir`) and `shutil`
    (`copy`, `copy2`, `copyfile`, `copytree`, `move`, `rmtree`) all land
-   in an in-memory overlay instead of disk. Reads and listings consult
-   the overlay first, so read-your-writes holds everywhere. Use `with`
-   blocks or `close()` your files; content is staged on close.
+   in an in-memory overlay instead of disk. The overlay is a dict keyed
+   by path: a first read of a file proxies through to the filesystem
+   and caches the full content (reads are always whole-file), writes
+   stay in memory. Readings and listings consult the overlay first, so
+   read-your-writes holds everywhere. Use `with` blocks or `close()`
+   your files; written content is staged on close.
 
 Any Python you know how to write works. No special DSL required.
 
 ### Session API
 
-    pyedit.files()                   sorted input files (list[Path])
-    pyedit.glob(pattern)             filter input files by cwd-relative
-                                     glob (* stays in one segment,
-                                     ** crosses them)
-    pyedit.read(path) -> str|bytes   staged content if edited, else disk
+    pyedit.glob(pattern)             files matching a filesystem glob
+                                     (recursive with **, overlay-aware)
+    pyedit.read(path) -> str|bytes   staged content if touched, else
+                                     disk (read is cached in full)
     pyedit.write(path, content)      stage str or bytes; new paths ok
     pyedit.edit(path, old, new,      replace; ValueError when old is
                 count=-1) -> int     absent; returns replacement count
@@ -60,9 +62,11 @@ Any Python you know how to write works. No special DSL required.
     pyedit.rename(old, new)          stage move (content kept, source
                                      deleted)
 
-Paths may be absolute or relative to the invocation directory. Do not
-`import pyedit` in a script: it would shadow the injected session (if
-you did, the live session is also reachable as `pyedit.session`).
+Paths may be absolute or relative to the invocation directory.
+
+Both access patterns work identically: the injected `pyedit` global and
+`import pyedit` followed by `pyedit.glob(...)` (the module forwards to
+the live session).
 
 ## Examples
 
@@ -88,7 +92,7 @@ Create, move and prune with stdlib tools:
 
 ## Workflow
 
-1. Dry-run: `pyedit 'src/**/*.py' < plan.py` - read the diff.
+1. Dry-run: `pyedit < plan.py` - read the diff.
 2. Scope it if needed: `--include`/`--exclude` (repeatable, fnmatch on
    the displayed paths; filters apply to both the diff and `--apply`).
 3. Save with `-o plan.diff` if you want a record.
@@ -100,10 +104,14 @@ Create, move and prune with stdlib tools:
 
 - Subprocesses and raw file descriptors (`os.open`, `os.fdopen`)
   bypass the overlay.
+- Reads slurp the whole file; pipes, fifos and devices are not
+  suitable inputs.
 - Encoding arguments are ignored; staged text is UTF-8.
 - Directories are not tracked: `mkdir` succeeds without creating,
   parents of new files are created on `--apply`, `rmdir` is a no-op,
-  empty directories never appear in diffs.
+  empty directories never appear in diffs, and files created in a
+  directory that does not exist yet show up via `glob`/`read` but not
+  in `os.walk`/`listdir` of parent directories.
 - `shutil.copy2` does not preserve metadata; mode bits are not staged.
 - Binary files stage as bytes; their diffs are one-line summaries, not
   hunks (the diff file is then not `git apply`-compatible).

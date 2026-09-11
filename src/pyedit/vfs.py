@@ -103,8 +103,6 @@ def install(session: EditSession) -> Callable[[], None]:
     path_exists = Path.exists
     path_is_file = Path.is_file
     path_is_dir = Path.is_dir
-    path_read_text = Path.read_text
-    path_read_bytes = Path.read_bytes
     path_iterdir = Path.iterdir
     path_glob = Path.glob
     path_mkdir = Path.mkdir
@@ -139,16 +137,18 @@ def install(session: EditSession) -> Callable[[], None]:
         return content.encode("utf-8") if binary else content
 
     def seed(path: Path, binary: bool, truncate: bool):
-        content = staged(path)
-        if content is not _MISSING:
-            if content is None:
-                return b"" if binary else ""
-            return coerce(content, binary)
         if truncate:
             return b"" if binary else ""
-        if binary:
-            return path.read_bytes() if path.is_file() else b""
-        return path.read_text()
+        content = staged(path)
+        if content is None:
+            # staged deletion: 'a' and 'r+' recreate the file empty
+            return b"" if binary else ""
+        if content is _MISSING:
+            try:
+                content = session.read(path)
+            except FileNotFoundError:
+                return b"" if binary else ""
+        return coerce(content, binary)
 
     def _open(file, mode="r", *args, **kwargs):
         if isinstance(file, int):
@@ -158,17 +158,9 @@ def install(session: EditSession) -> Callable[[], None]:
         binary = "b" in flags
         writing = bool(flags & {"w", "a", "x", "+"})
         if not writing:
-            content = staged(p)
-            if content is None:
-                raise FileNotFoundError(str(p))
-            if content is not _MISSING:
-                buf = (
-                    io.BytesIO(coerce(content, True))
-                    if binary
-                    else io.StringIO(coerce(content, False))
-                )
-                return _ReadOnlyIO(buf, str(p))
-            return real_open(file, mode, *args, **kwargs)
+            content = coerce(session.read(p), binary)
+            buf = io.BytesIO(content) if binary else io.StringIO(content)
+            return _ReadOnlyIO(buf, str(p))
         if "x" in flags and session.exists(p):
             raise FileExistsError(str(p))
         seed_data = seed(p, binary, truncate="w" in flags or "x" in flags)
@@ -181,14 +173,12 @@ def install(session: EditSession) -> Callable[[], None]:
         return stream
 
     def _move(source: Path, dest: Path) -> None:
-        content = staged(source)
-        if content is None or (content is _MISSING and not source.is_file()):
-            raise FileNotFoundError(str(source))
-        if dest.is_dir():
-            raise IsADirectoryError(str(dest))
+        content = session.read(source)
         if source == dest:
             return
-        session.write(dest, session.current(source))
+        if dest.is_dir():
+            raise IsADirectoryError(str(dest))
+        session.write(dest, content)
         session.delete(source)
 
     def _copyfile(source: Path, dest: Path) -> Path:
@@ -196,7 +186,7 @@ def install(session: EditSession) -> Callable[[], None]:
             raise shutil.SameFileError(f"{source!r} and {dest!r} are the same file")
         if dest.is_dir():
             raise IsADirectoryError(str(dest))
-        session.write(dest, session.current(source))
+        session.write(dest, session.read(source))
         return dest
 
     def _stage_tree(source: Path, dest: Path) -> None:
@@ -204,7 +194,7 @@ def install(session: EditSession) -> Callable[[], None]:
             if entry.is_dir():
                 _stage_tree(entry, dest / entry.name)
             else:
-                session.write(dest / entry.name, session.current(entry))
+                session.write(dest / entry.name, session.read(entry))
 
     def _open_path(self, mode="r", buffering=-1, encoding=None, errors=None, newline=None):
         return _open(self, mode, buffering, encoding, errors, newline)
@@ -244,20 +234,10 @@ def install(session: EditSession) -> Callable[[], None]:
         return path_is_dir(self, *args, **kwargs)
 
     def _read_text(self, encoding=None, errors=None, newline=None):
-        content = staged(self)
-        if content is None:
-            raise FileNotFoundError(str(self))
-        if content is not _MISSING:
-            return coerce(content, False)
-        return path_read_text(self, encoding=encoding, errors=errors, newline=newline)
+        return coerce(session.read(self), False)
 
     def _read_bytes(self):
-        content = staged(self)
-        if content is None:
-            raise FileNotFoundError(str(self))
-        if content is not _MISSING:
-            return coerce(content, True)
-        return path_read_bytes(self)
+        return coerce(session.read(self), True)
 
     def _iterdir(self):
         return iter(session.entries(self))
@@ -386,7 +366,7 @@ def install(session: EditSession) -> Callable[[], None]:
         dest = resolve(dst)
         if dest.is_dir():
             dest = dest / source.name
-        session.write(dest, session.current(source))
+        session.write(dest, session.read(source))
         if source != dest:
             session.delete(source)
         return str(dest)

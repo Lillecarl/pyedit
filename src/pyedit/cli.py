@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
-import glob
 import sys
 import traceback
 from pathlib import Path
@@ -28,18 +27,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pyedit",
         description=(
-            "Run an edit script against input files and print the staged "
-            "changes as a unified diff. Nothing is written to disk unless "
-            "--apply is given."
+            "Run an edit script; every file the script touches is captured "
+            "in memory and printed as a unified diff. Nothing is written "
+            "to disk unless --apply is given."
         ),
         epilog="Run 'pyedit skill' for the agent-facing usage guide.",
-    )
-    parser.add_argument(
-        "paths",
-        nargs="*",
-        default=["."],
-        metavar="PATH_OR_GLOB",
-        help="files, directories or glob patterns the script can work on (default: .)",
     )
     parser.add_argument(
         "-s",
@@ -100,31 +92,6 @@ def read_script(args: argparse.Namespace) -> tuple[str, str]:
     return sys.stdin.read(), "<stdin>"
 
 
-def expand_inputs(patterns: list[str]) -> list[Path]:
-    files: set[Path] = set()
-    for pattern in patterns:
-        direct = Path(pattern)
-        candidates = [direct] if direct.exists() else [
-            Path(m) for m in glob.glob(pattern, recursive=True)
-        ]
-        for candidate in candidates:
-            if candidate.is_dir():
-                files.update(walk_files(candidate))
-            elif candidate.is_file():
-                files.add(candidate)
-    return sorted(files)
-
-
-def walk_files(directory: Path):
-    for item in sorted(directory.iterdir()):
-        if item.name.startswith("."):
-            continue
-        if item.is_dir():
-            yield from walk_files(item)
-        elif item.is_file():
-            yield item
-
-
 def allowed(
     rel: str, include: list[str] | None, exclude: list[str] | None
 ) -> bool:
@@ -174,7 +141,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(tokens)
 
     script, filename = read_script(args)
-    session = EditSession(expand_inputs(args.paths))
+    session = EditSession()
     pyedit.session = session
 
     previous_dont_write = sys.dont_write_bytecode

@@ -3,7 +3,7 @@ from pyedit.session import EditSession
 
 
 def staged(project, actions):
-    session = EditSession([project / "src" / "a.py"])
+    session = EditSession()
     actions(session)
     return session.staged()
 
