@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pyedit"
+version = "0.1.0"
+description = "Multi-file edit CLI and library for AI agents: scripted edits, dry-run diffs, apply on request."
+readme = "README.md"
+requires-python = ">=3.10"
+
+[project.scripts]
+pyedit = "pyedit.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pyedit"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
