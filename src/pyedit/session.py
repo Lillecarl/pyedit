@@ -216,12 +216,44 @@ class EditSession:
             )
         self._stage(self.canon(path), content)
 
-    def edit(self, path: str | Path, old: str, new: str, count: int = -1) -> int:
+    def edit(
+        self,
+        path: str | Path,
+        old: str,
+        new: str,
+        count: int = -1,
+        start_line: int | None = None,
+        stop_line: int | None = None,
+    ) -> int:
+        """Replace `old` with `new`, optionally bounded to a line range.
+
+        Lines are 1-based and inclusive on both ends, matching the rest
+        of pyedit. A match that crosses either range boundary is left
+        alone, which is what makes duplicate patterns addressable:
+        scope the edit to the one line span that holds the intended
+        occurrence.
+        """
         text = self.read(path)
-        n = text.count(old)
+        if not isinstance(text, str):
+            raise ValueError(f"{self.canon(path)} is binary; edit works on text")
+        lines = text.split("\n")
+        n_lines = len(lines)
+        start = 1 if start_line is None else start_line
+        stop = n_lines if stop_line is None else stop_line
+        if start < 1 or stop < start or stop > n_lines:
+            raise ValueError(
+                f"invalid line range {start_line}-{stop_line} for "
+                f"{self.canon(path)} ({n_lines} lines)"
+            )
+        line_start = sum(len(part) + 1 for part in lines[: start - 1])
+        range_end = sum(len(part) + 1 for part in lines[: stop - 1]) + len(lines[stop - 1])
+        haystack = text[line_start:range_end]
+        n = haystack.count(old)
         if n == 0:
             raise ValueError(f"pattern not found in {self.canon(path)}: {old!r}")
-        self.write(path, text.replace(old, new, count))
+        self.write(
+            path, text[:line_start] + haystack.replace(old, new, count) + text[range_end:]
+        )
         return n if count < 0 else min(n, count)
 
     def delete(self, path: str | Path) -> None:

@@ -60,6 +60,55 @@ def test_edit_missing_pattern_raises(session, project):
     assert session.staged()[project / "src" / "a.py"] == "alpha = 1\nbeta = 2\n"
 
 
+def test_edit_range_scopes_duplicates(session, project):
+    session.write("dup.txt", "x = 1\nx = 1\nx = 1\n")
+    n = session.edit("dup.txt", "x = 1", "x = 2", start_line=2, stop_line=2)
+    assert n == 1
+    assert session.read("dup.txt") == "x = 1\nx = 2\nx = 1\n"
+
+
+def test_edit_range_is_inclusive_and_spans_lines(session, project):
+    session.write("multi.txt", "a\nb\nc\nd\n")
+    n = session.edit("multi.txt", "b\nc", "B\nC", start_line=2, stop_line=3)
+    assert n == 1
+    assert session.read("multi.txt") == "a\nB\nC\nd\n"
+
+
+def test_edit_match_crossing_boundary_needs_the_newline_in_range(session, project):
+    session.write("bound.txt", "ab\nab\n")
+    with pytest.raises(ValueError):
+        session.edit("bound.txt", "b\na", "X", start_line=1, stop_line=1)
+    n = session.edit("bound.txt", "b\na", "X", start_line=1, stop_line=2)
+    assert n == 1
+    assert session.read("bound.txt") == "aXb\n"
+
+
+def test_edit_range_outside_fails_loudly(session, project):
+    session.write("out.txt", "alpha\nbeta\nalpha\n")
+    with pytest.raises(ValueError):
+        session.edit("out.txt", "beta", "BETA", start_line=1, stop_line=1)
+    # the failed edit staged nothing new
+    assert session.staged()[project / "out.txt"] == "alpha\nbeta\nalpha\n"
+
+
+def test_edit_range_validation(session, project):
+    session.write("r.txt", "one\ntwo\n")
+    for kwargs in (
+        {"start_line": 0},
+        {"start_line": 2, "stop_line": 1},
+        {"stop_line": 99},
+        {"start_line": 99},
+    ):
+        with pytest.raises(ValueError, match="invalid line range"):
+            session.edit("r.txt", "one", "ONE", **kwargs)
+
+
+def test_edit_binary_raises(session, project):
+    session.write("bin.dat", b"\x00\x01")
+    with pytest.raises(ValueError, match="binary"):
+        session.edit("bin.dat", "x", "y")
+
+
 def test_delete_and_rename(session, project):
     session.rename("src/a.py", "src/c.py")
     staged = session.staged()

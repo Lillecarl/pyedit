@@ -77,7 +77,10 @@ read-your-writes holds. Anything you can write in Python works.
                                      disk
     pyedit.write(path, content)      stage str or bytes; new paths ok
     pyedit.edit(path, old, new,      replace; ValueError when old is
-                count=-1) -> int     absent; returns replacement count
+                count=-1,            absent; returns replacement count;
+                start_line=None,     start_line/stop_line bound the
+                stop_line=None)      replacement to 1-based inclusive
+                                     lines, for duplicate patterns
     pyedit.delete(path)              stage deletion
     pyedit.rename(old, new)          stage move (content kept, source
                                      deleted)
