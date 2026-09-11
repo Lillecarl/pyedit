@@ -28,6 +28,8 @@ from rope.base.project import Project
 from rope.contrib.findit import find_occurrences
 from rope.refactor.rename import Rename
 
+from pyedit.session import EditSession
+
 from pyedit import vfs
 
 
@@ -39,13 +41,22 @@ class Reference:
 
 
 def rename_symbol(
-    session, path: str | Path, line: int, column: int, old_name: str, new_name: str
+    session: EditSession,
+    path: str | Path,
+    line: int,
+    column: int,
+    old_name: str,
+    new_name: str,
 ) -> list[Path]:
     """Rename the symbol at (line, column) project-wide.
 
     `old_name` must match what the position resolves to, so a cursor
     slightly off the target fails loudly instead of renaming the wrong
     thing. Stages every file rope would change; returns changed paths.
+    Rope resolves references statically: attribute calls on values
+    whose type it cannot infer (untyped parameters holding an
+    EditSession, duck-typed objects) are not renamed. The returned
+    diff shows what was covered; sweep the rest with replace().
     """
     _check_identifier("old", old_name)
     _check_identifier("new", new_name)
@@ -77,7 +88,9 @@ def rename_symbol(
             project.close()
 
 
-def rename_module(session, path: str | Path, old_name: str, new_name: str) -> list[Path]:
+def rename_module(
+    session: EditSession, path: str | Path, old_name: str, new_name: str
+) -> list[Path]:
     """Rename a module file or package folder and update its importers."""
     _check_identifier("old", old_name)
     _check_identifier("new", new_name)
@@ -152,7 +165,7 @@ def references(
 
 
 @contextmanager
-def _roped(session):
+def _roped(session: EditSession):
     """Run rope with the VFS patches active, even outside a script run,
     so it reads staged content like any other file consumer."""
     restore = vfs.install(session)
@@ -162,7 +175,7 @@ def _roped(session):
         restore()
 
 
-def _python_resources(session, project: Project) -> list:
+def _python_resources(session: EditSession, project: Project) -> list:
     resources = []
     for path in session.glob("**/*.py"):
         try:
@@ -172,7 +185,9 @@ def _python_resources(session, project: Project) -> list:
     return resources
 
 
-def _require_selection(renamer, old_name, session, path, line=None, column=None):
+def _require_selection(
+    renamer, old_name, session: EditSession, path: str | Path, line=None, column=None
+):
     resolved = renamer.get_old_name()
     if resolved != old_name:
         where = f"{session.relpath(session.canon(path))}"
@@ -235,18 +250,20 @@ def _is_word_char(line_text: str, column: int) -> bool:
     return line_text[column].isidentifier()
 
 
-def _project(session) -> Project:
+def _project(session: EditSession) -> Project:
     return Project(session.root.as_posix(), ropefolder=None)
 
 
-def _resource_or_none(project: Project, session, path: str | Path):
+def _resource_or_none(
+    project: Project, session: EditSession, path: str | Path
+):
     try:
         return project.get_resource(session.relpath(session.canon(path)))
     except Exception:
         return None
 
 
-def _stage_changes(session, changes) -> list[Path]:
+def _stage_changes(session: EditSession, changes) -> list[Path]:
     staged: list[Path] = []
     for change in changes.changes:
         if isinstance(change, rope_change.ChangeContents):
@@ -260,7 +277,7 @@ def _stage_changes(session, changes) -> list[Path]:
     return staged
 
 
-def _stage_move(session, change: rope_change.MoveResource) -> list[Path]:
+def _stage_move(session: EditSession, change: rope_change.MoveResource) -> list[Path]:
     old_root = Path(change.resource.real_path)
     new_root = Path(change.new_resource.real_path)
     staged: list[Path] = []
@@ -274,7 +291,7 @@ def _stage_move(session, change: rope_change.MoveResource) -> list[Path]:
     return [new_root]
 
 
-def _files_under(session, folder: Path) -> list[Path]:
+def _files_under(session: EditSession, folder: Path) -> list[Path]:
     found: set[Path] = set()
     for root, _dirs, files in os.walk(folder):
         for name in files:

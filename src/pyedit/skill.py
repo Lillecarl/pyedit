@@ -225,7 +225,12 @@ Module map:
   globs.
 - `lsp.py`: semantic editing via rope (the engine pylsp uses for
   rename), reading through the VFS: position-based rename_symbol,
-  rename_module (file moves) and references.
+  rename_module (file moves) and references. Rope is static: it
+  renames the definition and references it can resolve. Attribute
+  calls on a value whose type it cannot infer (e.g. `s.canon(x)`
+  where `s` is an untyped parameter) are left alone — the dry-run
+  diff shows exactly which files changed; catch stragglers with
+  pyedit.replace.
 - `vendor/apply_diff.py`: the V4A string applier, vendored from
   openai-agents-python (MIT).
 - `skill.py`: this document.
