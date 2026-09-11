@@ -68,9 +68,11 @@ read-your-writes holds. Anything you can write in Python works.
 
 ### Session API
 
-    pyedit.glob(pattern)             files matching a filesystem glob
-                                     (recursive with **, .gitignore-
-                                     excluded)
+    pyedit.glob(pattern)             files matching a filesystem glob;
+                                     returns pathlib.Path objects (use
+                                     str(p) for string operations);
+                                     recursive with **, .gitignore-
+                                     excluded
     pyedit.read(path) -> str|bytes   staged content if touched, else
                                      disk
     pyedit.write(path, content)      stage str or bytes; new paths ok
