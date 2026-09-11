@@ -2,8 +2,8 @@
   pkgs ? import <nixpkgs> { },
 }:
 rec {
-  pyedit = pkgs.callPackage ./pyedit { };
+  pyedit = pkgs.python3Packages.callPackage ./pyedit { };
   shell = pkgs.mkShell {
-    packages = [ (pkgs.python3.withPackages (_: pyedit)) ];
+    packages = [ (pkgs.python3.withPackages (_: [ pyedit.passthru.library ])) ];
   };
 }
