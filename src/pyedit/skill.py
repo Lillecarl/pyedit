@@ -95,7 +95,8 @@ read-your-writes holds. Anything you can write in Python works.
     pyedit.apply_patch(text)         stage a V4A envelope
     pyedit.apply_unified_diff(text)  stage a unified diff
 
-Paths may be absolute or relative to the invocation directory.
+Paths may be absolute or relative to the session root (the invocation
+directory in CLI runs and edit scripts).
 
 ## Other languages: language servers
 

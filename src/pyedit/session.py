@@ -140,7 +140,7 @@ class EditSession:
     @property
     def ignore_filter(self) -> IgnoreFilter:
         if self._ignore_filter is None:
-            self._ignore_filter = IgnoreFilter()
+            self._ignore_filter = IgnoreFilter(root=self._root)
         return self._ignore_filter
 
     def _stage(self, path: Path, content: str | bytes | None) -> None:
@@ -180,7 +180,7 @@ class EditSession:
         Gitignored paths are excluded unless --no-gitignore."""
         rx = glob_re(pattern)
         found: set[Path] = set()
-        for match in glob_module.glob(pattern, recursive=True):
+        for match in glob_module.glob(os.path.join(self._root, pattern), recursive=True):
             p = self.canon(match)
             if self.staged_content(p) is None:
                 continue
@@ -374,13 +374,17 @@ class EditSession:
     # --- helpers ---
 
     def relpath(self, path: str | Path) -> str:
-        return display_path(self.canon(path))
+        p = self.canon(path)
+        try:
+            return p.relative_to(self._root).as_posix()
+        except ValueError:
+            return p.as_posix()
 
-    @staticmethod
-    def canon(path: str | Path) -> Path:
+    def canon(self, path: str | Path) -> Path:
         # lexical normalization only: no syscalls, so it stays loop-free
-        # even while os.stat/os.lstat are patched (symlinks are not chased)
-        return Path(os.path.abspath(path))
+        # even while os.stat/os.lstat are patched (symlinks are not chased);
+        # relative paths join the session root, not the process cwd
+        return Path(os.path.abspath(os.path.join(self._root, path)))
 
 
 def display_path(path: Path) -> str:

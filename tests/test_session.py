@@ -47,6 +47,21 @@ def test_write_accepts_str_and_bytes_only(session, project):
         session.write("src/a.py", 42)
 
 
+def test_relative_paths_resolve_against_root(tmp_path):
+    # no chdir: the cwd is deliberately elsewhere
+    (tmp_path / "a.txt").write_text("x\n")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "b.txt").write_text("s\n")
+    session = EditSession(respect_gitignore=False, root=tmp_path)
+    assert [p.name for p in session.glob("**/*.txt")] == ["a.txt", "b.txt"]
+    session.write("b.txt", "y\n")
+    session.edit("sub/b.txt", "s", "S")
+    assert session.read("b.txt") == "y\n"
+    assert session.read("sub/b.txt") == "S\n"
+    # staged content only; disk truth is untouched
+    assert (tmp_path / "sub" / "b.txt").read_text() == "s\n"
+
+
 def test_edit_replaces_and_counts(session, project):
     n = session.edit("src/a.py", "alpha", "ALPHA")
     assert n == 1

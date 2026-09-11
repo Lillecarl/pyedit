@@ -1,6 +1,6 @@
 """.gitignore-aware filtering for discovery globs.
 
-Rules come from every .gitignore between the working directory's
+Rules come from every .gitignore between the session root's
 ancestors and each candidate's directory (nested files apply to their
 own subtree). Matching is per-directory GitIgnoreSpec (pathspec
 gitwildmatch). Only discovery is filtered; explicit reads and writes

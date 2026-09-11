@@ -23,6 +23,13 @@ def test_session_glob_excludes_ignored(repo):
     assert names == {"a.py", "b.py", "keep.log", "note.txt"}
 
 
+def test_gitignore_honors_session_root(repo):
+    # the cwd is deliberately elsewhere; rules must come from the root
+    session = EditSession(root=repo)
+    names = {p.name for p in session.glob("**/*")}
+    assert names == {"a.py", "b.py", "keep.log", "note.txt"}
+
+
 def test_negation_keeps_explicit(repo):
     session = EditSession()
     assert (repo / "src" / "keep.log") in session.glob("**/keep.log")

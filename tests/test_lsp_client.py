@@ -84,10 +84,7 @@ class Stub:
 
 
 @pytest.fixture
-def stub_project(tmp_path, monkeypatch):
-    # session.canon resolves relative paths against the cwd, like a script
-    # run from the project root
-    monkeypatch.chdir(tmp_path)
+def stub_project(tmp_path):
     (tmp_path / "a.txt").write_text("alpha beta\n")
     (tmp_path / "b.txt").write_text("gamma delta\n")
     return EditSession(respect_gitignore=False, root=tmp_path)
@@ -253,9 +250,7 @@ def _pyright_project(tmp_path):
 
 
 @requires_pyright
-def test_pyright_rename_stages_across_files(tmp_path, monkeypatch):
-    # session.canon resolves relative paths against the cwd
-    monkeypatch.chdir(tmp_path)
+def test_pyright_rename_stages_across_files(tmp_path):
     session = _pyright_project(tmp_path)
     with LspSession(session, [_pyright, "--stdio"]) as handle:
         staged = handle.rename_symbol("alpha.py", 1, 5, "alpha", "omega")
@@ -265,8 +260,7 @@ def test_pyright_rename_stages_across_files(tmp_path, monkeypatch):
 
 
 @requires_pyright
-def test_pyright_references_find_all_occurrences(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+def test_pyright_references_find_all_occurrences(tmp_path):
     session = _pyright_project(tmp_path)
     with LspSession(session, [_pyright, "--stdio"]) as handle:
         refs = handle.references("alpha.py", 1, 5, "alpha")
@@ -278,10 +272,9 @@ def test_pyright_references_find_all_occurrences(tmp_path, monkeypatch):
 
 
 @requires_pyright
-def test_pyright_sees_staged_content_not_disk(tmp_path, monkeypatch):
+def test_pyright_sees_staged_content_not_disk(tmp_path):
     # disk holds alpha; the session has renamed it to gamma already --
     # the server must compute over the didOpen'd overlay
-    monkeypatch.chdir(tmp_path)
     (tmp_path / "alpha.py").write_text("def alpha():\n    return 1\n")
     session = EditSession(respect_gitignore=False, root=tmp_path)
     session.write("alpha.py", "def gamma():\n    return 2\n")
