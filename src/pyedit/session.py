@@ -250,7 +250,11 @@ class EditSession:
         haystack = text[line_start:range_end]
         n = haystack.count(old)
         if n == 0:
-            raise ValueError(f"pattern not found in {self.canon(path)}: {old!r}")
+            raise ValueError(
+                f"pattern not found in {self.canon(path)}: {old!r} "
+                "(the pattern is matched after your literal decodes; "
+                "compare its bytes with the file's, e.g. via repr(read()))"
+            )
         self.write(
             path, text[:line_start] + haystack.replace(old, new, count) + text[range_end:]
         )

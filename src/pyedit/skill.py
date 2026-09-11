@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-SKILL = """\
+SKILL_HEAD = """\
 # pyedit
 
 pyedit stages multi-file edits in memory and shows them as diffs.
@@ -129,7 +129,34 @@ read-your-writes holds. Anything you can write in Python works.
 
 Paths may be absolute or relative to the session root (the invocation
 directory in CLI runs and edit scripts).
+"""
 
+# backslash examples must survive verbatim, so this section is raw;
+# writing it inside the main literal would decode the examples away
+ESCAPES_SECTION = r"""### Escapes in edit patterns
+
+`edit` matches after Python decodes your string literal: the literal
+must evaluate to the file's exact characters. Levels stack up when the
+target is code that writes code (shell inside Python, Nix inside
+Nix): the file's bytes may hold two backslashes where a rendered view
+shows one, and each wrong guess fails as a plain `pattern not found`.
+
+- Get the ground truth first: in the script,
+  `print(repr(pyedit.read(path)), file=sys.stderr)` on a dry-run shows
+  every backslash; so does `od -c` in a shell. Trust bytes over what a
+  tool displayed.
+- Build the literal from that: file bytes `\033` (one backslash) is
+  `'\\033'` or `r'\033'`; file bytes `\\033` (two) is `'\\\\033'` or
+  `r'\\033'`.
+- A raw string freezes what you type; it does not tell you how many
+  backslashes the file has.
+- Prefer an anchor without backslashes at all: match the plain lines
+  around the target and put the escape-heavy line, counted from
+  evidence, inside the replacement.
+
+"""
+
+SKILL_TAIL = """\
 ## Other languages: language servers
 
 `rename_symbol`, `rename_module` and `references` above are
@@ -245,6 +272,9 @@ package lives at:
 If pyedit breaks - a crash, a wrong diff, a failed apply - report it
 at https://github.com/lillecarl/pyedit
 """
+
+
+SKILL = SKILL_HEAD + ESCAPES_SECTION + SKILL_TAIL
 
 
 def render_skill() -> str:
