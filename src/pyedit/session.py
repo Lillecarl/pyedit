@@ -313,6 +313,27 @@ class EditSession:
 
         return rope.references(self, path, line, column, name)
 
+    def node_at(self, path: str | Path, line: int, column: int) -> "syntax.NodeInfo":
+        """The smallest syntax node at (line, column), with its named
+        parent, from the staged content. Needs a tree-sitter grammar
+        for the file's suffix."""
+        from pyedit import syntax
+
+        return syntax.node_at(self, path, line, column)
+
+    def outline(self, path: str | Path) -> list["syntax.NodeInfo"]:
+        """Every named definition in the file with its span."""
+        from pyedit import syntax
+
+        return syntax.outline(self, path)
+
+    def check(self, path: str | Path) -> list["syntax.SyntaxProblem"]:
+        """Syntax problems in a file: compile() for Python, tree-sitter
+        for other languages with an installed grammar."""
+        from pyedit import syntax
+
+        return syntax.problems(self, path)
+
     # --- engine ---
 
     def staged(self) -> dict[Path, str | bytes | None]:

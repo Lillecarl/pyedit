@@ -8,6 +8,8 @@
   pygls,
   lsprotocol,
   pyright,
+  tree-sitter,
+  tree-sitter-grammars,
   cacert,
   pytestCheckHook,
   buildPythonApplication,
@@ -48,6 +50,30 @@ let
       pygit2
       pygls
       lsprotocol
+      tree-sitter
+    ] ++ map (name: tree-sitter-grammars.${name}) [
+      # python bindings for every grammar live in the generated
+      # tree-sitter-grammars scope; a grammar missing there is bindable
+      # with the same generator: callPackage
+      # ../development/python-modules/tree-sitter-grammars { inherit
+      # name grammarDrv; } against pkgs.tree-sitter-grammars
+      "tree-sitter-python"
+      "tree-sitter-javascript"
+      "tree-sitter-typescript"
+      "tree-sitter-tsx"
+      "tree-sitter-go"
+      "tree-sitter-rust"
+      "tree-sitter-c"
+      "tree-sitter-cpp"
+      "tree-sitter-bash"
+      "tree-sitter-json"
+      "tree-sitter-yaml"
+      "tree-sitter-toml"
+      "tree-sitter-nix"
+      "tree-sitter-ruby"
+      "tree-sitter-java"
+      "tree-sitter-lua"
+      "tree-sitter-zig"
     ];
 
     # pygit2 performs TLS setup at import; without certificates to load

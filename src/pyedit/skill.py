@@ -148,6 +148,29 @@ earlier edits in the session; returned edits are staged like any other
 edit. `old_name`/`name` must match the token at the position. Heavy
 servers may need a moment after startup before results are complete.
 
+## Syntax awareness
+
+Staged text is parsed before it is shown: syntax problems print to
+stderr as `pyedit: syntax: FILE:LINE:COL: message` (compile() for
+Python, tree-sitter grammars for others) and never block a run.
+Position queries run on staged content:
+
+    pyedit.node_at(path, line, column)   what is at a position: kind,
+                                         name, span, source text and
+                                         `enclosing` (the named node
+                                         around it, e.g. the method
+                                         the position sits in)
+    pyedit.outline(path)                 every named definition with
+                                         its span, ordered by position
+    pyedit.check(path)                   syntax problems: list of
+                                         (line, column, message)
+
+Lines are 1-based, columns 0-based. Supported languages: Python,
+JavaScript, TypeScript, TSX, Go, Rust, C, C++, Bash, JSON, YAML, TOML,
+Nix, Ruby, Java, Lua, Zig. Verify a target with `node_at` before a
+range-limited `edit`, and use `outline` to find definitions when the
+file is bigger than what fits in context.
+
 ## Independent scopes: several edits, merged by context
 
 Wrap independent edits in their own scopes; each sees the pristine

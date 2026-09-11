@@ -284,6 +284,18 @@ def main(argv: list[str] | None = None) -> int:
         if allowed(display_path(path), args.include, args.exclude)
     }
 
+    # staged text is parsed: syntax problems surface here, in the same
+    # run that shows the diff they would produce
+    for path in sorted(staged):
+        if not isinstance(staged[path], str):
+            continue
+        for problem in session.check(path):
+            print(
+                f"pyedit: syntax: {display_path(path)}:"
+                f"{problem.line}:{problem.column}: {problem.message}",
+                file=sys.stderr,
+            )
+
     diff_text = "".join(
         diff for _, diff in unified_diffs(staged, context=args.context)
     )
