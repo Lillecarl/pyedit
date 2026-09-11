@@ -101,6 +101,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="lines of context in the diff (default: 3)",
     )
     parser.add_argument(
+        "--no-gitignore",
+        action="store_true",
+        help="do not exclude .gitignore paths from glob discovery",
+    )
+    parser.add_argument(
         "--max-materialized-bytes",
         type=int,
         default=256 * 1024 * 1024,
@@ -203,6 +208,7 @@ def main(argv: list[str] | None = None) -> int:
     session = EditSession(
         max_bytes=args.max_materialized_bytes or None,
         max_files=args.max_materialized_files or None,
+        respect_gitignore=not args.no_gitignore,
     )
     pyedit.session = session
 

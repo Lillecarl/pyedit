@@ -262,7 +262,7 @@ def install(session: EditSession) -> Callable[[], None]:
                 continue
             if rx.match(rel.as_posix()):
                 out.setdefault(path, path)
-        return iter([out[key] for key in sorted(out)])
+        return iter(session.filter_ignored([out[key] for key in sorted(out)]))
 
     def _mkdir(self, mode=0o777, parents=False, exist_ok=False):
         p = resolve(self)

@@ -16,6 +16,8 @@ import re
 import stat
 from pathlib import Path
 
+from pyedit.gitignore import IgnoreFilter
+
 _MISSING = object()
 
 _GLOB_CACHE: dict[str, re.Pattern] = {}
@@ -107,12 +109,30 @@ class EditSession:
         self,
         max_bytes: int | None = None,
         max_files: int | None = None,
+        respect_gitignore: bool = True,
     ) -> None:
         self._max_bytes = max_bytes
         self._max_files = max_files
+        self._respect_gitignore = respect_gitignore
+        self._ignore_filter: IgnoreFilter | None = None
         self._staged: dict[Path, str | bytes | None] = {}
         self._bytes_used = 0
         self._files_used = 0
+
+    def filter_ignored(self, paths) -> list[Path]:
+        """Drop paths excluded by .gitignore rules (discovery only)."""
+        if not self._respect_gitignore:
+            return list(paths)
+        ignore = self.ignore_filter
+        return [
+            p for p in paths if not ignore.ignored(p, is_dir=self.is_dir(p))
+        ]
+
+    @property
+    def ignore_filter(self) -> IgnoreFilter:
+        if self._ignore_filter is None:
+            self._ignore_filter = IgnoreFilter()
+        return self._ignore_filter
 
     def _stage(self, path: Path, content: str | bytes | None) -> None:
         """Enforce budgets, track usage, and land content in the dict."""
@@ -147,7 +167,8 @@ class EditSession:
 
     def glob(self, pattern: str) -> list[Path]:
         """Files matching a filesystem glob (recursive with **): disk
-        matches minus staged deletions, plus files staged this run."""
+        matches minus staged deletions, plus files staged this run.
+        Gitignored paths are excluded unless --no-gitignore."""
         rx = glob_re(pattern)
         found: set[Path] = set()
         for match in glob_module.glob(pattern, recursive=True):
@@ -161,7 +182,7 @@ class EditSession:
                 continue
             if rx.match(self.relpath(staged_path)):
                 found.add(staged_path)
-        return sorted(found)
+        return self.filter_ignored(sorted(found))
 
     # --- overlay IO ---
 

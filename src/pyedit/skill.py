@@ -27,6 +27,11 @@ Options:
 - `-i, --include GLOB`: only show and apply matching paths (repeatable)
 - `-x, --exclude GLOB`: skip matching paths (repeatable)
 - `-U, --context N`: diff context lines (default 3)
+- `--no-gitignore`: do not exclude .gitignore paths from glob discovery
+- `--max-materialized-bytes BYTES`: memory budget for staged content
+  (default 268435456; 0 disables)
+- `--max-materialized-files N`: file count budget for the overlay
+  (default 20000; 0 disables)
 
 There are no input path arguments. The script works on any path; every
 file it touches is captured. Files read but left unchanged never appear
@@ -63,7 +68,7 @@ vendored from the OpenAI agents SDK.
 
 `--diff` (or auto-detected `diff --git` / `--- a/` input) reads a normal
 unified diff and stages it the same way. Create (`--- /dev/null`), delete
-(`+++ /dev/null`), pure renames, `\ No newline at end of file` markers and
+(`+++ /dev/null`), pure renames, `\\ No newline at end of file` markers and
 trailing-whitespace fuzz in context are handled. Binary patches and git
 extended headers beyond rename are not.
 
@@ -96,7 +101,8 @@ Any Python you know how to write works. No special DSL required.
 ### Session API
 
     pyedit.glob(pattern)             files matching a filesystem glob
-                                     (recursive with **, overlay-aware)
+                                     (recursive with **, overlay-aware,
+                                     .gitignore-excluded)
     pyedit.read(path) -> str|bytes   staged content if touched, else
                                      disk (read is cached in full)
     pyedit.write(path, content)      stage str or bytes; new paths ok
@@ -150,6 +156,17 @@ Create, move and prune with stdlib tools:
 
 ## Limits
 
+- Discovery globs (`pyedit.glob`, `Path.glob`) exclude .gitignore
+  paths: every .gitignore between the working directory's ancestors
+  and the candidate's own directory applies (negations only override
+  rules within the same file; .git/info/exclude and the global
+  excludesfile are not consulted). Disable with `--no-gitignore`.
+  Explicit reads and writes still reach ignored paths.
+- Whole-file reads are cached; the overlay enforces budgets
+  (--max-materialized-bytes, --max-materialized-files) and fails the
+  run before anything is written when they are exceeded. Narrow the
+  scope or raise the limits; budgets release when files are deleted,
+  rewritten smaller, or dropped as unchanged.
 - Subprocesses and raw file descriptors (`os.open`, `os.fdopen`)
   bypass the overlay.
 - Reads slurp the whole file; pipes, fifos and devices are not

@@ -1,13 +1,11 @@
 import io
-import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
+import pyedit
 from pyedit import cli
-
-SRC = Path(__file__).resolve().parent.parent / "src"
 
 
 @pytest.fixture
@@ -134,17 +132,14 @@ def test_script_can_touch_any_path(project, script, capsys):
     assert not (project / "outside").exists()
 
 
-def test_stdin_script_end_to_end(project):
-    result = subprocess.run(
-        [sys.executable, "-m", "pyedit"],
-        input='pyedit.edit("src/a.py", "alpha", "ALPHA")\n',
-        capture_output=True,
-        text=True,
-        cwd=project,
-        env={"PYTHONPATH": str(SRC), "PATH": ""},
+def test_stdin_script_mode(project, capsys, monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "stdin",
+        io.StringIO('pyedit.edit("src/a.py", "alpha", "ALPHA")\n'),
     )
-    assert result.returncode == 0, result.stderr
-    assert "+ALPHA = 1" in result.stdout
+    assert run(project) == 0
+    assert "+ALPHA = 1" in capsys.readouterr().out
     assert (project / "src" / "a.py").read_text() == "alpha = 1\n"
 
 

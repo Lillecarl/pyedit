@@ -2,6 +2,7 @@
   lib,
   hatchling,
   unidiff,
+  pathspec,
   pytestCheckHook,
   buildPythonApplication,
   buildPythonPackage,
@@ -34,7 +35,10 @@ let
 
     build-system = [ hatchling ];
 
-    dependencies = [ unidiff ];
+    dependencies = [
+      unidiff
+      pathspec
+    ];
 
     nativeCheckInputs = [ pytestCheckHook ];
 
