@@ -1,3 +1,4 @@
+from pyedit import cli
 from pyedit.diff import unified_diffs
 from pyedit.session import EditSession
 
@@ -64,3 +65,81 @@ def test_context_lines_respected(project):
 
     _, diff = unified_diffs(staged(project, edit), context=2)[0]
     assert "@@ -4,5 +4,5 @@\n" in diff
+
+
+def test_eof_newline_marker_on_added_file(project):
+    def write(session):
+        session.write(project / "fresh.txt", "first")
+
+    _, diff = unified_diffs(staged(project, write))[0]
+    assert "+first\n\\ No newline at end of file\n" in diff
+    # every line of the diff is newline-terminated: no header glue
+    assert all(line.endswith("\n") for line in diff.splitlines(keepends=True))
+
+
+def test_eof_newline_marker_on_both_sides_changed(project):
+    (project / "src" / "a.py").write_text("x=1")
+
+    def edit(session):
+        session.write(project / "src" / "a.py", "x=2")
+
+    _, diff = unified_diffs(staged(project, edit))[0]
+    assert "-x=1\n\\ No newline at end of file\n" in diff
+    assert "+x=2\n\\ No newline at end of file\n" in diff
+
+
+def test_eof_newline_marker_when_new_side_gains_newline(project):
+    (project / "src" / "a.py").write_text("x=1")
+
+    def edit(session):
+        session.write(project / "src" / "a.py", "x=1\n")
+
+    _, diff = unified_diffs(staged(project, edit))[0]
+    assert "-x=1\n\\ No newline at end of file\n" in diff
+    assert "+x=1\n" in diff
+    assert diff.count("No newline") == 1
+
+
+def test_eof_newline_marker_when_new_side_loses_newline(project):
+    (project / "src" / "a.py").write_text("x=1\n")
+
+    def edit(session):
+        session.write(project / "src" / "a.py", "x=1")
+
+    _, diff = unified_diffs(staged(project, edit))[0]
+    assert "-x=1\n" in diff
+    assert "+x=1\n\\ No newline at end of file\n" in diff
+    assert diff.count("No newline") == 1
+
+
+def test_eof_state_change_far_from_edit_gets_its_own_hunk(project):
+    content = "a\nb\nc\nd\ne\nf\ng\nh\ni\nend\n"
+    (project / "src" / "a.py").write_text(content)
+
+    def edit(session):
+        session.write(project / "src" / "a.py", content.replace("c\n", "X\n", 1)[:-1])
+
+    _, diff = unified_diffs(staged(project, edit))[0]
+    assert "-end\n+end\n\\ No newline at end of file\n" in diff
+
+
+def test_multi_file_patch_stays_separated(project):
+    def edits(session):
+        session.write(project / "fresh.txt", "first")
+        session.write(project / "src" / "b.py", "gamma = 3\nmore = 4\n")
+
+    diffs = dict(unified_diffs(staged(project, edits)))
+    fresh = diffs["fresh.txt"]
+    assert fresh.endswith("\\ No newline at end of file\n")
+    assert "--- a/src/b.py" not in fresh
+
+
+def test_cli_patch_without_trailing_newline_renders_git_apply_clean_diff(
+    project, capsys
+):
+    envelope = "*** Begin Patch\n*** Add File: fresh.txt\n+first\n*** End Patch\n"
+    (project / "nl.envelope").write_text(envelope)
+    target = project / "nl.diff"
+    assert cli.main(["--patch", "nl.envelope", "-o", str(target)]) == 0
+    rendered = target.read_text()
+    assert rendered.endswith("+first\n\\ No newline at end of file\n")

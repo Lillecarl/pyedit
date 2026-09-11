@@ -4,6 +4,8 @@
   unidiff,
   pathspec,
   rope,
+  pygit2,
+  cacert,
   pytestCheckHook,
   buildPythonApplication,
   buildPythonPackage,
@@ -40,7 +42,12 @@ let
       unidiff
       pathspec
       rope
+      pygit2
     ];
+
+    # pygit2 performs TLS setup at import; without certificates to load
+    # it fails - same workaround as nixpkgs uses for pygit2's own tests
+    env.SSL_CERT_FILE = "${cacert}/etc/ssl/certs/ca-bundle.crt";
 
     nativeCheckInputs = [ pytestCheckHook ];
 
