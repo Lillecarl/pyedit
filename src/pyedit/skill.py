@@ -1,5 +1,9 @@
 """The agent-facing skill document, printed by `pyedit skill`."""
 
+from __future__ import annotations
+
+from pathlib import Path
+
 SKILL = """\
 # pyedit
 
@@ -183,3 +187,41 @@ Create, move and prune with stdlib tools:
 - `Path.stat()` and `os.stat()` on files created during the run raise;
   `exists()`, `is_file()` and listings are overlay-aware.
 """
+
+SOURCE_SECTION = """\
+## Source
+
+For complicated edits, read the source that is actually running; it is
+small and written to be skimmed. The installed package lives at:
+
+    {source}
+
+Module map:
+
+- `session.py`: EditSession, the overlay dict (path -> str|bytes|None)
+  with budgets, glob discovery, and read/write/edit/delete/rename;
+  apply_patch and apply_unified_diff stage here too.
+- `vfs.py`: install()/restore() monkeypatch open(), pathlib, os and
+  shutil for the duration of a script run, routing every write into the
+  session; reads and listings consult the overlay first.
+- `diff.py`: renders staged changes as git-style unified diffs
+  (binary changes as one-line summaries).
+- `patch.py`: parses OpenAI apply_patch (V4A) envelopes and stages
+  create/update/delete/move operations.
+- `udiff.py`: parses unified diffs with unidiff and applies hunks into
+  the session (newline-tolerant matching, EOF newline markers).
+- `gitignore.py`: pathspec-based .gitignore filtering for discovery
+  globs.
+- `vendor/apply_diff.py`: the V4A string applier, vendored from
+  openai-agents-python (MIT).
+- `skill.py`: this document.
+
+Dependencies: unidiff (unified diff parsing), pathspec (.gitignore
+matching). Read the module you need before unusual edits; the
+docstrings are the contract.
+"""
+
+
+def render_skill() -> str:
+    source = Path(__file__).resolve().parent
+    return SKILL + SOURCE_SECTION.format(source=source)

@@ -1,8 +1,10 @@
 """pyedit command line interface.
 
-Runs an edit script supplied on stdin or via --script against a set of
-input files, shows the staged changes as a unified diff, and writes
-nothing to disk unless --apply is given.
+Input is a Python edit script (-s/--script), an OpenAI apply_patch (V4A)
+envelope (-p/--patch) or a unified diff (-d/--diff); bare stdin is
+auto-detected between the three. Input runs against an in-memory
+overlay: the result prints as a unified diff and nothing is written to
+disk unless --apply is given.
 """
 
 from __future__ import annotations
@@ -17,7 +19,7 @@ import pyedit
 from pyedit import vfs
 from pyedit.diff import unified_diffs
 from pyedit.session import EditSession, display_path
-from pyedit.skill import SKILL
+from pyedit.skill import render_skill
 
 EXIT_OK = 0
 EXIT_SCRIPT_ERROR = 1
@@ -187,12 +189,13 @@ def run_skill(rest: list[str]) -> int:
         "file", nargs="?", help="write the skill to this file instead of stdout"
     )
     args = parser.parse_args(rest)
+    skill = render_skill()
     if args.file:
         out = Path(args.file)
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(SKILL)
+        out.write_text(skill)
     else:
-        sys.stdout.write(SKILL)
+        sys.stdout.write(skill)
     return EXIT_OK
 
 

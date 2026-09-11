@@ -340,10 +340,16 @@ def test_skill_prints_markdown(capsys):
     assert out.startswith("# pyedit")
     assert "Nothing touches disk" in out
     assert "--apply" in out
+    assert "## Source" in out
+    assert "session.py" in out and "vfs.py" in out
+    assert str(Path(pyedit.skill.__file__).resolve().parent) in out
 
 
 def test_skill_writes_file(project, capsys):
     target = project / "docs" / "skill.md"
     assert cli.main(["skill", str(target)]) == 0
     assert capsys.readouterr().out == ""
-    assert target.read_text().startswith("# pyedit")
+    content = target.read_text()
+    assert content.startswith("# pyedit")
+    assert "## Source" in content
+    assert str(Path(pyedit.skill.__file__).resolve().parent) in content

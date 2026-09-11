@@ -51,5 +51,9 @@ Inspect the diff, then rerun with `--apply` to write.
 
 - Build and test: `nix build --file . pyedit` (runs pytest via
   pytestCheckHook).
-- Local test loop: `nix shell --file /etc/nixpkgs python3.pkgs.pytest
-  --command sh -c 'PYTHONPATH=src pytest tests -q'`.
+- Live-source dev loop: `nix develop --file . editable` installs pyedit
+  as a PEP-660 editable package pointing at `./src` (overlay pattern),
+  then `pytest tests -q` runs against the live tree.
+- For agent navigation, `pyedit skill` ends with a module map and the
+  installed source path: read the module you need before unusual
+  edits; the module docstrings are the contract.
