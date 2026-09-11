@@ -154,6 +154,23 @@ shows one, and each wrong guess fails as a plain `pattern not found`.
   around the target and put the escape-heavy line, counted from
   evidence, inside the replacement.
 
+### Content on extra file descriptors
+
+Or sidestep decoding entirely: keep big or escape-heavy payloads out
+of the script and attach them as extra heredocs. A quoted heredoc
+passes bytes through untouched; the script reads them verbatim:
+
+    pyedit -s - 3<<'EOF3' <<'PY'
+    printf '\033[31m done'
+    EOF3
+    old = open("/dev/fd/3").read()
+    pyedit.edit("a.py", old, old.replace("done", "OK"))
+    PY
+
+With two heredocs, the first redirection gets the first body.
+One bash command carries the program and the content -- and the
+pattern arrives byte-exact, with no escaping level to lose.
+
 """
 
 SKILL_TAIL = """\
