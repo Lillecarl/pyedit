@@ -94,9 +94,54 @@ def glob_re(pattern: str) -> re.Pattern:
     return compiled
 
 
+def _content_size(content: str | bytes) -> int:
+    return len(content) if isinstance(content, bytes) else len(content.encode("utf-8"))
+
+
+class BudgetExceeded(Exception):
+    """Raised when staged content would exceed the materialization budget."""
+
+
 class EditSession:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        max_bytes: int | None = None,
+        max_files: int | None = None,
+    ) -> None:
+        self._max_bytes = max_bytes
+        self._max_files = max_files
         self._staged: dict[Path, str | bytes | None] = {}
+        self._bytes_used = 0
+        self._files_used = 0
+
+    def _stage(self, path: Path, content: str | bytes | None) -> None:
+        """Enforce budgets, track usage, and land content in the dict."""
+        old = self._staged.get(path, _MISSING)
+        old_bytes = 0 if old is _MISSING or old is None else _content_size(old)
+        old_files = 0 if old is _MISSING or old is None else 1
+        new_bytes = 0 if content is None else _content_size(content)
+        new_files = 0 if content is None else 1
+        delta_bytes = new_bytes - old_bytes
+        delta_files = new_files - old_files
+        if self._max_bytes is not None and delta_bytes > 0:
+            if self._bytes_used + delta_bytes > self._max_bytes:
+                raise BudgetExceeded(
+                    f"memory budget exceeded: staging this file would use "
+                    f"{self._bytes_used + delta_bytes} bytes (limit "
+                    f"{self._max_bytes}); narrow the scope or raise "
+                    "--max-materialized-bytes (0 disables the limit)"
+                )
+        if self._max_files is not None and delta_files > 0:
+            if self._files_used + delta_files > self._max_files:
+                raise BudgetExceeded(
+                    f"file budget exceeded: {self._files_used + delta_files} "
+                    f"files staged (limit {self._max_files}); narrow the "
+                    "scope or raise --max-materialized-files (0 disables "
+                    "the limit)"
+                )
+        self._bytes_used += delta_bytes
+        self._files_used += delta_files
+        self._staged[path] = content
 
     # --- input discovery ---
 
@@ -128,7 +173,7 @@ class EditSession:
                 raise FileNotFoundError(f"file is deleted in this session: {p}")
             return content
         content = _slurp(p)
-        self._staged[p] = content
+        self._stage(p, content)
         return content
 
     def write(self, path: str | Path, content: str | bytes) -> None:
@@ -136,7 +181,7 @@ class EditSession:
             raise TypeError(
                 f"write() needs str or bytes, got {type(content).__name__}"
             )
-        self._staged[self.canon(path)] = content
+        self._stage(self.canon(path), content)
 
     def edit(self, path: str | Path, old: str, new: str, count: int = -1) -> int:
         text = self.read(path)
