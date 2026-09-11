@@ -341,7 +341,7 @@ def test_skill_prints_markdown(capsys):
     assert "Nothing touches disk" in out
     assert "--apply" in out
     assert "## Source" in out
-    assert "session.py" in out and "vfs.py" in out
+    assert "github.com/lillecarl/pyedit" in out
     assert str(Path(pyedit.skill.__file__).resolve().parent) in out
 
 
