@@ -261,25 +261,25 @@ class EditSession:
         """LSP-grade rename of the symbol at (line, column). `old_name`
         must match what the position resolves to. Stages every changed
         file."""
-        from pyedit import lsp
+        from pyedit import rope
 
-        return lsp.rename_symbol(self, path, line, column, old_name, new_name)
+        return rope.rename_symbol(self, path, line, column, old_name, new_name)
 
     def rename_module(self, path: str | Path, old_name: str, new_name: str) -> list[Path]:
         """Rename a module file or package folder (`old_name` is the
         module's current name); stages the move and importer updates."""
-        from pyedit import lsp
+        from pyedit import rope
 
-        return lsp.rename_module(self, path, old_name, new_name)
+        return rope.rename_module(self, path, old_name, new_name)
 
     def references(
         self, path: str | Path, line: int, column: int, name: str
     ) -> list["Reference"]:
         """Every occurrence of the symbol at (line, column); `name` must
         match the identifier there. Lines are 1-based."""
-        from pyedit import lsp
+        from pyedit import rope
 
-        return lsp.references(self, path, line, column, name)
+        return rope.references(self, path, line, column, name)
 
     # --- engine ---
 
