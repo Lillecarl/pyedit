@@ -1,4 +1,19 @@
+import io
+
 import pytest
+
+_real_open = io.open
+
+
+@pytest.fixture
+def disk_text():
+    """Read the real file on disk, bypassing any VFS patches."""
+
+    def _read(path) -> str:
+        with _real_open(path) as f:
+            return f.read()
+
+    return _read
 
 
 @pytest.fixture

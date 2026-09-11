@@ -14,7 +14,9 @@ def test_files_lists_sorted_input(session, project):
 
 
 def test_glob_matches_relative_paths(session):
-    assert [p.name for p in session.glob("*.py")] == ["a.py", "b.py"]
+    assert [p.name for p in session.glob("src/*.py")] == ["a.py", "b.py"]
+    assert [p.name for p in session.glob("**/*.py")] == ["a.py", "b.py"]
+    assert session.glob("*.py") == []
     assert session.glob("*.txt") == []
 
 
@@ -27,9 +29,11 @@ def test_read_sees_staged_write(session, project):
     assert session.read("src/a.py") == "rewritten\n"
 
 
-def test_write_accepts_only_str(session, project):
+def test_write_accepts_str_and_bytes_only(session, project):
+    session.write("src/a.py", b"bytes\n")
+    assert session.read("src/a.py") == b"bytes\n"
     with pytest.raises(TypeError):
-        session.write("src/a.py", b"bytes\n")
+        session.write("src/a.py", 42)
 
 
 def test_edit_replaces_and_counts(session, project):

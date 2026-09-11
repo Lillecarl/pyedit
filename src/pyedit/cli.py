@@ -14,8 +14,11 @@ import sys
 import traceback
 from pathlib import Path
 
+import pyedit
+from pyedit import vfs
 from pyedit.diff import unified_diffs
 from pyedit.session import EditSession, display_path
+from pyedit.skill import SKILL
 
 EXIT_OK = 0
 EXIT_SCRIPT_ERROR = 1
@@ -29,6 +32,7 @@ def build_parser() -> argparse.ArgumentParser:
             "changes as a unified diff. Nothing is written to disk unless "
             "--apply is given."
         ),
+        epilog="Run 'pyedit skill' for the agent-facing usage guide.",
     )
     parser.add_argument(
         "paths",
@@ -78,7 +82,9 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="N",
         help="lines of context in the diff (default: 3)",
     )
-    parser.add_argument("--version", action="version", version="pyedit 0.1.0")
+    parser.add_argument(
+        "--version", action="version", version=f"pyedit {pyedit.__version__}"
+    )
     return parser
 
 
@@ -129,31 +135,66 @@ def allowed(
     return True
 
 
-def apply_changes(staged: dict[Path, str | None]) -> None:
+def apply_changes(staged: dict[Path, str | bytes | None]) -> None:
     for path, content in sorted(staged.items()):
         if content is None:
-            path.unlink()
+            path.unlink(missing_ok=True)
+        elif isinstance(content, bytes):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(content)
         else:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content)
 
 
+def run_skill(rest: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="pyedit skill",
+        description="Print the pyedit agent skill as markdown.",
+    )
+    parser.add_argument(
+        "file", nargs="?", help="write the skill to this file instead of stdout"
+    )
+    args = parser.parse_args(rest)
+    if args.file:
+        out = Path(args.file)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(SKILL)
+    else:
+        sys.stdout.write(SKILL)
+    return EXIT_OK
+
+
 def main(argv: list[str] | None = None) -> int:
+    tokens = sys.argv[1:] if argv is None else list(argv)
+    if tokens and tokens[0] == "skill":
+        return run_skill(tokens[1:])
+
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(tokens)
 
     script, filename = read_script(args)
     session = EditSession(expand_inputs(args.paths))
+    pyedit.session = session
 
+    previous_dont_write = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
     try:
-        exec(
-            compile(script, filename, "exec"),
-            {"pyedit": session, "__name__": "__main__"},
-        )
-    except Exception:
-        traceback.print_exc()
-        print("pyedit: edit script failed; nothing was written", file=sys.stderr)
-        return EXIT_SCRIPT_ERROR
+        try:
+            restore = vfs.install(session)
+            try:
+                exec(
+                    compile(script, filename, "exec"),
+                    {"pyedit": session, "__name__": "__main__"},
+                )
+            finally:
+                restore()
+        except Exception:
+            traceback.print_exc()
+            print("pyedit: edit script failed; nothing was written", file=sys.stderr)
+            return EXIT_SCRIPT_ERROR
+    finally:
+        sys.dont_write_bytecode = previous_dont_write
 
     session.prune_unchanged()
     staged = {

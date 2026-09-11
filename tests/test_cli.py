@@ -140,3 +140,69 @@ def test_stdin_script_end_to_end(project):
     assert result.returncode == 0, result.stderr
     assert "+ALPHA = 1" in result.stdout
     assert (project / "src" / "a.py").read_text() == "alpha = 1\n"
+
+
+def test_ordinary_python_script_is_captured(project, capsys):
+    script = project / "edit.py"
+    script.write_text(
+        "from pathlib import Path\n"
+        "import os, shutil\n"
+        "for p in Path('src').glob('*.py'):\n"
+        "    p.write_text(p.read_text().replace('alpha', 'ALPHA'))\n"
+        "shutil.copy('src/a.py', 'src/a.py.bak')\n"
+        "os.remove('src/b.py')\n"
+    )
+    assert run(project, "src", script=script) == 0
+    out = capsys.readouterr().out
+    assert "+ALPHA = 1" in out
+    assert "src/a.py.bak" in out
+    assert "src/b.py" in out
+    assert (project / "src" / "b.py").exists()
+    assert not (project / "src" / "a.py.bak").exists()
+
+
+def test_ordinary_python_apply_writes(project, capsys):
+    script = project / "edit.py"
+    script.write_text(
+        "from pathlib import Path\n"
+        "Path('src/brand_new/f.txt').write_text('fresh\\n')\n"
+    )
+    assert run(project, "src", "--apply", script=script) == 0
+    assert (project / "src" / "brand_new" / "f.txt").read_text() == "fresh\n"
+
+
+def test_binary_apply_writes_bytes(project, capsys):
+    script = project / "edit.py"
+    script.write_text(
+        "from pathlib import Path\n"
+        "Path('src/data.bin').write_bytes(bytes([0, 1, 2]))\n"
+    )
+    assert run(project, "src", "--apply", script=script) == 0
+    assert (project / "src" / "data.bin").read_bytes() == bytes([0, 1, 2])
+    out = capsys.readouterr().out
+    assert "Binary file src/data.bin created (3 bytes)" in out
+
+
+def test_session_module_attr_reachable_from_import(project, capsys):
+    script = project / "edit.py"
+    script.write_text(
+        "import pyedit\n"
+        "pyedit.session.write('src/a.py', 'via module\\n')\n"
+    )
+    assert run(project, "src", script=script) == 0
+    assert "+via module" in capsys.readouterr().out
+
+
+def test_skill_prints_markdown(capsys):
+    assert cli.main(["skill"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("# pyedit")
+    assert "Nothing touches disk" in out
+    assert "--apply" in out
+
+
+def test_skill_writes_file(project, capsys):
+    target = project / "docs" / "skill.md"
+    assert cli.main(["skill", str(target)]) == 0
+    assert capsys.readouterr().out == ""
+    assert target.read_text().startswith("# pyedit")

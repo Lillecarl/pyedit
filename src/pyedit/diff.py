@@ -1,8 +1,9 @@
 """Unified diff rendering for staged changes.
 
 Headers follow git conventions (``a/`` and ``b/`` prefixes, ``/dev/null``
-for added and deleted files), so the output can be piped to ``git apply``
-or ``patch -p1``.
+for added and deleted files), so text output can be piped to ``git
+apply`` or ``patch -p1``. Changes involving bytes render as one-line
+summaries instead of hunks.
 """
 
 from __future__ import annotations
@@ -10,19 +11,31 @@ from __future__ import annotations
 import difflib
 from pathlib import Path
 
-from pyedit.session import display_path
+from pyedit.session import _disk_is_file, display_path
+
+
+def original(path: Path) -> str | bytes | None:
+    if not _disk_is_file(path):
+        return None
+    try:
+        return path.read_text()
+    except UnicodeDecodeError:
+        return path.read_bytes()
 
 
 def unified_diffs(
-    staged: dict[Path, str | None], context: int = 3
+    staged: dict[Path, str | bytes | None], context: int = 3
 ) -> list[tuple[str, str]]:
-    """Return (display path, diff text) for every staged change with a diff."""
+    """Return (display path, diff text) for every staged change."""
     results: list[tuple[str, str]] = []
     for path, new in sorted(staged.items()):
-        old = path.read_text() if path.is_file() else None
+        old = original(path)
         if new is None and old is None:
             continue
         rel = display_path(path)
+        if isinstance(new, bytes) or isinstance(old, bytes):
+            results.append((rel, binary_note(rel, old, new)))
+            continue
         a_lines = old.splitlines(keepends=True) if old is not None else []
         b_lines = new.splitlines(keepends=True) if new is not None else []
         fromfile = f"a/{rel}" if old is not None else "/dev/null"
@@ -35,3 +48,11 @@ def unified_diffs(
         if diff:
             results.append((rel, diff))
     return results
+
+
+def binary_note(rel: str, old: str | bytes | None, new: str | bytes | None) -> str:
+    if new is None:
+        return f"Binary file {rel} deleted ({len(old)} bytes)\n"
+    if old is None:
+        return f"Binary file {rel} created ({len(new)} bytes)\n"
+    return f"Binary file {rel} changed ({len(old)} -> {len(new)} bytes)\n"
