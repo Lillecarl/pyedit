@@ -128,7 +128,9 @@ read-your-writes holds. Anything you can write in Python works.
                                      the replacement count
     pyedit.delete(path)              stage deletion
     pyedit.rename(old, new)          stage move (content kept, source
-                                     deleted)
+                                     deleted); a directory moves as a
+                                     whole tree, refusing symlinks
+                                     inside it
     pyedit.rename_symbol(path,       rename the symbol at (1-based
                 line, column,        line, 0-based column) everywhere
                 old_name, new_name)  import-aware; old_name must match

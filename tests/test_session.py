@@ -149,6 +149,50 @@ def test_rename_missing_raises(session):
         session.rename("src/nope.py", "src/x.py")
 
 
+def test_rename_moves_a_directory_tree(session, project):
+    session.write("pkg/one.py", "a = 1\n")
+    session.write("pkg/sub/two.py", "b = 2\n")
+    session.rename("pkg", "renamed")
+    staged = session.staged()
+    assert staged[project / "pkg" / "one.py"] is None
+    assert staged[project / "renamed" / "one.py"] == "a = 1\n"
+    assert staged[project / "renamed" / "sub" / "two.py"] == "b = 2\n"
+
+
+def test_directory_rename_keeps_staged_deletions_deleted(session, project):
+    session.write("pkg/one.py", "a = 1\n")
+    session.write("pkg/gone.py", "b = 2\n")
+    session.delete("pkg/gone.py")
+    session.rename("pkg", "renamed")
+    staged = session.staged()
+    assert staged[project / "pkg" / "gone.py"] is None
+    assert project / "renamed" / "gone.py" not in staged
+
+
+def test_directory_rename_includes_files_created_this_run(session, project):
+    session.write("docs/extra.md", "x\n")
+    session.rename("docs", "renamed")
+    staged = session.staged()
+    assert staged[project / "renamed" / "note.txt"] == "hello\n"
+    assert staged[project / "renamed" / "extra.md"] == "x\n"
+
+
+def test_directory_rename_onto_existing_path_raises(session):
+    with pytest.raises(FileExistsError):
+        session.rename("docs", "src")
+
+
+def test_directory_rename_into_itself_raises(session):
+    with pytest.raises(ValueError):
+        session.rename("docs", "docs/inner")
+
+
+def test_directory_rename_refuses_symlinks(session, project):
+    (project / "docs" / "link.txt").symlink_to("note.txt")
+    with pytest.raises(ValueError, match="symlink"):
+        session.rename("docs", "renamed")
+
+
 def test_glob_does_not_descend_into_symlinked_dirs(session, project):
     # the target sits outside the root, so the only way in is the
     # link; git never traverses symlinks for discovery either

@@ -27,6 +27,8 @@ _GLOB_CACHE: dict[str, re.Pattern] = {}
 _REAL_STAT = os.stat
 _REAL_MAKEDIRS = os.makedirs
 _REAL_REMOVE = os.remove
+_REAL_SCANDIR = os.scandir
+_REAL_LSTAT = os.lstat
 _REAL_OPEN = os.open
 _REAL_WRITE = os.write
 _REAL_CLOSE = os.close
@@ -52,6 +54,25 @@ def _disk_is_file(path: Path) -> bool:
 def _disk_is_dir(path: Path) -> bool:
     info = _disk_stat(path)
     return info is not None and stat.S_ISDIR(info.st_mode)
+
+
+def _disk_tree(path: Path) -> tuple[list[Path], Path | None]:
+    """Real files under path, and the first symlink found (moved
+    trees refuse links until staging can represent them)."""
+    found: list[Path] = []
+    link: Path | None = None
+    stack = [path]
+    while stack:
+        with _REAL_SCANDIR(stack.pop()) as entries:
+            for entry in entries:
+                if stat.S_IFMT(_REAL_LSTAT(entry.path).st_mode) == stat.S_IFLNK:
+                    link = Path(entry.path)
+                    continue
+                if entry.is_dir(follow_symlinks=False):
+                    stack.append(Path(entry.path))
+                elif entry.is_file(follow_symlinks=False):
+                    found.append(Path(entry.path))
+    return found, link
 
 
 def _slurp(path: Path) -> str | bytes:
@@ -310,11 +331,38 @@ class EditSession:
 
     def rename(self, old: str | Path, new: str | Path) -> None:
         src = self.canon(old)
-        if src not in self._staged and not _disk_is_file(src):
+        dst = self.canon(new)
+        if src in self._staged or _disk_is_file(src):
+            content = self.read(src)
+            self._stage(src, None)
+            self._stage(dst, content)
+            return
+        disk_files, link = _disk_tree(src) if _disk_is_dir(src) else ([], None)
+        moved = {
+            path: content
+            for path, content in self._staged.items()
+            if content is not None and path.is_relative_to(src)
+        }
+        for path in disk_files:
+            if path not in moved:
+                moved[path] = self.read(path)
+        if not moved and link is None:
             raise FileNotFoundError(f"no such file: {src}")
-        content = self.read(src)
-        self._stage(src, None)
-        self._stage(self.canon(new), content)
+        if link is not None:
+            raise ValueError(
+                f"cannot move {src}: {link} is a symlink; "
+                "rename cannot stage links yet -- move the tree without it"
+            )
+        if dst == src or dst.is_relative_to(src):
+            raise ValueError(f"{dst} is inside {src}; move it elsewhere")
+        if _disk_exists(dst) or (
+            self.staged_content(dst) is not _MISSING
+            and self.staged_content(dst) is not None
+        ):
+            raise FileExistsError(f"cannot move onto an existing path: {dst}")
+        for path, content in sorted(moved.items()):
+            self._stage(path, None)
+            self._stage(dst / path.relative_to(src), content)
 
     def apply_patch(self, text: str) -> list["PatchOperation"]:
         """Stage an OpenAI apply_patch (V4A) envelope on this session.
