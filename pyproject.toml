@@ -47,3 +47,12 @@ packages = ["src/pyedit"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+filterwarnings = [
+  # our own code must stay warning-clean; new deprecations fail tests
+  "error",
+  # pygls 2.1.1 calls asyncio.iscoroutinefunction (removed in 3.16);
+  # theirs to fix, ignore until the pin moves
+  "ignore::DeprecationWarning:pygls",
+  # rope deprecates its own internals with the same marker
+  "ignore::DeprecationWarning:rope",
+]
