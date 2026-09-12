@@ -268,7 +268,7 @@ def main(argv: list[str] | None = None) -> int:
             return EXIT_SCRIPT_ERROR
     elif mode == "diff":
         try:
-            session.apply_unified_diff(text)
+            session.apply_diff(text)
         except Exception:
             traceback.print_exc()
             print("pyedit: unified diff failed; nothing was written", file=sys.stderr)

@@ -130,8 +130,11 @@ read-your-writes holds. Anything you can write in Python works.
                 old_name, new_name)  folder and update importers
     pyedit.references(path,          every occurrence of the symbol at
                 line, column, name)  the position
-    pyedit.apply_patch(text)         stage a V4A envelope
-    pyedit.apply_unified_diff(text)  stage a unified diff
+    pyedit.apply_v4a(text)           stage an OpenAI apply_patch (V4A)
+                                     envelope; apply_patch(text) is
+                                     the same thing under its
+                                     ecosystem name
+    pyedit.apply_diff(text)          stage a unified diff
 
 Paths may be absolute or relative to the session root (the invocation
 directory in CLI runs and edit scripts).

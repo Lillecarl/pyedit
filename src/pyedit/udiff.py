@@ -24,7 +24,7 @@ class AppliedFile:
     action: str
 
 
-def apply_unified_diff(session, text: str) -> list[AppliedFile]:
+def apply_diff(session, text: str) -> list[AppliedFile]:
     """Parse a unified diff and stage every file on the session."""
     try:
         patch_set = PatchSet.from_string(text)

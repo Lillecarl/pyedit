@@ -1,7 +1,7 @@
 import pytest
 
 from pyedit.session import EditSession
-from pyedit.udiff import UnifiedDiffError, apply_unified_diff
+from pyedit.udiff import UnifiedDiffError, apply_diff
 
 
 GIT_DIFF = """\
@@ -17,7 +17,7 @@ diff --git a/src/a.py b/src/a.py
 
 def test_update_single_hunk(project):
     session = EditSession()
-    applied = apply_unified_diff(session, GIT_DIFF)
+    applied = apply_diff(session, GIT_DIFF)
     assert applied[0].path == "src/a.py"
     assert applied[0].action == "updated"
     assert session.staged()[project / "src" / "a.py"] == "alpha = 42\nbeta = 2\n"
@@ -26,7 +26,7 @@ def test_update_single_hunk(project):
 def test_update_multiple_hunks(project):
     (project / "src" / "a.py").write_text("l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\n")
     session = EditSession()
-    apply_unified_diff(
+    apply_diff(
         session,
         "--- a/src/a.py\n"
         "+++ b/src/a.py\n"
@@ -45,7 +45,7 @@ def test_update_multiple_hunks(project):
 
 def test_create_and_delete_files(project):
     session = EditSession()
-    apply_unified_diff(
+    apply_diff(
         session,
         "--- /dev/null\n"
         "+++ b/src/new.txt\n"
@@ -66,7 +66,7 @@ def test_create_and_delete_files(project):
 
 def test_no_prefix_paths(project):
     session = EditSession()
-    apply_unified_diff(
+    apply_diff(
         session,
         "--- src/a.py\n+++ src/a.py\n@@ -1 +1 @@\n-alpha = 1\n+alpha = 9\n",
     )
@@ -76,7 +76,7 @@ def test_no_prefix_paths(project):
 def test_no_newline_markers_on_both_sides(project):
     (project / "src" / "a.py").write_text("alpha = 1")
     session = EditSession()
-    apply_unified_diff(
+    apply_diff(
         session,
         "--- a/src/a.py\n+++ b/src/a.py\n@@ -1 +1 @@\n-alpha = 1\n\\ No newline at end of file\n+alpha = 2\n\\ No newline at end of file\n",
     )
@@ -86,7 +86,7 @@ def test_no_newline_markers_on_both_sides(project):
 def test_marker_only_on_old_side_adds_newline(project):
     (project / "src" / "a.py").write_text("alpha = 1")
     session = EditSession()
-    apply_unified_diff(
+    apply_diff(
         session,
         "--- a/src/a.py\n+++ b/src/a.py\n@@ -1 +1 @@\n-alpha = 1\n\\ No newline at end of file\n+alpha = 2\n",
     )
@@ -96,7 +96,7 @@ def test_marker_only_on_old_side_adds_newline(project):
 def test_insertion_after_no_newline_file(project):
     (project / "src" / "a.py").write_text("alpha = 1")
     session = EditSession()
-    apply_unified_diff(
+    apply_diff(
         session,
         "--- a/src/a.py\n+++ b/src/a.py\n@@ -1,0 +2 @@\n+beta = 2\n",
     )
@@ -106,7 +106,7 @@ def test_insertion_after_no_newline_file(project):
 def test_fuzz_tolerates_trailing_whitespace(project):
     (project / "src" / "a.py").write_text("alpha = 1   \nbeta = 2\n")
     session = EditSession()
-    apply_unified_diff(
+    apply_diff(
         session,
         "--- a/src/a.py\n+++ b/src/a.py\n@@ -1,2 +1,2 @@\n-alpha = 1\n+alpha = 42\n beta = 2\n",
     )
@@ -116,7 +116,7 @@ def test_fuzz_tolerates_trailing_whitespace(project):
 def test_context_mismatch_raises(project):
     session = EditSession()
     with pytest.raises(UnifiedDiffError, match="context not found"):
-        apply_unified_diff(
+        apply_diff(
             session,
             "--- a/src/a.py\n+++ b/src/a.py\n@@ -1 +1 @@\n-nothing here\n+x\n",
         )
@@ -126,7 +126,7 @@ def test_binary_source_raises(project):
     (project / "src" / "data.bin").write_bytes(b"\xff\xfe\x00\x01")
     session = EditSession()
     with pytest.raises(UnifiedDiffError, match="binary"):
-        apply_unified_diff(
+        apply_diff(
             session,
             "--- a/src/data.bin\n+++ b/src/data.bin\n@@ -1 +1 @@\n-x\n+y\n",
         )
@@ -134,7 +134,7 @@ def test_binary_source_raises(project):
 
 def test_rename_without_hunks(project):
     session = EditSession()
-    applied = apply_unified_diff(
+    applied = apply_diff(
         session,
         "diff --git a/src/a.py b/src/renamed.py\n"
         "similarity index 100%\n"
@@ -149,7 +149,7 @@ def test_rename_without_hunks(project):
 
 def test_multiple_files_in_one_diff(project):
     session = EditSession()
-    apply_unified_diff(
+    apply_diff(
         session,
         GIT_DIFF
         + "diff --git a/docs/note.txt b/docs/note.txt\n"
@@ -174,5 +174,5 @@ def test_roundtrip_through_pyedit_output(project):
         diff for _, diff in unified_diffs(session.staged())
     )
     roundtrip = EditSession()
-    apply_unified_diff(roundtrip, produced)
+    apply_diff(roundtrip, produced)
     assert roundtrip.staged()[project / "src" / "a.py"] == "ALPHA = 1\nbeta = 2\n"

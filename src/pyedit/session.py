@@ -280,11 +280,14 @@ class EditSession:
 
         return patch.apply_patch(self, text)
 
-    def apply_unified_diff(self, text: str) -> list["AppliedFile"]:
+    # the same operation under its format name
+    apply_v4a = apply_patch
+
+    def apply_diff(self, text: str) -> list["AppliedFile"]:
         """Stage a unified diff (git-style) on this session."""
         from pyedit import udiff
 
-        return udiff.apply_unified_diff(self, text)
+        return udiff.apply_diff(self, text)
 
     def rename_symbol(
         self,

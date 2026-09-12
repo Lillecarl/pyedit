@@ -5,20 +5,16 @@ from collections.abc import Sequence
 from pyedit._version import __version__
 from pyedit.lsp_client import LspSession
 from pyedit.merge import Collision, VFS
-from pyedit.vendor.apply_diff import apply_diff
 
 __all__ = [
     "LspSession",
     "apply_diff",
-    "apply_4va",
+    "apply_v4a",
     "Collision",
     "VFS",
     "__version__",
     "lsp",
 ]
-
-# the V4A string applier, under its ecosystem name and an alias
-apply_4va = apply_diff
 
 
 def lsp(command: Sequence[str]) -> LspSession:
