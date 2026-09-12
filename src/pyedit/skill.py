@@ -117,7 +117,7 @@ read-your-writes holds. Anything you can write in Python works.
 
 ### Session API
 
-    pyedit.glob(pattern)             files matching a filesystem glob;
+    pyedit.glob(pattern)             files and symlinks matching a glob;
                                      returns pathlib.Path objects (use
                                      str(p) for string operations);
                                      recursive with **, .gitignore-

@@ -233,16 +233,21 @@ class EditSession:
     # --- input discovery ---
 
     def glob(self, pattern: str) -> list[Path]:
-        """Files matching a filesystem glob (recursive with **): disk
-        matches minus staged deletions, plus files staged this run.
-        Gitignored paths are excluded unless --no-gitignore."""
+        """Files and symlinks matching a filesystem glob (recursive
+        with **): disk matches minus staged deletions, plus files
+        staged this run. Symlinked directories are listed but never
+        descended into. Gitignored paths are excluded unless
+        --no-gitignore."""
         rx = glob_re(pattern)
         found: set[Path] = set()
         for match in glob_module.glob(os.path.join(self._root, pattern), recursive=True):
             p = self.canon(match)
             if self.staged_content(p) is None:
                 continue
-            if self.is_file(p) and not _traverses_symlink(p, self._root):
+            if (
+                (self.is_file(p) or self.is_link(p))
+                and not _traverses_symlink(p, self._root)
+            ):
                 found.add(p)
         for staged_path, content in self._staged.items():
             if content is None or staged_path in found:
@@ -585,6 +590,12 @@ class EditSession:
 
     def is_dir(self, path: str | Path) -> bool:
         return _disk_is_dir(self.canon(path))
+
+    def is_link(self, path: str | Path) -> bool:
+        content = self.staged_content(path)
+        if content is not _MISSING:
+            return isinstance(content, Symlink)
+        return _disk_is_link(self.canon(path))
 
     def entries(self, directory: str | Path) -> list[Path]:
         """Merged directory listing: disk entries minus staged deletions,

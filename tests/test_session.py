@@ -13,7 +13,25 @@ def session(project):
 
 def test_glob_matches_relative_paths(session):
     assert [p.name for p in session.glob("src/*.py")] == ["a.py", "b.py"]
-    assert [p.name for p in session.glob("**/*.py")] == ["a.py", "b.py"]
+
+
+def test_glob_lists_a_directory_link_but_never_descends(session, project):
+    (project / "srcdir").symlink_to("src")
+    matches = [p.name for p in session.glob("*")]
+    assert "srcdir" in matches
+    assert session.glob("srcdir/*.py") == []
+    assert session.is_link("srcdir")
+    assert not session.is_link("src/a.py")
+
+
+def test_glob_sees_a_staged_link(session, project):
+    session.symlink("src/a.py", "linked.py")
+    assert [p.name for p in session.glob("linked.py")] == ["linked.py"]
+    assert [p.name for p in session.glob("**/*.py")] == [
+        "linked.py",
+        "a.py",
+        "b.py",
+    ]
     assert session.glob("*.txt") == []
 
 
