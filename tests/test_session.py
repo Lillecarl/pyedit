@@ -75,6 +75,14 @@ def test_edit_missing_pattern_raises(session, project):
     assert session.staged()[project / "src" / "a.py"] == "alpha = 1\nbeta = 2\n"
 
 
+def test_edit_empty_pattern_raises(session, project):
+    # "" counts len+1 times and replaces at every position: without the
+    # guard it splices the replacement between every character
+    with pytest.raises(ValueError):
+        session.edit("src/a.py", "", "x")
+    assert session.read("src/a.py") == "alpha = 1\nbeta = 2\n"
+
+
 def test_edit_range_scopes_duplicates(session, project):
     session.write("dup.txt", "x = 1\nx = 1\nx = 1\n")
     n = session.edit("dup.txt", "x = 1", "x = 2", start_line=2, stop_line=2)

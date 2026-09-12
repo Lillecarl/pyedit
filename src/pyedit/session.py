@@ -253,6 +253,10 @@ class EditSession:
         line_start = sum(len(part) + 1 for part in lines[: start - 1])
         range_end = sum(len(part) + 1 for part in lines[: stop - 1]) + len(lines[stop - 1])
         haystack = text[line_start:range_end]
+        if not old:
+            # "" counts len+1 times and replaces at every position,
+            # splicing `new` between every character
+            raise ValueError(f"empty pattern in edit for {self.canon(path)}")
         n = haystack.count(old)
         if n == 0:
             raise ValueError(
