@@ -173,12 +173,14 @@ class LspSession:
         command: list[str],
         timeout: float = 120.0,
         in_memory=None,
+        python_path: str | Path | None = None,
     ) -> None:
         self._session = session
         self._command = list(command)
         self._timeout = timeout
         # test seam: an async stub server wired over in-memory streams
         self._in_memory = in_memory
+        self._python_path = python_path
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._client: _LanguageClient | None = None
@@ -317,6 +319,15 @@ class LspSession:
         if result.capabilities.position_encoding is not None:
             self._encoding = result.capabilities.position_encoding
         client.protocol.notify("initialized", types.InitializedParams())
+        if self._python_path is not None:
+            # servers cannot resolve imports without an interpreter;
+            # pyright silently drops qualified call sites without one
+            client.protocol.notify(
+                "workspace/didChangeConfiguration",
+                types.DidChangeConfigurationParams(
+                    settings={"python": {"pythonPath": str(self._python_path)}}
+                ),
+            )
         await self._sync_documents()
 
     async def _shutdown(self) -> None:

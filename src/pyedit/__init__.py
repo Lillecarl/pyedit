@@ -17,10 +17,12 @@ __all__ = [
 ]
 
 
-def lsp(command: Sequence[str]) -> LspSession:
+def lsp(command: Sequence[str], python_path: str | Path | None = None) -> LspSession:
     """Bind a language server to the active edit session.
 
     The command runs from PATH or absolute, e.g. ["rust-analyzer"].
+    Pass python_path when the server must know the interpreter to
+    resolve imports (pyright drops qualified call sites otherwise).
     Library callers holding their own EditSession construct
     LspSession(session, command) directly.
     """
@@ -31,7 +33,7 @@ def lsp(command: Sequence[str]) -> LspSession:
         raise AttributeError(
             "no edit session is running: construct LspSession(session, command) directly"
         )
-    return LspSession(session, list(command))
+    return LspSession(session, list(command), python_path=python_path)
 
 
 def __getattr__(name: str):

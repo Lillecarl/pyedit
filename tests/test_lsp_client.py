@@ -46,6 +46,7 @@ class Stub:
         self.answers: dict = {}
         self.documents: dict[str, str] = {}
         self.closed: list[str] = []
+        self.settings = None
 
     async def run(self, to_server: asyncio.StreamReader, to_client) -> None:
         server = LanguageServer("stub", "0.1")
@@ -68,11 +69,15 @@ class Stub:
             self.closed.append(params.text_document.uri)
             self.documents.pop(params.text_document.uri, None)
 
+        def did_change_configuration(params):
+            self.settings = params.settings
+
         server.feature(types.TEXT_DOCUMENT_RENAME)(rename)
         server.feature(types.TEXT_DOCUMENT_REFERENCES)(references)
         server.feature(types.TEXT_DOCUMENT_DID_OPEN)(did_open)
         server.feature(types.TEXT_DOCUMENT_DID_CHANGE)(did_change)
         server.feature(types.TEXT_DOCUMENT_DID_CLOSE)(did_close)
+        server.feature(types.WORKSPACE_DID_CHANGE_CONFIGURATION)(did_change_configuration)
 
         server.protocol.set_writer(to_client)
         await run_async(
@@ -95,6 +100,20 @@ def lsp(stub_project):
     stub = Stub()
     with LspSession(stub_project, [], in_memory=stub.run) as handle:
         yield handle, stub_project, stub
+
+
+def test_python_path_reaches_the_server(stub_project):
+    stub = Stub()
+    with LspSession(stub_project, [], in_memory=stub.run, python_path="/opt/py"):
+        pass
+    assert stub.settings == {"python": {"pythonPath": "/opt/py"}}
+
+
+def test_no_python_path_sends_no_configuration(stub_project):
+    stub = Stub()
+    with LspSession(stub_project, [], in_memory=stub.run):
+        pass
+    assert stub.settings is None
 
 
 def test_rename_stages_server_edits_across_files(lsp):
@@ -233,7 +252,9 @@ def test_lsp_binds_the_live_session(stub_project, monkeypatch):
     pyedit.session = stub_project
     try:
         monkeypatch.setattr(
-            pyedit, "LspSession", lambda session, command: opened.append((session, command))
+            pyedit,
+            "LspSession",
+            lambda session, command, **kwargs: opened.append((session, command))
         )
         pyedit.lsp(["rust-analyzer"])
         assert opened == [(stub_project, ["rust-analyzer"])]
