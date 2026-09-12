@@ -1,6 +1,7 @@
 """pyedit: scripted multi-file edits with dry-run diffs for AI agents."""
 
 from collections.abc import Sequence
+from pathlib import Path
 
 from pyedit._version import __version__
 from pyedit.lsp_client import LspSession

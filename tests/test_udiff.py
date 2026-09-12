@@ -103,7 +103,7 @@ def test_insertion_after_no_newline_file(project):
     assert session.staged()[project / "src" / "a.py"] == "alpha = 1\nbeta = 2\n"
 
 
-def test_fuzz_tolerates_trailing_whitespace(project):
+def test_apply_matches_context_despite_trailing_whitespace(project):
     (project / "src" / "a.py").write_text("alpha = 1   \nbeta = 2\n")
     session = EditSession()
     apply_diff(

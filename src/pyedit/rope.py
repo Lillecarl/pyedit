@@ -62,7 +62,7 @@ def rename_symbol(
     """
     _check_identifier("old", old_name)
     _check_identifier("new", new_name)
-    with _roped(session):
+    with _vfs_patched(session):
         content = session.read(path)
         if not isinstance(content, str):
             raise ValueError(f"{session.canon(path)} is binary; rename works on text")
@@ -96,7 +96,7 @@ def rename_module(
     """Rename a module file or package folder and update its importers."""
     _check_identifier("old", old_name)
     _check_identifier("new", new_name)
-    with _roped(session):
+    with _vfs_patched(session):
         project = _project(session)
         try:
             resource = _resource_or_none(project, session, path)
@@ -127,7 +127,7 @@ def references(
     `name` must match the identifier at the position.
     """
     _check_identifier("name", name)
-    with _roped(session):
+    with _vfs_patched(session):
         content = session.read(path)
         if not isinstance(content, str):
             raise ValueError(f"{session.canon(path)} is binary; references work on text")
@@ -167,7 +167,7 @@ def references(
 
 
 @contextmanager
-def _roped(session: EditSession):
+def _vfs_patched(session: EditSession):
     """Run rope with the VFS patches active, even outside a script run,
     so it reads staged content like any other file consumer."""
     restore = vfs.install(session)

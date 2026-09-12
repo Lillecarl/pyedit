@@ -114,7 +114,7 @@ def test_edit_range_outside_fails_loudly(session, project):
     assert session.staged()[project / "out.txt"] == "alpha\nbeta\nalpha\n"
 
 
-def test_edit_range_validation(session, project):
+def test_edit_rejects_invalid_line_ranges(session, project):
     session.write("r.txt", "one\ntwo\n")
     for kwargs in (
         {"start_line": 0},

@@ -17,7 +17,7 @@ from pygls.io_ import run_async
 from pygls.lsp.server import LanguageServer
 
 import pyedit
-from pyedit.lsp_client import LspSession, _column, _units
+from pyedit.lsp_client import LspSession, _column_to_units, _units_to_column
 from pyedit.session import EditSession
 
 _logger = logging.getLogger("pyedit-test-stub")
@@ -223,12 +223,12 @@ def test_close_notification_on_delete(lsp):
 def test_utf16_columns_convert_round_trip():
     # astral chars take two utf-16 units; BMP and ascii take one
     line = "𝐀xα y"
-    assert _units(line, 1, "utf-16") == 2
-    assert _units(line, 1, "utf-8") == 4
-    assert _column(line, 2, "utf-16") == 1
-    assert _column(line, 4, "utf-8") == 1
-    assert _units(line, 3, "utf-32") == 3
-    assert _column(line, 3, "utf-32") == 3
+    assert _column_to_units(line, 1, "utf-16") == 2
+    assert _column_to_units(line, 1, "utf-8") == 4
+    assert _units_to_column(line, 2, "utf-16") == 1
+    assert _units_to_column(line, 4, "utf-8") == 1
+    assert _column_to_units(line, 3, "utf-32") == 3
+    assert _units_to_column(line, 3, "utf-32") == 3
 
 
 def test_overlapping_server_edits_are_rejected(lsp):

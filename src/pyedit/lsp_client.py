@@ -74,7 +74,7 @@ def _path(uri: str) -> Path:
     return Path(url2pathname(urlparse(uri).path))
 
 
-def _units(line_text: str, column: int, encoding: str) -> int:
+def _column_to_units(line_text: str, column: int, encoding: str) -> int:
     """A character column as the encoding's position units."""
     if encoding == "utf-32":
         return column
@@ -84,7 +84,7 @@ def _units(line_text: str, column: int, encoding: str) -> int:
     return len(prefix.encode("utf-8"))
 
 
-def _column(line_text: str, units: int, encoding: str) -> int:
+def _units_to_column(line_text: str, units: int, encoding: str) -> int:
     """Position units back into a character column, floored into the
     character that owns the unit."""
     if encoding == "utf-32":
@@ -127,7 +127,9 @@ def _offset_at(content: str, position: types.Position, encoding: str) -> int:
             f"the language server sent a position past the end of the file: {position}"
         )
     line_text = lines[position.line]
-    column = min(_column(line_text, position.character, encoding), len(line_text))
+    column = min(
+        _units_to_column(line_text, position.character, encoding), len(line_text)
+    )
     return sum(len(part) + 1 for part in lines[: position.line]) + column
 
 
@@ -468,7 +470,8 @@ class LspSession:
     def _position(self, content: str, line: int, column: int) -> types.Position:
         line_text = content.split("\n")[line - 1]
         return types.Position(
-            line=line - 1, character=_units(line_text, column, self._encoding)
+            line=line - 1,
+            character=_column_to_units(line_text, column, self._encoding),
         )
 
     def _stage_workspace_edit(self, edit: types.WorkspaceEdit) -> list[Path]:
@@ -514,7 +517,9 @@ class LspSession:
                 Reference(
                     path=ref_path,
                     line=line0 + 1,
-                    column=_column(lines[line0], location.range.start.character, self._encoding),
+                    column=_units_to_column(
+                        lines[line0], location.range.start.character, self._encoding
+                    ),
                 )
             )
         return refs
