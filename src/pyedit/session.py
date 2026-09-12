@@ -68,6 +68,11 @@ def _slurp(path: Path) -> str | bytes:
     finally:
         os.close(fd)
     data = b"".join(chunks)
+    # git's rule: a NUL byte means bytes. Without the sniff a
+    # null-bearing file decodes as text on disk but stages as
+    # bytes -- the same content, two different types
+    if b"\x00" in data:
+        return data
     try:
         return data.decode("utf-8")
     except UnicodeDecodeError:

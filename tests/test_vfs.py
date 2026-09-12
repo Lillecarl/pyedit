@@ -96,6 +96,16 @@ def test_open_wplus_truncates(patched, project):
     assert patched.staged()[project / "src" / "a.py"] == "only this\n"
 
 
+def test_text_handle_on_binary_refused_at_open(patched, project):
+    # the real FS defers the decode failure to read time; the
+    # overlay refuses at open, where the caller can still act
+    (project / "blob.bin").write_bytes(b"\x00\x81\xfe")
+    with pytest.raises(ValueError, match="binary"):
+        open(project / "blob.bin", "a")
+    with pytest.raises(ValueError, match="binary"):
+        open(project / "blob.bin", "r")
+
+
 def test_open_binary_roundtrip(patched, project):
     with open("src/a.bin", "wb") as f:
         f.write(b"\x00\x01")

@@ -13,7 +13,10 @@ edits a file's first token, scopes the last) so merge outcomes stay
 predictable without reimplementing the merge.
 """
 
+import binascii
+import builtins
 import os
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -28,7 +31,9 @@ from pyedit.merge import Collision, VFS
 from pyedit.session import EditSession
 
 FILES = ["a.txt", "b.txt", "dir/c.txt"]
+BIN = "img.bin"
 SEED = {"a.txt": "A0\nA1\n", "b.txt": "B0\nB1\n", "dir/c.txt": "C0\nC1\nC2\n"}
+BIN_SEED = {BIN: b"\x00\x01\x02\n"}
 FIRST = {"a.txt": "A0", "b.txt": "B0", "dir/c.txt": "C0"}
 LAST = {"a.txt": "A1", "b.txt": "B1", "dir/c.txt": "C2"}
 MOVE_TARGETS = ["moved.txt", "other.txt"]
@@ -57,19 +62,53 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
                 path = tree / rel
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(text)
+            for rel, blob in BIN_SEED.items():
+                (tree / rel).write_bytes(blob)
+        # capture the raw functions BEFORE the patch: the oracle side
+        # must do real filesystem work while the overlay is installed
+        self._raw = {
+            "open": builtins.open,
+            "rename": os.rename,
+            "unlink": os.unlink,
+            "rmtree": shutil.rmtree,
+            "walk": os.walk,
+            "isfile": os.path.isfile,
+            "mkdir": os.mkdir,
+            "isdir": os.path.isdir,
+        }
         self.session = EditSession(root=self.a_root)
+        self.restore = vfs_module.install(self.session)
+
+    def raw_makedirs(self, path):
+        # os.makedirs re-looks-up os.mkdir at call time, which the
+        # patch has replaced: build the tree from raw mkdir
+        if self._raw["isdir"](path):
+            return
+        self.raw_makedirs(path.parent)
+        try:
+            self._raw["mkdir"](path)
+        except FileExistsError:
+            pass
 
     def oracle_read(self, rel):
+        # bytes everywhere; OSError of any kind reads as absent, which
+        # covers missing files, deleted-in-session paths and directories
         try:
-            return (self.b_root / rel).read_text()
-        except (FileNotFoundError, IsADirectoryError):
+            with self._raw["open"](self.b_root / rel, "rb") as fh:
+                return fh.read()
+        except OSError:
             return None
 
     def every_rel(self):
-        rels = set(FILES) | set(MOVE_TARGETS)
+        rels = set(FILES) | set(MOVE_TARGETS) | {BIN}
         for path in self.session.staged():
-            rels.add(str(path.relative_to(self.a_root)))
-        for base, _dirs, names in os.walk(self.b_root):
+            try:
+                rels.add(str(path.relative_to(self.a_root)))
+            except ValueError:
+                # the patch stages everything the process writes,
+                # the test framework's bookkeeping included
+                continue
+        for base, _dirs, names in self._raw["walk"](self.b_root):
             for name in names:
                 rels.add(str(Path(base).relative_to(self.b_root) / name))
         return sorted(rels)
@@ -80,16 +119,23 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
         # raise or agree per path
         for rel in self.every_rel():
             oracle = self.oracle_read(rel)
+            try:
+                content = self.session.read(rel)
+            except OSError:
+                content = None
             if oracle is None:
-                with pytest.raises(FileNotFoundError):
-                    self.session.read(rel)
+                assert content is None
+            elif isinstance(content, str):
+                assert content.encode() == oracle
             else:
-                assert self.session.read(rel) == oracle
+                assert content == oracle
 
     @rule(path=st.sampled_from(FILES), text=texts)
     def write(self, path, text):
         self.session.write(path, text)
-        (self.b_root / path).write_text(text)
+        self.raw_makedirs((self.b_root / path).parent)
+        with self._raw["open"](self.b_root / path, "w") as fh:
+            fh.write(text)
 
     @rule(path=st.sampled_from(FILES), frag=parent_fragments, repl=replacements)
     def edit(self, path, frag, repl):
@@ -98,9 +144,11 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
             with pytest.raises(FileNotFoundError):
                 self.session.edit(path, frag, repl)
             return
-        if frag in oracle:
+        text = oracle.decode()
+        if frag in text:
             self.session.edit(path, frag, repl)
-            (self.b_root / path).write_text(oracle.replace(frag, repl))
+            with self._raw["open"](self.b_root / path, "w") as fh:
+                fh.write(text.replace(frag, repl))
         else:
             with pytest.raises(ValueError):
                 self.session.edit(path, frag, repl)
@@ -125,7 +173,7 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
                 self.session.delete(path)
         else:
             self.session.delete(path)
-            (self.b_root / path).unlink()
+            self._raw["unlink"](self.b_root / path)
 
     @rule(data=st.data())
     def rename(self, data):
@@ -140,7 +188,8 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
             return
         # POSIX: renaming onto an existing file overwrites it
         self.session.rename(src, dst)
-        os.rename(self.b_root / src, self.b_root / dst)
+        self.raw_makedirs((self.b_root / dst).parent)
+        self._raw["rename"](self.b_root / src, self.b_root / dst)
 
     @rule()
     def apply(self):
@@ -149,21 +198,23 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
         b_files = self.tree(self.b_root)
         assert a_files == b_files
         for rel, content in b_files.items():
-            assert (self.a_root / rel).read_text() == content
+            with self._raw["open"](self.a_root / rel, "rb") as fh:
+                assert fh.read() == content
         self.view_equals_oracle()
+
+    def tree(self, root):
+        out = {}
+        for base, _dirs, names in self._raw["walk"](root):
+            for name in names:
+                path = Path(base) / name
+                with self._raw["open"](path, "rb") as fh:
+                    out[str(path.relative_to(root))] = fh.read()
+        return out
 
     @rule()
     def prune(self):
         self.session.prune_unchanged()
         self.view_equals_oracle()
-
-    def tree(self, root):
-        out = {}
-        for base, _dirs, names in os.walk(root):
-            for name in names:
-                path = Path(base) / name
-                out[str(path.relative_to(root))] = path.read_text()
-        return out
 
     @invariant()
     def view_matches_oracle(self):
@@ -176,14 +227,61 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
         pending = False
         for path, content in self.session.staged().items():
             base = None
-            if path.is_file():
-                base = path.read_text()
+            try:
+                with self._raw["open"](path, "rb") as fh:
+                    base = fh.read()
+            except OSError:
+                base = None
+            if isinstance(content, str):
+                content = content.encode()
             if content != base:
                 pending = True
         assert bool(self.session.diff().strip()) == pending
 
+    @rule()
+    def rmtree_the_dir(self):
+        # rmtree stages every file under the tree as deleted;
+        # directories are untracked on the session side, so the
+        # oracle tolerates the tree already being gone
+        shutil.rmtree(self.a_root / "dir")
+        if (self.b_root / "dir").is_dir():
+            self._raw["rmtree"](self.b_root / "dir")
+
+    @rule(data=st.data())
+    def bounded_edit(self, data):
+        path = data.draw(st.sampled_from(FILES))
+        start = data.draw(st.integers(min_value=1, max_value=3))
+        stop = data.draw(st.integers(min_value=1, max_value=3))
+        old = data.draw(parent_fragments)
+        repl = "R"
+        oracle = self.oracle_read(path)
+        if oracle is None:
+            with pytest.raises(OSError):
+                self.session.edit(
+                    path, old, repl, start_line=start, stop_line=stop
+                )
+            return
+        # mirror the documented contract: replace every occurrence
+        # inside the 1-based inclusive line span, leave matches that
+        # cross the boundary alone
+        lines = oracle.decode().split("\n")
+        segment = "\n".join(lines[start - 1 : stop])
+        if old not in segment:
+            with pytest.raises(ValueError):
+                self.session.edit(
+                    path, old, repl, start_line=start, stop_line=stop
+                )
+            return
+        self.session.edit(path, old, repl, start_line=start, stop_line=stop)
+        new_segment = segment.replace(old, repl)
+        new_lines = lines[: start - 1] + new_segment.split("\n") + lines[stop:]
+        with self._raw["open"](self.b_root / path, "w") as fh:
+            fh.write("\n".join(new_lines))
+
     def teardown(self):
-        pass
+        # the patch is process-global: leaking it would stage
+        # the next machine's seed writes
+        self.restore()
 
 
 SessionAgainstRealDisk.TestCase.settings = settings(

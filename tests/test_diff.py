@@ -35,6 +35,21 @@ def test_new_file_diff_is_dev_null(project):
     assert "+fresh = 1\n" in diff
 
 
+def test_identical_binary_stage_renders_nothing(project):
+    # a no-op binary restage is not a change; the NUL sniff keeps
+    # the disk side bytes so the comparison can see they are equal
+    blob = b"\x00\x01\x02\n"
+    (project / "data.bin").write_bytes(blob)
+    session = EditSession()
+    assert isinstance(session.read("data.bin"), bytes)
+    session.write("data.bin", blob)
+    assert session.diff() == ""
+    session.write("data.bin", b"")
+    assert "changed (4 -> 0 bytes)" in session.diff()
+    session.write("data.bin", b"\xff")
+    assert "changed (4 -> 1 bytes)" in session.diff()
+
+
 def test_deleted_diff_to_dev_null(project):
     (project / "src" / "a.py").write_text("alpha = 1\n")
 

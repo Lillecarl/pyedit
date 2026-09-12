@@ -44,6 +44,9 @@ def unified_diffs(
             continue
         rel = display_path(path)
         if isinstance(new, bytes) or isinstance(old, bytes):
+            if new == old:
+                # an identical binary stage is not a change
+                continue
             results.append((rel, binary_note(rel, old, new)))
             continue
         fromfile = f"a/{rel}" if old is not None else "/dev/null"

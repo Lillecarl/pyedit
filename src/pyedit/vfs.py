@@ -150,7 +150,17 @@ def install(session: EditSession) -> Callable[[], None]:
 
     def coerce(content, binary: bool):
         if isinstance(content, bytes):
-            return content if binary else content.decode("utf-8")
+            if binary:
+                return content
+            try:
+                return content.decode("utf-8")
+            except UnicodeDecodeError:
+                # the real FS defers the failure to read time;
+                # refusing at open says what is wrong while the
+                # caller can still act on it
+                raise ValueError(
+                    "this file is binary; a text handle needs a binary mode"
+                ) from None
         return content.encode("utf-8") if binary else content
 
     def seed(path: Path, binary: bool, truncate: bool):
@@ -305,13 +315,24 @@ def install(session: EditSession) -> Callable[[], None]:
         _move(resolve(self), resolve(target))
         return Path(target)
 
-    def _os_remove(path, /):
+    def _os_remove(path, /, *args, **kwargs):
+        if kwargs:
+            # fd-relative and flag-carrying calls cannot be
+            # staged: shutil.rmtree passes dir_fd; the real
+            # filesystem takes them
+            return os_remove(path, *args, **kwargs)
         current().delete(resolve(path))
 
-    def _os_mkdir(path, mode=0o777):
+    def _os_mkdir(path, mode=0o777, **kwargs):
+        if kwargs:
+            return os_mkdir(path, mode, **kwargs)
         return _mkdir(Path(path))
 
-    def _os_makedirs(name, mode=0o777, exist_ok=False):
+    def _os_makedirs(name, mode=0o777, exist_ok=False, **kwargs):
+        if kwargs:
+            return os_makedirs(
+                name, mode=mode, exist_ok=exist_ok, **kwargs
+            )
         p = resolve(name)
         if p.is_dir():
             if exist_ok:
@@ -408,6 +429,9 @@ def install(session: EditSession) -> Callable[[], None]:
         return 0.0
 
     def _os_rename(src, dst, /, *args, **kwargs):
+        if kwargs:
+            # src_dir_fd/dst_dir_fd calls go to the real fs
+            return os_rename(src, dst, *args, **kwargs)
         _move(resolve(src), resolve(dst))
 
     def _shutil_copyfile(src, dst, *, follow_symlinks=True):
