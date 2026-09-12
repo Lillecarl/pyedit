@@ -13,10 +13,17 @@ import builtins
 import io
 import os
 import shutil
+import stat
 from pathlib import Path
 from typing import Callable
 
-from pyedit.session import EditSession, _MISSING, _content_size, glob_re
+from pyedit.session import (
+    EditSession,
+    Symlink,
+    _MISSING,
+    _content_size,
+    glob_re,
+)
 
 
 class _StagedTextIO(io.StringIO):
@@ -124,6 +131,8 @@ def install(session: EditSession) -> Callable[[], None]:
     os_path_getctime = os.path.getctime
     os_stat = os.stat
     os_lstat = os.lstat
+    os_readlink = os.readlink
+    os_path_islink = os.path.islink
     sh_copyfile = shutil.copyfile
     sh_copy = shutil.copy
     sh_copy2 = shutil.copy2
@@ -149,6 +158,10 @@ def install(session: EditSession) -> Callable[[], None]:
     _ = session  # the bound root, used only through current()
 
     def coerce(content, binary: bool):
+        if isinstance(content, Symlink):
+            raise ValueError(
+                "this path is a staged symlink; a handle cannot follow it"
+            )
         if isinstance(content, bytes):
             if binary:
                 return content
@@ -369,13 +382,21 @@ def install(session: EditSession) -> Callable[[], None]:
     def _os_path_isdir(path):
         return current().is_dir(path)
 
+
+    def _os_path_islink(path):
+        content = _staged_state(path)
+        if content is _MISSING:
+            return os_path_islink(path)
+        return isinstance(content, Symlink)
+
     def _staged_state(path):
         """MISSING (never staged), None (staged deletion) or content."""
         return current().staged_content(current().canon(path))
 
     def _fake_stat(content):
+        mode = stat.S_IFLNK | 0o777 if isinstance(content, Symlink) else 0o100644
         return os.stat_result(
-            (0o100644, 0, 0, 1, 0, 0, _content_size(content), 0, 0, 0)
+            (mode, 0, 0, 1, 0, 0, _content_size(content), 0, 0, 0)
         )
 
     def _os_stat(path, *args, **kwargs):
@@ -385,6 +406,15 @@ def install(session: EditSession) -> Callable[[], None]:
         if content is None:
             raise FileNotFoundError(str(resolve(path)))
         return _fake_stat(content)
+
+    def _os_readlink(path, *args, **kwargs):
+        content = _staged_state(path)
+        if content is _MISSING:
+            return os_readlink(path, *args, **kwargs)
+        if content is None:
+            raise FileNotFoundError(str(resolve(path)))
+        return str(content)
+
 
     def _os_lstat(path, *args, **kwargs):
         content = _staged_state(path)
@@ -516,9 +546,11 @@ def install(session: EditSession) -> Callable[[], None]:
         (os, "walk", _os_walk),
         (os, "stat", _os_stat),
         (os, "lstat", _os_lstat),
+        (os, "readlink", _os_readlink),
         (os.path, "exists", _os_path_exists),
         (os.path, "isfile", _os_path_isfile),
         (os.path, "isdir", _os_path_isdir),
+        (os.path, "islink", _os_path_islink),
         (os.path, "getmtime", _os_path_getmtime),
         (os.path, "getsize", _os_path_getsize),
         (os.path, "getatime", _os_path_getatime),

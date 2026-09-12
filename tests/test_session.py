@@ -1,5 +1,8 @@
+import os
+
 import pytest
 
+from pyedit import Symlink
 from pyedit.session import EditSession
 
 
@@ -187,10 +190,45 @@ def test_directory_rename_into_itself_raises(session):
         session.rename("docs", "docs/inner")
 
 
-def test_directory_rename_refuses_symlinks(session, project):
-    (project / "docs" / "link.txt").symlink_to("note.txt")
+def test_rename_preserves_a_symlink(session, project):
+    (project / "target.txt").write_text("t\n")
+    (project / "link.txt").symlink_to("target.txt")
+    session.rename("link.txt", "moved.txt")
+    staged = session.staged()
+    assert staged[project / "link.txt"] is None
+    assert staged[project / "moved.txt"] == Symlink("target.txt")
+    session.apply()
+    assert (project / "moved.txt").is_symlink()
+    assert os.readlink(project / "moved.txt") == "target.txt"
+    assert not (project / "link.txt").exists()
+
+
+def test_symlink_creates_a_link(session, project):
+    session.symlink("AGENTS.md", "CLAUDE.md")
+    assert session.staged()[project / "CLAUDE.md"] == Symlink("AGENTS.md")
+    session.apply()
+    assert (project / "CLAUDE.md").is_symlink()
+    assert os.readlink(project / "CLAUDE.md") == "AGENTS.md"
+
+
+def test_symlink_onto_existing_path_raises(session):
+    session.write("docs/anchor.md", "x\n")
+    with pytest.raises(FileExistsError):
+        session.symlink("anchor.md", "docs/anchor.md")
+
+
+def test_read_of_a_staged_symlink_refuses(session):
+    session.symlink("AGENTS.md", "CLAUDE.md")
     with pytest.raises(ValueError, match="symlink"):
-        session.rename("docs", "renamed")
+        session.read("CLAUDE.md")
+
+
+def test_directory_rename_moves_symlinks(session, project):
+    (project / "docs" / "link.txt").symlink_to("note.txt")
+    session.rename("docs", "renamed")
+    assert session.staged()[project / "renamed" / "link.txt"] == Symlink("note.txt")
+    session.apply()
+    assert (project / "renamed" / "link.txt").is_symlink()
 
 
 def test_glob_does_not_descend_into_symlinked_dirs(session, project):

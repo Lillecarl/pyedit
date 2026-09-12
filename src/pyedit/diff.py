@@ -12,7 +12,14 @@ from __future__ import annotations
 from pathlib import Path
 
 from pyedit.render import DiffRenderer
-from pyedit.session import _disk_is_file, _slurp, display_path
+from pyedit.session import (
+    Symlink,
+    _disk_is_file,
+    _disk_is_link,
+    _disk_readlink,
+    _slurp,
+    display_path,
+)
 
 # one process-wide renderer; it imports pygit2 lazily, so module import
 # stays cheap and cert-less environments fail at render time only
@@ -20,6 +27,8 @@ _RENDERER = DiffRenderer()
 
 
 def original(path: Path) -> str | bytes | None:
+    if _disk_is_link(path):
+        return Symlink(_disk_readlink(path))
     if not _disk_is_file(path):
         return None
     return _slurp(path)
@@ -43,6 +52,10 @@ def unified_diffs(
         if new is None and old is None:
             continue
         rel = display_path(path)
+        if isinstance(new, Symlink) or isinstance(old, Symlink):
+            if new != old:
+                results.append((rel, symlink_note(rel, old, new)))
+            continue
         if isinstance(new, bytes) or isinstance(old, bytes):
             if new == old:
                 # an identical binary stage is not a change
@@ -62,6 +75,18 @@ def unified_diffs(
             continue
         results.append((rel, f"--- {fromfile}\n+++ {tofile}\n" + hunks))
     return results
+
+
+def symlink_note(rel: str, old, new) -> str:
+    if isinstance(new, Symlink) and old is None:
+        return f"Symlink {rel} -> {new} created\n"
+    if isinstance(old, Symlink) and new is None:
+        return f"Symlink {rel} -> {old} deleted\n"
+    if isinstance(new, Symlink) and isinstance(old, Symlink):
+        return f"Symlink {rel} retargeted ({old} -> {new})\n"
+    if isinstance(new, Symlink):
+        return f"{rel} replaced by symlink -> {new}\n"
+    return f"Symlink {rel} -> {old} replaced by a regular file\n"
 
 
 def binary_note(rel: str, old: str | bytes | None, new: str | bytes | None) -> str:

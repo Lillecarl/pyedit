@@ -129,8 +129,10 @@ read-your-writes holds. Anything you can write in Python works.
     pyedit.delete(path)              stage deletion
     pyedit.rename(old, new)          stage move (content kept, source
                                      deleted); a directory moves as a
-                                     whole tree, refusing symlinks
-                                     inside it
+                                     whole tree, symlinks move as
+                                     links
+    pyedit.symlink(target, path)     stage a symlink; the target is
+                                     stored as the link's target
     pyedit.rename_symbol(path,       rename the symbol at (1-based
                 line, column,        line, 0-based column) everywhere
                 old_name, new_name)  import-aware; old_name must match
@@ -311,6 +313,12 @@ Create, move and prune with stdlib tools:
   `count=1`, a line range, or a longer unique pattern.
 - Subprocesses and raw file descriptors (`os.open`, `os.fdopen`)
   bypass the overlay.
+- Symlinks are first-class: `rename` moves the link itself and
+  `symlink()` creates one. Link changes render as one-line notes
+  in the diff (like binaries), so `git apply` cannot recreate
+  them and a stored-id undo cannot replay them; pyedit's own
+  `--apply` handles both exactly. Reads and open() cannot follow
+  a staged link -- they resolve after apply.
 - Directories are not tracked: parents of new files are created on
   `--apply`; empty directories never appear in diffs.
 - Binary files stage as bytes; their diffs are one-line summaries.

@@ -9,6 +9,15 @@ def staged(project, actions):
     return session.staged()
 
 
+def test_symlink_changes_render_as_notes(project):
+    session = EditSession()
+    session.symlink("AGENTS.md", "CLAUDE.md")
+    rel, text = unified_diffs(session.staged())[0]
+    assert rel == "CLAUDE.md"
+    assert "Symlink" in text
+    assert "AGENTS.md" in text
+
+
 def test_modified_diff_headers(project):
     def edit(session):
         session.write(project / "src" / "a.py", "alpha = 2\nbeta = 2\n")

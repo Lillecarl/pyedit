@@ -6,12 +6,14 @@ from pathlib import Path
 from pyedit._version import __version__
 from pyedit.lsp_client import LspSession
 from pyedit.merge import Collision, VFS
+from pyedit.session import Symlink
 
 __all__ = [
     "LspSession",
     "apply_diff",
     "apply_v4a",
     "Collision",
+    "Symlink",
     "VFS",
     "__version__",
     "lsp",

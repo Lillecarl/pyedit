@@ -2,7 +2,7 @@
 
 The session is injected into edit scripts as the global name ``pyedit``.
 State is a plain dict keyed by resolved path: str or bytes content,
-None for deletions. First reads proxy through to the filesystem and
+Symlink for symlinks (value = target path), None for deletions. First reads proxy through to the filesystem and
 materialize the full content in the dict; writes land in memory and
 reach disk only when the caller applies. Unchanged entries are pruned
 before diffing, so plain reads never show up in the diff.
@@ -20,6 +20,11 @@ from pyedit.gitignore import IgnoreFilter
 
 _MISSING = object()
 
+
+class Symlink(str):
+    """A symlink entry in the staged map; the value is the target
+    path, stored and diffed like git stores a link's blob."""
+
 _GLOB_CACHE: dict[str, re.Pattern] = {}
 
 # captured at import time, before the VFS layer patches os.stat: the
@@ -29,6 +34,8 @@ _REAL_MAKEDIRS = os.makedirs
 _REAL_REMOVE = os.remove
 _REAL_SCANDIR = os.scandir
 _REAL_LSTAT = os.lstat
+_REAL_SYMLINK = os.symlink
+_REAL_READLINK = os.readlink
 _REAL_OPEN = os.open
 _REAL_WRITE = os.write
 _REAL_CLOSE = os.close
@@ -56,23 +63,32 @@ def _disk_is_dir(path: Path) -> bool:
     return info is not None and stat.S_ISDIR(info.st_mode)
 
 
-def _disk_tree(path: Path) -> tuple[list[Path], Path | None]:
-    """Real files under path, and the first symlink found (moved
-    trees refuse links until staging can represent them)."""
+def _disk_is_link(path: Path) -> bool:
+    try:
+        return stat.S_IFMT(_REAL_LSTAT(path).st_mode) == stat.S_IFLNK
+    except OSError:
+        return False
+
+
+def _disk_readlink(path: Path) -> str:
+    return _REAL_READLINK(path)
+
+
+def _disk_tree(path: Path) -> tuple[list[Path], list[Path]]:
+    """Real files and symlinks under path."""
     found: list[Path] = []
-    link: Path | None = None
+    links: list[Path] = []
     stack = [path]
     while stack:
         with _REAL_SCANDIR(stack.pop()) as entries:
             for entry in entries:
                 if stat.S_IFMT(_REAL_LSTAT(entry.path).st_mode) == stat.S_IFLNK:
-                    link = Path(entry.path)
-                    continue
-                if entry.is_dir(follow_symlinks=False):
+                    links.append(Path(entry.path))
+                elif entry.is_dir(follow_symlinks=False):
                     stack.append(Path(entry.path))
                 elif entry.is_file(follow_symlinks=False):
                     found.append(Path(entry.path))
-    return found, link
+    return found, links
 
 
 def _slurp(path: Path) -> str | bytes:
@@ -260,6 +276,11 @@ class EditSession:
         if content is not _MISSING:
             if content is None:
                 raise FileNotFoundError(f"file is deleted in this session: {p}")
+            if isinstance(content, Symlink):
+                raise ValueError(
+                    f"{p} is a staged symlink to {str(content)!r}; "
+                    "reads resolve after apply"
+                )
             return content
         content = _slurp(p)
         if p.is_relative_to(self._root):
@@ -274,6 +295,15 @@ class EditSession:
                 f"write() needs str or bytes, got {type(content).__name__}"
             )
         self._stage(self.canon(path), content)
+
+    def symlink(self, target: str, path: str | Path) -> None:
+        if not isinstance(target, str) or not target:
+            raise ValueError("symlink target must be a non-empty string")
+        p = self.canon(path)
+        existing = self.staged_content(p)
+        if _disk_exists(p) or (existing is not _MISSING and existing is not None):
+            raise FileExistsError(f"cannot link onto an existing path: {p}")
+        self._stage(p, Symlink(target))
 
     def edit(
         self,
@@ -332,12 +362,26 @@ class EditSession:
     def rename(self, old: str | Path, new: str | Path) -> None:
         src = self.canon(old)
         dst = self.canon(new)
+        staged_src = self.staged_content(src)
+        if isinstance(staged_src, Symlink) or (
+            staged_src is _MISSING and _disk_is_link(src)
+        ):
+            target = (
+                str(staged_src)
+                if staged_src is not _MISSING
+                else _disk_readlink(src)
+            )
+            self._stage(src, None)
+            self._stage(dst, Symlink(target))
+            return
         if src in self._staged or _disk_is_file(src):
             content = self.read(src)
             self._stage(src, None)
             self._stage(dst, content)
             return
-        disk_files, link = _disk_tree(src) if _disk_is_dir(src) else ([], None)
+        disk_files, disk_links = (
+            _disk_tree(src) if _disk_is_dir(src) else ([], [])
+        )
         moved = {
             path: content
             for path, content in self._staged.items()
@@ -346,13 +390,12 @@ class EditSession:
         for path in disk_files:
             if path not in moved:
                 moved[path] = self.read(path)
-        if not moved and link is None:
+        moved_links = {path: _disk_readlink(path) for path in disk_links}
+        for path, content in self._staged.items():
+            if isinstance(content, Symlink) and path.is_relative_to(src):
+                moved_links[path] = str(content)
+        if not moved and not moved_links:
             raise FileNotFoundError(f"no such file: {src}")
-        if link is not None:
-            raise ValueError(
-                f"cannot move {src}: {link} is a symlink; "
-                "rename cannot stage links yet -- move the tree without it"
-            )
         if dst == src or dst.is_relative_to(src):
             raise ValueError(f"{dst} is inside {src}; move it elsewhere")
         if _disk_exists(dst) or (
@@ -363,6 +406,9 @@ class EditSession:
         for path, content in sorted(moved.items()):
             self._stage(path, None)
             self._stage(dst / path.relative_to(src), content)
+        for path, target in sorted(moved_links.items()):
+            self._stage(path, None)
+            self._stage(dst / path.relative_to(src), Symlink(target))
 
     def apply_patch(self, text: str) -> list["PatchOperation"]:
         """Stage an OpenAI apply_patch (V4A) envelope on this session.
@@ -467,6 +513,9 @@ class EditSession:
                         pass  # already gone; the staged deletion stands
                     continue
                 _REAL_MAKEDIRS(path.parent, exist_ok=True)
+                if isinstance(content, Symlink):
+                    _REAL_SYMLINK(str(content), path)
+                    continue
                 if isinstance(content, bytes):
                     payload = content
                 else:
@@ -489,6 +538,10 @@ class EditSession:
             if content is None:
                 # a deletion of an already-absent file is not pending
                 if not _disk_is_file(path):
+                    del self._staged[path]
+                continue
+            if isinstance(content, Symlink):
+                if _disk_is_link(path) and _disk_readlink(path) == str(content):
                     del self._staged[path]
                 continue
             if not _disk_is_file(path):

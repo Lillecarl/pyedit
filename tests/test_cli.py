@@ -447,6 +447,13 @@ def test_patch_apply_writes(project, capsys):
     assert not (project / "src" / "b.py").exists()
 
 
+def test_symlink_target_is_not_syntax_checked(project):
+    script = project / "edit.py"
+    script.write_text("pyedit.symlink('not python (', 'broken.py')\n")
+    assert run(project, "--apply", script=script) == 0
+    assert (project / "broken.py").is_symlink()
+
+
 def test_diff_file_mode(project, capsys):
     diff = project / "plan.diff"
     diff.write_text(

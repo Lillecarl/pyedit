@@ -23,6 +23,7 @@ from pyedit import store
 from pyedit import udiff as _udiff
 from pyedit import vfs
 from pyedit.diff import unified_diffs, original
+from pyedit.session import Symlink
 from pyedit.session import EditSession, display_path
 from pyedit.skill import render_skill
 from pyedit.syntax import render
@@ -309,7 +310,8 @@ def main(argv: list[str] | None = None) -> int:
     # run that shows the diff they would produce
     problems: list[tuple[Path, object]] = []
     for path in sorted(staged):
-        if not isinstance(staged[path], str):
+        value = staged[path]
+        if not isinstance(value, str) or isinstance(value, Symlink):
             continue
         for problem in session.check(path):
             problems.append((path, problem))
