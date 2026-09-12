@@ -317,8 +317,10 @@ Create, move and prune with stdlib tools:
   `symlink()` creates one. Link changes render as one-line notes
   in the diff (like binaries), so `git apply` cannot recreate
   them and a stored-id undo cannot replay them; pyedit's own
-  `--apply` handles both exactly. Reads and open() cannot follow
-  a staged link -- they resolve after apply.
+  `--apply` handles both exactly. A diff input carrying notes
+  (an undo, re-fed output) applies its hunks and warns, naming
+  each note-only change it skipped. Reads and open() cannot
+  follow a staged link -- they resolve after apply.
 - Directories are not tracked: parents of new files are created on
   `--apply`; empty directories never appear in diffs.
 - Binary files stage as bytes; their diffs are one-line summaries.

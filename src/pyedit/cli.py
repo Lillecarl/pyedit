@@ -22,7 +22,7 @@ from pyedit import patch as _patch
 from pyedit import store
 from pyedit import udiff as _udiff
 from pyedit import vfs
-from pyedit.diff import unified_diffs, original
+from pyedit.diff import NOTE_PREFIXES, unified_diffs, original
 from pyedit.session import Symlink
 from pyedit.session import EditSession, display_path
 from pyedit.skill import render_skill
@@ -270,6 +270,12 @@ def main(argv: list[str] | None = None) -> int:
             traceback.print_exc()
             print("pyedit: unified diff failed; nothing was written", file=sys.stderr)
             return EXIT_SCRIPT_ERROR
+        for line in text.splitlines():
+            if line.startswith(NOTE_PREFIXES):
+                print(
+                    f"pyedit: not applied by this diff (link or binary): {line}",
+                    file=sys.stderr,
+                )
     else:
         previous_dont_write = sys.dont_write_bytecode
         sys.dont_write_bytecode = True

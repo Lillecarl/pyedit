@@ -80,6 +80,9 @@ def unified_diffs(
     return results
 
 
+NOTE_PREFIXES = ("Symlink ", "Binary file ")
+
+
 def symlink_note(rel: str, old, new) -> str:
     if isinstance(new, Symlink) and old is None:
         return f"Symlink {rel} -> {new} created\n"
@@ -88,7 +91,7 @@ def symlink_note(rel: str, old, new) -> str:
     if isinstance(new, Symlink) and isinstance(old, Symlink):
         return f"Symlink {rel} retargeted ({old} -> {new})\n"
     if isinstance(new, Symlink):
-        return f"{rel} replaced by symlink -> {new}\n"
+        return f"Symlink {rel} -> {new} (replaces a regular file)\n"
     return f"Symlink {rel} -> {old} replaced by a regular file\n"
 
 
