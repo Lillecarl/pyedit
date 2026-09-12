@@ -24,7 +24,11 @@ class IgnoreFilter:
         self._specs: dict[Path, GitIgnoreSpec | None] = {}
 
     def ignored(self, path: Path, is_dir: bool = False) -> bool:
-        path = Path(path).resolve()
+        # never resolve(): a candidate reached through a symlinked
+        # directory loses the component its rules name
+        path = Path(path)
+        if not path.is_absolute():
+            path = self._root / path
         rel_suffix = "/" if is_dir else ""
         for base in self._chain(path):
             spec = self._spec(base)

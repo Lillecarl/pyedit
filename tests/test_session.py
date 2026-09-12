@@ -149,6 +149,17 @@ def test_rename_missing_raises(session):
         session.rename("src/nope.py", "src/x.py")
 
 
+def test_glob_does_not_descend_into_symlinked_dirs(session, project):
+    # the target sits outside the root, so the only way in is the
+    # link; git never traverses symlinks for discovery either
+    outside = project.parent / 'outside-tree'
+    outside.mkdir()
+    (outside / 'z.py').write_text('z = 1\n')
+    (project / 'src' / 'shortcut').symlink_to(outside, target_is_directory=True)
+    names = {p.name for p in session.glob('**/*.py')}
+    assert 'z.py' not in names
+
+
 def test_read_after_delete_raises(session, project):
     session.delete("src/a.py")
     with pytest.raises(FileNotFoundError):

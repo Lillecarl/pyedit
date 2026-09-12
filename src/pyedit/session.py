@@ -74,6 +74,16 @@ def _slurp(path: Path) -> str | bytes:
         return data
 
 
+def _traverses_symlink(path: Path, root: Path) -> bool:
+    """True when a directory between root and path is a symlink."""
+    for anc in path.parents:
+        if anc == root:
+            return False
+        if anc.is_symlink():
+            return True
+    return False
+
+
 def glob_re(pattern: str) -> re.Pattern:
     """Compile a glob where * does not cross '/' and '**' does."""
     cached = _GLOB_CACHE.get(pattern)
@@ -189,7 +199,7 @@ class EditSession:
             p = self.canon(match)
             if self.staged_content(p) is None:
                 continue
-            if self.is_file(p):
+            if self.is_file(p) and not _traverses_symlink(p, self._root):
                 found.add(p)
         for staged_path, content in self._staged.items():
             if content is None or staged_path in found:

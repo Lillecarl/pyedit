@@ -48,6 +48,16 @@ def test_nested_gitignore(repo):
     assert names == {"a.py", "b.py"}
 
 
+def test_rules_apply_through_a_symlinked_dir(repo):
+    # a candidate reached through a symlinked directory keeps the
+    # name its rules give: resolve() must not walk past the link
+    (repo / '.gitignore').write_text('link\n')
+    (repo / 'link').symlink_to(repo / 'src', target_is_directory=True)
+    session = EditSession()
+    assert session.ignore_filter.ignored(repo / 'link' / 'a.py') is True
+    assert session.glob('link/*') == []
+
+
 def test_staged_new_files_are_filtered_too(repo):
     session = EditSession()
     session.write("src/new.log", "x\n")
