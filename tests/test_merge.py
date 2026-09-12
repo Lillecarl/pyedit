@@ -185,6 +185,23 @@ def test_nested_scopes(root, project):
     assert staged[project / "src" / "b.py"] == "gamma = 33\n"
 
 
+def test_same_file_scopes_do_not_drift(root, project):
+    """The skill's promise, pinned: three edits to one file, each
+    authored against the pristine disk text, merged by context."""
+    (project / "app.py").write_text(
+        "import json\nVERSION = 1\n\n\ndef parse(cfg):\n    return cfg\n"
+    )
+    with VFS():
+        pyedit.edit("app.py", "def parse(cfg):", "def parse(cfg, strict):")
+    with VFS():
+        pyedit.edit("app.py", "import json", "import json\nimport os")
+    with VFS():
+        pyedit.edit("app.py", "VERSION = 1", "VERSION = 2")
+    assert root.staged_content(root.canon("app.py")) == (
+        "import json\nimport os\nVERSION = 2\n\n\ndef parse(cfg, strict):\n    return cfg\n"
+    )
+
+
 def test_scopes_continue_after_a_collision(root):
     with VFS():
         pyedit.edit("src/a.py", "beta = 2\n", "beta = 20\n")

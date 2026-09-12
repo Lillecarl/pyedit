@@ -231,23 +231,30 @@ Nix, Ruby, Java, Lua, Zig. Verify a target with `node_at` before a
 range-limited `edit`, and use `outline` to find definitions when the
 file is bigger than what fits in context.
 
-## Scopes: independent edits, merged by context
+## Scopes: several edits to one file, without drift
 
 You are always editing inside a root VFS: the session itself. `with
 pyedit.VFS():` opens an independent scope -- no variable needed,
 inside the block every `pyedit.*` call edits the scope, and when the
-body ends the scope merges into what it was opened in:
+body ends the scope merges into what it was opened in.
 
-    pyedit.edit("shared.txt", pre, pre_new)   # root: staged now
-    with pyedit.VFS():
-        pyedit.edit("a.py", old_a, new_a)     # scope: fresh overlay
-    with pyedit.VFS():
-        pyedit.edit("b.py", old_b, new_b)     # sibling: never sees a.py
-    # both scopes are merged; the dry-run diff shows everything
+The point is making several edits to the SAME file without the edits
+stepping on each other: write each one against the file as you first
+read it. A scope starts from DISK truth, so edit two does not have to
+reproduce what edit one already changed; at merge time every hunk
+re-anchors by context, so lines another scope inserted or removed
+above it change nothing:
 
-A scope starts from DISK truth, not the parent's staged state, so an
-edit never has to account for lines another scope moved: its hunks
-re-anchor on the merged text. Scopes nest; each merges into the scope
+    with pyedit.VFS():
+        pyedit.edit("src/app.py", "def parse(cfg):", "def parse(cfg, strict):")
+    with pyedit.VFS():
+        pyedit.edit("src/app.py", "import json", "import json\\nimport os")
+    with pyedit.VFS():
+        pyedit.edit("src/app.py", "VERSION = 1", "VERSION = 2")
+    # all three merge; the dry-run diff shows the combined result
+
+Plain sequential edits would force the second and third to match the
+text the first left behind. Scopes nest; each merges into the scope
 it was opened in.
 
 Merging re-anchors hunks by context; line numbers are ignored. It
@@ -256,8 +263,8 @@ cannot find its context, matches several places, or two scopes
 changed the same region incompatibly (delete/edit, double-create and
 binary conflicts included). A scope whose body raises is discarded
 whole -- nothing of it merges, and earlier merges in the parent
-stand. Edits that depend on an earlier edit belong OUTSIDE scopes, or
-in the same scope, where they run in order on the staged state.
+stand. Edits that depend on an earlier edit's result belong in the
+same scope, where they run in order on the staged state.
 
 ## Examples
 
