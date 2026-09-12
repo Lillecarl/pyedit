@@ -34,6 +34,7 @@ thread stacks to `$XDG_STATE_HOME/pyedit/dumps/`.
 | module | job |
 |---|---|
 | `src/pyedit/session.py` | `EditSession`: staged multi-file state machine (the engine) |
+| `src/pyedit/active.py` | the active-session stack behind `pyedit.*` routing |
 | `src/pyedit/merge.py` | `VFS` scopes: independent edits, context-anchored merge, `Collision` |
 | `src/pyedit/vfs.py` | stdlib overlay patching so edit scripts see staged state |
 | `src/pyedit/cli.py` | arguments, dry-run/apply/undo, syntax gate, watchdog hookup |
