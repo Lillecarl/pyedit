@@ -12,6 +12,7 @@
   tree-sitter-grammars,
   cacert,
   pytestCheckHook,
+  hypothesis,
   buildPythonApplication,
   buildPythonPackage,
 }:
@@ -80,7 +81,7 @@ let
     # it fails - same workaround as nixpkgs uses for pygit2's own tests
     env.SSL_CERT_FILE = "${cacert}/etc/ssl/certs/ca-bundle.crt";
 
-    nativeCheckInputs = [ pytestCheckHook pyright ];
+    nativeCheckInputs = [ pytestCheckHook pyright hypothesis ];
 
     pythonImportsCheck = [ "pyedit" ];
 

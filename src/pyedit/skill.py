@@ -306,6 +306,8 @@ Create, move and prune with stdlib tools:
 - Directories are not tracked: parents of new files are created on
   `--apply`; empty directories never appear in diffs.
 - Binary files stage as bytes; their diffs are one-line summaries.
+- `read()` materializes a file into the staged map as a cache;
+  `prune_unchanged()` drops entries whose content equals disk.
 - Discovery globs exclude .gitignore paths; disable with
   `--no-gitignore`. Explicit reads and writes still reach ignored
   paths.

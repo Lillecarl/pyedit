@@ -133,7 +133,8 @@ class EditSession:
         self._max_bytes = max_bytes
         self._max_files = max_files
         self._respect_gitignore = respect_gitignore
-        self._root = (root or Path.cwd()).resolve()
+        # agents pass what they have: coerce strings, never guess
+        self._root = (Path(root) if root else Path.cwd()).resolve()
         self._ignore_filter: IgnoreFilter | None = None
         self._staged: dict[Path, str | bytes | None] = {}
         self._bytes_used = 0
@@ -405,7 +406,12 @@ class EditSession:
 
     def prune_unchanged(self) -> None:
         for path, content in list(self._staged.items()):
-            if content is None or not _disk_is_file(path):
+            if content is None:
+                # a deletion of an already-absent file is not pending
+                if not _disk_is_file(path):
+                    del self._staged[path]
+                continue
+            if not _disk_is_file(path):
                 continue
             try:
                 same = _slurp(path) == content

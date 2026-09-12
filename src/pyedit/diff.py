@@ -46,13 +46,17 @@ def unified_diffs(
         if isinstance(new, bytes) or isinstance(old, bytes):
             results.append((rel, binary_note(rel, old, new)))
             continue
+        fromfile = f"a/{rel}" if old is not None else "/dev/null"
+        tofile = f"b/{rel}" if new is not None else "/dev/null"
         old_text = "" if old is None else old
         new_text = "" if new is None else new
         hunks = _RENDERER.hunks(old_text, new_text, context)
         if not hunks:
+            if old is None or new is None:
+                # an empty file created or deleted renders as headers
+                # alone; skipping it would hide the change entirely
+                results.append((rel, f"--- {fromfile}\n+++ {tofile}\n"))
             continue
-        fromfile = f"a/{rel}" if old is not None else "/dev/null"
-        tofile = f"b/{rel}" if new is not None else "/dev/null"
         results.append((rel, f"--- {fromfile}\n+++ {tofile}\n" + hunks))
     return results
 

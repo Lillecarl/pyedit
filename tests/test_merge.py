@@ -185,6 +185,24 @@ def test_nested_scopes(root, project):
     assert staged[project / "src" / "b.py"] == "gamma = 33\n"
 
 
+def test_scope_root_follows_the_parent_not_the_cwd(tmp_path, monkeypatch):
+    # a library caller passes root=; the scope must edit that tree
+    # even though the cwd is elsewhere (#12)
+    import os
+
+    session = EditSession(root=tmp_path)
+    (tmp_path / "a.txt").write_text("alpha\n")
+    monkeypatch.setattr(pyedit, "session", session, raising=False)
+    cwd = os.getcwd()
+    os.chdir(tmp_path.parent)
+    try:
+        with VFS():
+            pyedit.edit("a.txt", "alpha", "ALPHA")
+        assert session.staged_content(session.canon("a.txt")) == "ALPHA\n"
+    finally:
+        os.chdir(cwd)
+
+
 def test_same_file_scopes_do_not_drift(root, project):
     """The skill's promise, pinned: three edits to one file, each
     authored against the pristine disk text, merged by context."""

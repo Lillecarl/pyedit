@@ -47,7 +47,7 @@ class VFS:
     """
 
     def __init__(self) -> None:
-        self._session = EditSession()
+        self._session = None
         self._parent = None
 
     def __enter__(self) -> EditSession:
@@ -63,6 +63,15 @@ class VFS:
                 "no edit session is running: VFS scopes merge into the "
                 "active session"
             )
+        # the scope edits the parent's tree, not the cwd: its root
+        # and budgets must be the parent's, or paths and limits
+        # diverge the moment a library caller passes root=
+        self._session = EditSession(
+            root=self._parent.root,
+            max_bytes=self._parent._max_bytes,
+            max_files=self._parent._max_files,
+            respect_gitignore=self._parent._respect_gitignore,
+        )
         push(self._session)
         return self._session
 

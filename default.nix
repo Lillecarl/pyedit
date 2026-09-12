@@ -9,6 +9,7 @@ rec {
       pkgs.pyright
       (pkgs.python3.withPackages (p: [
         p.pytest
+        p.hypothesis
         (pyedit.passthru.library.overrideAttrs {
           doCheck = false;
           doInstallCheck = false;
