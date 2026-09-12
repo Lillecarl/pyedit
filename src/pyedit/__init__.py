@@ -18,13 +18,15 @@ __all__ = [
 
 
 def lsp(command: Sequence[str]) -> LspSession:
-    """Bind a language server to the live edit session.
+    """Bind a language server to the active edit session.
 
     The command runs from PATH or absolute, e.g. ["rust-analyzer"].
     Library callers holding their own EditSession construct
     LspSession(session, command) directly.
     """
-    session = globals().get("session")
+    from pyedit.active import current
+
+    session = current() or globals().get("session")
     if session is None:
         raise AttributeError(
             "no edit session is running: construct LspSession(session, command) directly"
@@ -33,11 +35,14 @@ def lsp(command: Sequence[str]) -> LspSession:
 
 
 def __getattr__(name: str):
-    # PEP 562: forward API names to the live session, so `import pyedit`
-    # and the injected global behave identically in edit scripts
+    # PEP 562: forward API names to the active session -- the root, or
+    # the VFS scope while its with-body runs -- so `import pyedit` and
+    # the injected global behave identically in edit scripts
     if name.startswith("__"):
         raise AttributeError(name)
-    session = globals().get("session")
+    from pyedit.active import current
+
+    session = current() or globals().get("session")
     if session is not None and hasattr(session, name):
         return getattr(session, name)
     raise AttributeError(

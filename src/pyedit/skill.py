@@ -135,6 +135,11 @@ read-your-writes holds. Anything you can write in Python works.
                                      the same thing under its
                                      ecosystem name
     pyedit.apply_diff(text)          stage a unified diff
+    pyedit.diff(context=3)           the staged changes as one diff
+                                     text
+    pyedit.apply(paths=None)         write the staged state to disk
+                                     now, even in a dry-run; prefer
+                                     the CLI's --apply
 
 Paths may be absolute or relative to the session root (the invocation
 directory in CLI runs and edit scripts).
@@ -226,30 +231,33 @@ Nix, Ruby, Java, Lua, Zig. Verify a target with `node_at` before a
 range-limited `edit`, and use `outline` to find definitions when the
 file is bigger than what fits in context.
 
-## Independent scopes: several edits, merged by context
+## Scopes: independent edits, merged by context
 
-Wrap independent edits in their own scopes; each sees the pristine
-tree, so an edit never has to account for lines another edit moved:
+You are always editing inside a root VFS: the session itself. `with
+pyedit.VFS():` opens an independent scope -- no variable needed,
+inside the block every `pyedit.*` call edits the scope, and when the
+body ends the scope merges into what it was opened in:
 
-    with pyedit.VFS() as root:      # collector
-        with pyedit.VFS(root) as fs:
-            fs.edit("a.py", old_a, new_a)
-        with pyedit.VFS(root) as fs:
-            fs.edit("b.py", old_b, new_b)
-        # both merged here
+    pyedit.edit("shared.txt", pre, pre_new)   # root: staged now
+    with pyedit.VFS():
+        pyedit.edit("a.py", old_a, new_a)     # scope: fresh overlay
+    with pyedit.VFS():
+        pyedit.edit("b.py", old_b, new_b)     # sibling: never sees a.py
+    # both scopes are merged; the dry-run diff shows everything
 
-Scopes see disk truth, not each other. Edits that depend on an
-earlier edit belong in the SAME scope, where they run in order on the
-staged state.
+A scope starts from DISK truth, not the parent's staged state, so an
+edit never has to account for lines another scope moved: its hunks
+re-anchor on the merged text. Scopes nest; each merges into the scope
+it was opened in.
 
 Merging re-anchors hunks by context; line numbers are ignored. It
 refuses instead of guessing: `pyedit.Collision` is raised when a hunk
 cannot find its context, matches several places, or two scopes
 changed the same region incompatibly (delete/edit, double-create and
-binary conflicts included). On a collision the collector keeps the
-earlier merges; if the exception escapes the collector's with-body,
-everything is discarded. `root.apply()` writes the merged state to
-disk; `root.diff()` renders it.
+binary conflicts included). A scope whose body raises is discarded
+whole -- nothing of it merges, and earlier merges in the parent
+stand. Edits that depend on an earlier edit belong OUTSIDE scopes, or
+in the same scope, where they run in order on the staged state.
 
 ## Examples
 

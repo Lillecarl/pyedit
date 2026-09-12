@@ -208,18 +208,6 @@ def allowed(
     return True
 
 
-def apply_changes(staged: dict[Path, str | bytes | None]) -> None:
-    for path, content in sorted(staged.items()):
-        if content is None:
-            path.unlink(missing_ok=True)
-        elif isinstance(content, bytes):
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(content)
-        else:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content)
-
-
 def run_skill(rest: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="pyedit skill",
@@ -282,7 +270,7 @@ def main(argv: list[str] | None = None) -> int:
                 try:
                     exec(
                         compile(text, filename, "exec"),
-                        {"pyedit": session, "__name__": "__main__"},
+                        {"pyedit": pyedit, "__name__": "__main__"},
                     )
                 finally:
                     restore()
@@ -377,7 +365,7 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_SCRIPT_ERROR
 
     if args.apply:
-        apply_changes(staged)
+        session.apply(staged)
 
     return EXIT_OK
 

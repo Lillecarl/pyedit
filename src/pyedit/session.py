@@ -25,6 +25,11 @@ _GLOB_CACHE: dict[str, re.Pattern] = {}
 # captured at import time, before the VFS layer patches os.stat: the
 # disk-truth helpers must never observe staged content
 _REAL_STAT = os.stat
+_REAL_MAKEDIRS = os.makedirs
+_REAL_REMOVE = os.remove
+_REAL_OPEN = os.open
+_REAL_WRITE = os.write
+_REAL_CLOSE = os.close
 
 
 def _disk_stat(path: Path):
@@ -345,6 +350,41 @@ class EditSession:
 
     def staged(self) -> dict[Path, str | bytes | None]:
         return dict(self._staged)
+
+    def diff(self, context: int = 3) -> str:
+        """The staged changes as one git-style unified diff text."""
+        from pyedit.diff import unified_diffs
+
+        return "".join(d for _, d in unified_diffs(self.staged(), context))
+
+    def apply(self, paths=None) -> None:
+        """Write staged content to disk now (raw os calls, so this is
+        safe inside a scope whose filesystem patches are installed).
+
+        `paths` limits the write to those staged paths (the CLI uses it
+        for its include/exclude filter)."""
+        for path, content in sorted((paths or self.staged()).items()):
+            try:
+                if content is None:
+                    try:
+                        _REAL_REMOVE(path)
+                    except FileNotFoundError:
+                        pass  # already gone; the staged deletion stands
+                    continue
+                _REAL_MAKEDIRS(path.parent, exist_ok=True)
+                if isinstance(content, bytes):
+                    payload = content
+                else:
+                    payload = content.encode("utf-8")
+                fd = _REAL_OPEN(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
+                try:
+                    _REAL_WRITE(fd, payload)
+                finally:
+                    _REAL_CLOSE(fd)
+            except IsADirectoryError:
+                raise ValueError(f"{path}: cannot overwrite a directory") from None
+            except FileNotFoundError:
+                raise ValueError(f"{path}: parent directory vanished") from None
 
     def staged_content(self, path: str | Path) -> str | bytes | None:
         return self._staged.get(self.canon(path), _MISSING)

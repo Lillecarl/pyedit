@@ -134,10 +134,19 @@ def install(session: EditSession) -> Callable[[], None]:
     def resolve(path) -> Path:
         # syscall-free: pathlib.resolve() would recurse into the patched
         # os.lstat, so everything goes through the session's lexical canon
-        return session.canon(path)
+        return current().canon(path)
+
+    def current() -> EditSession:
+        """The active session: a VFS scope inside its with-body, else
+        the session this patch was installed for."""
+        from pyedit.active import current as active_session
+
+        return active_session() or session
 
     def staged(path):
-        return session.staged_content(resolve(path))
+        return current().staged_content(resolve(path))
+
+    _ = session  # the bound root, used only through current()
 
     def coerce(content, binary: bool):
         if isinstance(content, bytes):
@@ -153,7 +162,7 @@ def install(session: EditSession) -> Callable[[], None]:
             return b"" if binary else ""
         if content is _MISSING:
             try:
-                content = session.read(path)
+                content = current().read(path)
             except FileNotFoundError:
                 return b"" if binary else ""
         return coerce(content, binary)
@@ -166,10 +175,10 @@ def install(session: EditSession) -> Callable[[], None]:
         binary = "b" in flags
         writing = bool(flags & {"w", "a", "x", "+"})
         if not writing:
-            content = coerce(session.read(p), binary)
+            content = coerce(current().read(p), binary)
             buf = io.BytesIO(content) if binary else io.StringIO(content)
             return _ReadOnlyIO(buf, str(p))
-        if "x" in flags and session.exists(p):
+        if "x" in flags and current().exists(p):
             raise FileExistsError(str(p))
         seed_data = seed(p, binary, truncate="w" in flags or "x" in flags)
         if binary:
@@ -181,28 +190,28 @@ def install(session: EditSession) -> Callable[[], None]:
         return stream
 
     def _move(source: Path, dest: Path) -> None:
-        content = session.read(source)
+        content = current().read(source)
         if source == dest:
             return
         if dest.is_dir():
             raise IsADirectoryError(str(dest))
-        session.write(dest, content)
-        session.delete(source)
+        current().write(dest, content)
+        current().delete(source)
 
     def _copyfile(source: Path, dest: Path) -> Path:
         if source == dest:
             raise shutil.SameFileError(f"{source!r} and {dest!r} are the same file")
         if dest.is_dir():
             raise IsADirectoryError(str(dest))
-        session.write(dest, session.read(source))
+        current().write(dest, current().read(source))
         return dest
 
     def _stage_tree(source: Path, dest: Path) -> None:
-        for entry in session.entries(source):
+        for entry in current().entries(source):
             if entry.is_dir():
                 _stage_tree(entry, dest / entry.name)
             else:
-                session.write(dest / entry.name, session.read(entry))
+                current().write(dest / entry.name, current().read(entry))
 
     def _open_path(self, mode="r", buffering=-1, encoding=None, errors=None, newline=None):
         return _open(self, mode, buffering, encoding, errors, newline)
@@ -210,18 +219,18 @@ def install(session: EditSession) -> Callable[[], None]:
     def _write_text(self, data, *args, **kwargs):
         if not isinstance(data, str):
             raise TypeError(f"data must be str, not {type(data).__name__}")
-        session.write(resolve(self), data)
+        current().write(resolve(self), data)
         return len(data)
 
     def _write_bytes(self, data):
         if not isinstance(data, (bytes, bytearray, memoryview)):
             raise TypeError(f"a bytes-like object is required, not {type(data).__name__}")
-        session.write(resolve(self), bytes(data))
+        current().write(resolve(self), bytes(data))
         return len(data)
 
     def _unlink(self, missing_ok=False):
         try:
-            session.delete(resolve(self))
+            current().delete(resolve(self))
         except FileNotFoundError:
             if not missing_ok:
                 raise
@@ -242,13 +251,13 @@ def install(session: EditSession) -> Callable[[], None]:
         return path_is_dir(self, *args, **kwargs)
 
     def _read_text(self, encoding=None, errors=None, newline=None):
-        return coerce(session.read(self), False)
+        return coerce(current().read(self), False)
 
     def _read_bytes(self):
-        return coerce(session.read(self), True)
+        return coerce(current().read(self), True)
 
     def _iterdir(self):
-        return iter(session.entries(self))
+        return iter(current().entries(self))
 
     def _glob(self, pattern, *, case_sensitive=None, recurse_symlinks=False):
         base = resolve(self)
@@ -261,7 +270,7 @@ def install(session: EditSession) -> Callable[[], None]:
             if staged(resolved) is None:
                 continue
             out[resolved] = resolved
-        for path, content in session.staged().items():
+        for path, content in current().staged().items():
             if content is None:
                 continue
             try:
@@ -270,7 +279,7 @@ def install(session: EditSession) -> Callable[[], None]:
                 continue
             if rx.match(rel.as_posix()):
                 out.setdefault(path, path)
-        return iter(session.filter_ignored([out[key] for key in sorted(out)]))
+        return iter(current().filter_ignored([out[key] for key in sorted(out)]))
 
     def _mkdir(self, mode=0o777, parents=False, exist_ok=False):
         p = resolve(self)
@@ -288,7 +297,7 @@ def install(session: EditSession) -> Callable[[], None]:
             raise FileNotFoundError(str(p))
         if not p.is_dir():
             raise NotADirectoryError(str(p))
-        if session.entries(p):
+        if current().entries(p):
             raise OSError(f"Directory not empty: {p}")
         # dirs are untracked: an empty dir survives apply
 
@@ -297,7 +306,7 @@ def install(session: EditSession) -> Callable[[], None]:
         return Path(target)
 
     def _os_remove(path, /):
-        session.delete(resolve(path))
+        current().delete(resolve(path))
 
     def _os_mkdir(path, mode=0o777):
         return _mkdir(Path(path))
@@ -311,12 +320,12 @@ def install(session: EditSession) -> Callable[[], None]:
         # dirs are untracked: created on apply when a staged file needs one
 
     def _os_listdir(path="."):
-        return [entry.name for entry in session.entries(resolve(path))]
+        return [entry.name for entry in current().entries(resolve(path))]
 
     def _os_walk(top, topdown=True, onerror=None, followlinks=False):
         top_path = resolve(top)
         try:
-            listing = session.entries(top_path)
+            listing = current().entries(top_path)
         except OSError as err:
             if onerror is not None:
                 onerror(err)
@@ -331,17 +340,17 @@ def install(session: EditSession) -> Callable[[], None]:
             yield str(top_path), [d.name for d in dirs], [f.name for f in files]
 
     def _os_path_exists(path):
-        return session.exists(path)
+        return current().exists(path)
 
     def _os_path_isfile(path):
-        return session.is_file(path)
+        return current().is_file(path)
 
     def _os_path_isdir(path):
-        return session.is_dir(path)
+        return current().is_dir(path)
 
     def _staged_state(path):
         """MISSING (never staged), None (staged deletion) or content."""
-        return session.staged_content(session.canon(path))
+        return current().staged_content(current().canon(path))
 
     def _fake_stat(content):
         return os.stat_result(
@@ -433,9 +442,9 @@ def install(session: EditSession) -> Callable[[], None]:
         dest = resolve(dst)
         if dest.is_dir():
             dest = dest / source.name
-        session.write(dest, session.read(source))
+        current().write(dest, current().read(source))
         if source != dest:
-            session.delete(source)
+            current().delete(source)
         return str(dest)
 
     def _shutil_rmtree(path, ignore_errors=False, **kwargs):
@@ -444,14 +453,14 @@ def install(session: EditSession) -> Callable[[], None]:
             if p.is_dir():
                 for child in p.rglob("*"):
                     if child.is_file():
-                        session.delete(child)
+                        current().delete(child)
             elif p.is_file():
                 raise NotADirectoryError(str(p))
-            elif not any(k != p and k.is_relative_to(p) for k in session.staged()):
+            elif not any(k != p and k.is_relative_to(p) for k in current().staged()):
                 raise FileNotFoundError(str(p))
-            for staged_path in session.staged():
+            for staged_path in current().staged():
                 if staged_path != p and staged_path.is_relative_to(p):
-                    session.delete(staged_path)
+                    current().delete(staged_path)
         except OSError:
             if not ignore_errors:
                 raise
