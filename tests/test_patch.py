@@ -52,6 +52,22 @@ def test_apply_patch_stages_all_operations(project):
     assert staged[project / "src" / "b.py"] is None
 
 
+def test_deleting_a_pre_existing_file_renders_a_removal(project):
+    session = EditSession()
+    apply_patch(session, "*** Begin Patch\n*** Delete File: src/a.py\n*** End Patch\n")
+    assert "+++ /dev/null" in session.diff()
+    assert "-alpha = 1" in session.diff()
+
+
+def test_create_then_delete_nets_to_nothing(project):
+    # a file created and deleted in the same session has no net change:
+    # neither side exists, so the diff is empty by design
+    session = EditSession()
+    apply_patch(session, "*** Begin Patch\n*** Add File: src/tmp.py\n+x = 1\n*** End Patch\n")
+    apply_patch(session, "*** Begin Patch\n*** Delete File: src/tmp.py\n*** End Patch\n")
+    assert session.diff() == ""
+
+
 def test_apply_patch_update_with_move_to(project):
     session = EditSession()
     apply_patch(
