@@ -29,6 +29,8 @@ class SyntaxProblem:
     line: int
     column: int
     message: str
+    # exclusive 0-based end; None renders a single caret
+    end_column: int | None = None
 
 
 def char_column(line_text: str, byte_column: int) -> int:

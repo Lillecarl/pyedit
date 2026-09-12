@@ -17,7 +17,15 @@ from pathlib import Path
 from pyedit.syntax.nodes import NodeInfo, SyntaxProblem, byte_offset, char_column
 from pyedit.syntax.rules import RULES, rules_for
 
-__all__ = ["NodeInfo", "SyntaxProblem", "known_language", "node_at", "outline", "problems"]
+__all__ = [
+    "NodeInfo",
+    "SyntaxProblem",
+    "known_language",
+    "node_at",
+    "outline",
+    "problems",
+    "render",
+]
 
 _parsers: dict[str, object | None] = {}
 
@@ -164,6 +172,18 @@ def outline(session, path: str | Path) -> list[NodeInfo]:
         stack.extend(node.children)
     result.sort(key=lambda entry: (entry.start_line, entry.start_column))
     return result
+
+
+def render(problem: SyntaxProblem, text: str) -> str:
+    """A CPython-style view of one problem: the source line with
+    a caret (or span) under the position."""
+    lines = text.split("\n")
+    line_no = max(1, min(problem.line, len(lines)))
+    source = lines[line_no - 1]
+    gutter = f"{line_no:>4} | "
+    pad = " " * max(0, problem.column)
+    width = max(1, (problem.end_column or problem.column) - problem.column)
+    return f"{gutter}{source}\n{' ' * len(gutter)}| {pad}{'^' * width}"
 
 
 def problems(session, path: str | Path) -> list[SyntaxProblem]:

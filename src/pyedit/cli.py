@@ -23,6 +23,7 @@ from pyedit import vfs
 from pyedit.diff import unified_diffs, original
 from pyedit.session import EditSession, display_path
 from pyedit.skill import render_skill
+from pyedit.syntax import render
 
 EXIT_OK = 0
 EXIT_SCRIPT_ERROR = 1
@@ -304,6 +305,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"{problem.line}:{problem.column}: {problem.message}",
                 file=sys.stderr,
             )
+            print(render(problem, staged[path]), file=sys.stderr)
 
     diff_text = "".join(
         diff for _, diff in unified_diffs(staged, context=args.context)

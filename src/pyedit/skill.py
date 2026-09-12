@@ -210,11 +210,13 @@ servers may need a moment after startup before results are complete.
 
 Staged text is parsed before it is shown: syntax problems print to
 stderr as `pyedit: syntax: FILE:LINE:COL: message` (compile() for
-Python, tree-sitter grammars for others). A dry-run warns and still
-shows the diff; an `--apply` with syntax problems refuses to write and
-exits 1 -- override with `--force`, which keeps the problems on
-record and the write revertible. Position queries run on staged
-content:
+Python, tree-sitter grammars for others) followed by the source
+line with a caret under the position, CPython style. A dry-run
+warns and still shows the diff; an `--apply` with syntax problems
+refuses to write and exits 1 -- this is the post-edit verification
+step, so an agent does not need `&& python -m compile` after it.
+Override with `--force`, which keeps the problems on record and
+the write revertible. Position queries run on staged content:
 
     pyedit.node_at(path, line, column)   what is at a position: kind,
                                          name, span, source text and

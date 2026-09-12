@@ -7,7 +7,14 @@ is in-process.
 import pytest
 
 from pyedit.session import EditSession
-from pyedit.syntax import _parser_for, outline, node_at, problems
+from pyedit.syntax import (
+    SyntaxProblem,
+    _parser_for,
+    outline,
+    node_at,
+    problems,
+    render,
+)
 from pyedit.syntax.rules import RULES
 
 
@@ -157,3 +164,24 @@ def test_every_shipped_grammar_loads():
     # the dependency set or the loader regressed
     dead = [suffix for suffix in sorted(RULES) if _parser_for(suffix) is None]
     assert dead == []
+
+
+def test_render_spans_and_carets():
+    block = render(
+        SyntaxProblem(line=1, column=4, end_column=6, message="x"), "def (:\n"
+    )
+    assert block.splitlines()[0] == "   1 | def (:"
+    assert block.splitlines()[1].endswith("     ^^")
+
+    single = render(SyntaxProblem(line=1, column=2, message="x"), "abc\n")
+    assert single.splitlines()[1].endswith("   ^")
+
+
+def test_python_problem_carries_the_span():
+    class S:
+        def read(self, path):
+            return "if = 1\n"
+
+    (problem,) = problems(S(), "x.py")
+    assert problem.line == 1 and problem.column == 3
+    assert problem.end_column == 4

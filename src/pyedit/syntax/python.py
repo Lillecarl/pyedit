@@ -25,10 +25,13 @@ class Python(LanguageRules):
         try:
             compile(text, "<staged>", "exec")
         except SyntaxError as err:
+            column = (err.offset or 1) - 1
+            end = (err.end_offset or 0) - 1
             return [
                 SyntaxProblem(
                     line=err.lineno or 1,
-                    column=(err.offset or 1) - 1,
+                    column=column,
+                    end_column=end if end > column else None,
                     message=err.msg,
                 )
             ]

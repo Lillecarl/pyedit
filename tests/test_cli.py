@@ -159,15 +159,9 @@ def test_broken_syntax_warns_on_dry_run(project, capsys):
     assert run(project, script=broken) == 0
     out, err = capsys.readouterr()
     assert "pyedit: syntax: src/broken.py:1:" in err
-    assert "+def (:" in out  # the diff still shows what was staged
-
-
-def test_broken_syntax_warns_on_dry_run(project, capsys):
-    broken = project / "bad.py"
-    broken.write_text('pyedit.write("src/broken.py", "def (:\\n")\n')
-    assert run(project, script=broken) == 0
-    out, err = capsys.readouterr()
-    assert "pyedit: syntax: src/broken.py:1:" in err
+    # the source line with a caret, CPython style
+    assert re.search(r"^\s+1 \| def \(:$", err, re.M)
+    assert re.search(r"^\s+\| +\^$", err, re.M)
     assert "+def (:" in out  # the diff still shows what was staged
 
 
