@@ -28,7 +28,7 @@ from hypothesis.stateful import RuleBasedStateMachine, invariant, initialize, ru
 import pyedit
 from pyedit import vfs as vfs_module
 from pyedit.merge import Collision, VFS
-from pyedit.session import EditSession
+from pyedit.session import EditSession, Symlink
 
 FILES = ["a.txt", "b.txt", "dir/c.txt"]
 BIN = "img.bin"
@@ -75,6 +75,9 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
             "isfile": os.path.isfile,
             "mkdir": os.mkdir,
             "isdir": os.path.isdir,
+            "symlink": os.symlink,
+            "readlink": os.readlink,
+            "islink": os.path.islink,
         }
         self.session = EditSession(root=self.a_root)
         self.restore = vfs_module.install(self.session)
@@ -89,6 +92,13 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
             self._raw["mkdir"](path)
         except FileExistsError:
             pass
+
+    def raw_copyfile(self, src, dst):
+        with self._raw["open"](src, "rb") as fh:
+            data = fh.read()
+        self.raw_makedirs(Path(dst).parent)
+        with self._raw["open"](dst, "wb") as fh:
+            fh.write(data)
 
     def oracle_read(self, rel):
         # bytes everywhere; OSError of any kind reads as absent, which
@@ -117,7 +127,20 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
         # the oracle tree is the view: the view-equality invariant
         # makes a path's existence agree on both sides, so reads
         # raise or agree per path
+        staged = self.session.staged()
+        staged_names = {str(p.relative_to(self.a_root)) for p in staged}
         for rel in self.every_rel():
+            if isinstance(staged.get(self.session.canon(rel)), Symlink):
+                # a staged link cannot be followed; the apply
+                # invariant compares the materialized trees
+                continue
+            if rel not in staged_names and self._raw["islink"](
+                self.a_root / rel
+            ):
+                # an unstaged link chases A's real disk, while the
+                # B mirror already holds staged effects on the
+                # target; the trees agree only once applied
+                continue
             oracle = self.oracle_read(rel)
             try:
                 content = self.session.read(rel)
@@ -136,6 +159,36 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
         self.raw_makedirs((self.b_root / path).parent)
         with self._raw["open"](self.b_root / path, "w") as fh:
             fh.write(text)
+
+    @rule(data=st.data())
+    def write_bytes(self, data):
+        blob = data.draw(
+            st.sampled_from([b"\x00\x01\n", b"raw bytes", b"", b"nul\x00end"])
+        )
+        self.session.write(BIN, blob)
+        with self._raw["open"](self.b_root / BIN, "wb") as fh:
+            fh.write(blob)
+
+    @rule(data=st.data())
+    def open_for_write_or_append(self, data):
+        path = data.draw(st.sampled_from(FILES + [BIN]))
+        mode = data.draw(st.sampled_from(["w", "a"]))
+        try:
+            with open(self.a_root / path, mode) as fh:
+                fh.write("opened\n")
+            failed = False
+        except OSError:
+            failed = True
+        if failed:
+            # the view refuses what the filesystem refuses: the
+            # parent dir is gone on both sides after rmtree
+            with pytest.raises(OSError):
+                with self._raw["open"](self.b_root / path, mode) as fh:
+                    fh.write("opened\n")
+            return
+        self.raw_makedirs((self.b_root / path).parent)
+        with self._raw["open"](self.b_root / path, mode) as fh:
+            fh.write("opened\n")
 
     @rule(path=st.sampled_from(FILES), frag=parent_fragments, repl=replacements)
     def edit(self, path, frag, repl):
@@ -191,15 +244,44 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
         self.raw_makedirs((self.b_root / dst).parent)
         self._raw["rename"](self.b_root / src, self.b_root / dst)
 
+    @rule(data=st.data())
+    def copy_file(self, data):
+        src = data.draw(st.sampled_from(FILES + [BIN]))
+        dst = data.draw(st.sampled_from(["copy.txt", "dir/copy.txt"]))
+        if not (self.b_root / src).is_file():
+            with pytest.raises(OSError):
+                shutil.copyfile(self.a_root / src, self.a_root / dst)
+            return
+        shutil.copyfile(self.a_root / src, self.a_root / dst)
+        self.raw_copyfile(self.b_root / src, self.b_root / dst)
+
+    @rule(data=st.data())
+    def move_file(self, data):
+        src = data.draw(st.sampled_from(FILES + MOVE_TARGETS))
+        dst = data.draw(st.sampled_from(["moved.txt", "dir/moved.txt"]))
+        if not (self.b_root / src).is_file():
+            return
+        shutil.move(str(self.a_root / src), str(self.a_root / dst))
+        self.raw_makedirs((self.b_root / dst).parent)
+        self._raw["rename"](self.b_root / src, self.b_root / dst)
+
+    @rule(data=st.data())
+    def link(self, data):
+        target = data.draw(st.sampled_from(["a.txt", "missing.txt"]))
+        dst = data.draw(st.sampled_from(["link.txt", "dir/link.txt"]))
+        if (self.b_root / dst).is_file() or (self.b_root / dst).is_symlink():
+            return
+        self.session.symlink(target, dst)
+        self.raw_makedirs((self.b_root / dst).parent)
+        self._raw["symlink"](target, self.b_root / dst)
+
     @rule()
     def apply(self):
         self.session.apply()
         a_files = self.tree(self.a_root)
         b_files = self.tree(self.b_root)
+        # tree() reads through links on both sides the same way
         assert a_files == b_files
-        for rel, content in b_files.items():
-            with self._raw["open"](self.a_root / rel, "rb") as fh:
-                assert fh.read() == content
         self.view_equals_oracle()
 
     def tree(self, root):
@@ -207,6 +289,11 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
         for base, _dirs, names in self._raw["walk"](root):
             for name in names:
                 path = Path(base) / name
+                if self._raw["islink"](path):
+                    out[str(path.relative_to(root))] = (
+                        self._raw["readlink"](path).encode()
+                    )
+                    continue
                 with self._raw["open"](path, "rb") as fh:
                     out[str(path.relative_to(root))] = fh.read()
         return out
@@ -228,8 +315,11 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
         for path, content in self.session.staged().items():
             base = None
             try:
-                with self._raw["open"](path, "rb") as fh:
-                    base = fh.read()
+                if self._raw["islink"](path):
+                    base = self._raw["readlink"](path).encode()
+                else:
+                    with self._raw["open"](path, "rb") as fh:
+                        base = fh.read()
             except OSError:
                 base = None
             if isinstance(content, str):

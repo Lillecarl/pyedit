@@ -57,10 +57,13 @@ def unified_diffs(
                 results.append((rel, symlink_note(rel, old, new)))
             continue
         if isinstance(new, bytes) or isinstance(old, bytes):
-            if new == old:
-                # an identical binary stage is not a change
+            # _slurp decodes NUL-free files to str: compare encoded
+            # bytes, so restaging what is on disk stays a no-op
+            old_bytes = old.encode() if isinstance(old, str) else old
+            new_bytes = new.encode() if isinstance(new, str) else new
+            if new_bytes == old_bytes:
                 continue
-            results.append((rel, binary_note(rel, old, new)))
+            results.append((rel, binary_note(rel, old_bytes, new_bytes)))
             continue
         fromfile = f"a/{rel}" if old is not None else "/dev/null"
         tofile = f"b/{rel}" if new is not None else "/dev/null"

@@ -514,6 +514,14 @@ class EditSession:
                     continue
                 _REAL_MAKEDIRS(path.parent, exist_ok=True)
                 if isinstance(content, Symlink):
+                    try:
+                        _REAL_REMOVE(path)
+                    except FileNotFoundError:
+                        pass
+                    except IsADirectoryError:
+                        raise ValueError(
+                            f"{path}: cannot replace a directory with a symlink"
+                        ) from None
                     _REAL_SYMLINK(str(content), path)
                     continue
                 if isinstance(content, bytes):
@@ -547,9 +555,15 @@ class EditSession:
             if not _disk_is_file(path):
                 continue
             try:
-                same = _slurp(path) == content
+                disk = _slurp(path)
             except OSError:
                 continue
+            if isinstance(disk, str) and isinstance(content, bytes):
+                same = disk.encode() == content
+            elif isinstance(disk, bytes) and isinstance(content, str):
+                same = disk == content.encode()
+            else:
+                same = disk == content
             if same:
                 del self._staged[path]
                 self._bytes_used -= _content_size(content)

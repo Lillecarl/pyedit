@@ -18,6 +18,15 @@ def test_symlink_changes_render_as_notes(project):
     assert "AGENTS.md" in text
 
 
+def test_restaging_identical_bytes_is_a_no_op(project):
+    (project / "img.bin").write_bytes(b"raw bytes")
+    session = EditSession()
+    session.write("img.bin", b"raw bytes")
+    assert not session.diff().strip()
+    session.prune_unchanged()
+    assert project / "img.bin" not in session.staged()
+
+
 def test_modified_diff_headers(project):
     def edit(session):
         session.write(project / "src" / "a.py", "alpha = 2\nbeta = 2\n")
