@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Dogfood entry: always the current build, like any external agent.
+exec nix run --file . pyedit -- "$@"
