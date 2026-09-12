@@ -1,5 +1,6 @@
 from pyedit import cli
 from pyedit.diff import unified_diffs
+from pyedit.udiff import apply_diff
 from pyedit.session import EditSession
 
 
@@ -25,6 +26,56 @@ def test_restaging_identical_bytes_is_a_no_op(project):
     assert not session.diff().strip()
     session.prune_unchanged()
     assert project / "img.bin" not in session.staged()
+
+
+def test_pure_rename_renders_rename_headers(project):
+    session = EditSession()
+    session.rename("src/a.py", "lib/a.py")
+    [(rel, text)] = unified_diffs(session.staged())
+    assert rel == "src/a.py"
+    assert "similarity index 100%\n" in text
+    assert "rename from src/a.py\n" in text
+    assert "rename to lib/a.py\n" in text
+    assert "alpha" not in text
+
+
+def test_rename_diff_round_trips_through_the_parser(project):
+    session = EditSession()
+    session.rename("src/a.py", "lib/a.py")
+    text = unified_diffs(session.staged())[0][1]
+    moved = EditSession()
+    applied, _failures = apply_diff(moved, text)
+    staged = moved.staged()
+    assert staged[project / "src" / "a.py"] is None
+    assert staged[project / "lib" / "a.py"] == "alpha = 1\nbeta = 2\n"
+
+
+def test_moved_and_edited_file_renders_delete_and_create(project):
+    session = EditSession()
+    session.rename("src/a.py", "lib/a.py")
+    session.write("lib/a.py", "totally different\n")
+    texts = [t for _, t in unified_diffs(session.staged())]
+    assert not any("rename from" in t for t in texts)
+    assert any(t.startswith("--- /dev/null") for t in texts)
+
+
+def test_rename_diff_applies_with_git_apply(project):
+    import subprocess
+
+    session = EditSession()
+    session.rename("src/a.py", "lib/a.py")
+    diff_text = unified_diffs(session.staged())[0][1]
+    subprocess.run(["git", "init", "-q", str(project)], check=True)
+    subprocess.run(
+        ["git", "apply"],
+        input=diff_text,
+        text=True,
+        cwd=project,
+        check=True,
+        capture_output=True,
+    )
+    assert (project / "lib" / "a.py").exists()
+    assert not (project / "src" / "a.py").exists()
 
 
 def test_modified_diff_headers(project):

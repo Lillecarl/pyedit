@@ -26,6 +26,10 @@ from pyedit.session import (
 _RENDERER = DiffRenderer()
 
 
+def _encoded(value):
+    return value.encode() if isinstance(value, str) else value
+
+
 def original(path: Path) -> str | bytes | None:
     if _disk_is_link(path):
         return Symlink(_disk_readlink(path))
@@ -46,10 +50,51 @@ def unified_diffs(
     diff means swapping the maps: undo = unified_diffs(pre_apply,
     base=post_apply).
     """
-    results: list[tuple[str, str]] = []
+    entries = []
     for path, new in sorted(staged.items()):
         old = base.get(path) if base is not None else original(path)
         if new is None and old is None:
+            continue
+        entries.append((path, old, new))
+    # a staged deletion and a staged creation with the same
+    # content are one rename: render it with git's extended
+    # headers instead of a verbose delete+create pair
+    deletions = [e for e in entries if e[1] is not None and e[2] is None]
+    creations = [
+        e
+        for e in entries
+        if e[1] is None and e[2] is not None and not isinstance(e[2], Symlink)
+    ]
+    partners: dict[Path, Path] = {}
+    consumed: set[Path] = set()
+    for dpath, dold, _ in deletions:
+        if isinstance(dold, Symlink):
+            continue
+        for cpath, _cold, cnew in creations:
+            if cpath in consumed:
+                continue
+            if _encoded(dold) == _encoded(cnew):
+                partners[dpath] = cpath
+                consumed.add(cpath)
+                break
+    results: list[tuple[str, str]] = []
+    for path, old, new in entries:
+        if path in partners:
+            rel = display_path(path)
+            to = display_path(partners[path])
+            results.append(
+                (
+                    rel,
+                    f"diff --git a/{rel} b/{to}\n"
+                    f"similarity index 100%\n"
+                    f"rename from {rel}\n"
+                    f"rename to {to}\n"
+                    f"--- a/{rel}\n"
+                    f"+++ b/{to}\n",
+                )
+            )
+            continue
+        if path in consumed:
             continue
         rel = display_path(path)
         if isinstance(new, Symlink) or isinstance(old, Symlink):

@@ -2,7 +2,7 @@
   pkgs ? import <nixpkgs> { },
 }:
 rec {
-  pyedit = pkgs.python3Packages.callPackage ./pyedit { };
+  pyedit = pkgs.python3Packages.callPackage ./pyedit { git = pkgs.git; };
 
   shell = pkgs.mkShell {
     packages = [

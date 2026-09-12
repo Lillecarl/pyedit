@@ -575,8 +575,8 @@ class ScopeMachine(RuleBasedStateMachine):
     @invariant()
     def diff_is_empty_exactly_when_nothing_changed(self):
         changed = any(
-            rel in self.overlay and self.overlay[rel] != self.disk[rel]
-            for rel in FILES
+            rel in self.overlay and self.overlay[rel] != self.disk.get(rel)
+            for rel in self.known
         )
         assert bool(self.session.diff().strip()) == changed
 

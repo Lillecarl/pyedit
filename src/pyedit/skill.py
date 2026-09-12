@@ -102,6 +102,11 @@ fails the whole input -- nothing is staged, nothing is written, exit
 per skip on stderr) and the rest applies; scripts stay fail-closed,
 since a script can write its own try/except.
 
+A pure rename -- a moved file or directory whose content is
+unchanged -- renders as git rename headers (`similarity index
+100%`) instead of delete+create, and re-applies through `-d`, undo
+and `git apply`.
+
 ## Writing scripts
 
 The script is plain Python, run in-process. The global `pyedit` is an
