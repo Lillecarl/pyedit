@@ -33,6 +33,39 @@ def test_rename_accepts_cursor_just_after_token(pkg):
     assert "def bar():" in session.staged()[pkg / "src" / "mod.py"]
 
 
+def test_rename_symbol_resolves_the_definition_by_name(pkg):
+    session = EditSession()
+    changed = session.rename_symbol(
+        "src/mod.py", None, None, "foo", "bar"
+    )
+    assert pkg / "app.py" in changed
+    assert session.staged()[pkg / "src" / "mod.py"] == (
+        "def bar():\n    return 1\n"
+    )
+
+
+def test_references_resolve_by_name(pkg):
+    session = EditSession()
+    refs = session.references("src/mod.py", None, None, "foo")
+    assert len(refs) == 3
+    assert {r.path for r in refs} == {pkg / "src" / "mod.py", pkg / "app.py"}
+
+
+def test_ambiguous_definition_lists_candidates(pkg):
+    session = EditSession()
+    (pkg / "src" / "mod.py").write_text(
+        "def foo():\n    return 1\n\n\ndef foo(x):\n    return x\n"
+    )
+    with pytest.raises(ValueError, match="defined 2 times.*pass line and column"):
+        session.rename_symbol("src/mod.py", None, None, "foo", "bar")
+
+
+def test_half_position_is_a_usage_error(pkg):
+    session = EditSession()
+    with pytest.raises(ValueError, match="both line and column, or neither"):
+        session.rename_symbol("src/mod.py", 1, None, "foo", "bar")
+
+
 def test_rename_wrong_old_name_fails_loudly(pkg):
     session = EditSession()
     with pytest.raises(ValueError, match="resolves to 'foo'"):

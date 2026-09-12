@@ -14,6 +14,7 @@ import importlib
 import warnings
 from pathlib import Path
 
+from pyedit.diff import display_path
 from pyedit.syntax.nodes import NodeInfo, SyntaxProblem, byte_offset, char_column
 from pyedit.syntax.rules import RULES, rules_for
 
@@ -75,6 +76,10 @@ def _read_text(session, path: str | Path) -> str:
 def _info(node, lines: list[str], rules) -> NodeInfo:
     start_row, start_byte = node.start_point
     end_row, end_byte = node.end_point
+    name_node = node.child_by_field_name("name")
+    name_row, name_byte = (
+        (name_node.start_point if name_node is not None else (None, None))
+    )
     return NodeInfo(
         kind=node.type,
         name=rules.title(node),
@@ -83,6 +88,10 @@ def _info(node, lines: list[str], rules) -> NodeInfo:
         end_line=end_row + 1,
         end_column=char_column(lines[end_row], end_byte),
         text=node.text.decode("utf-8", errors="replace"),
+        name_line=None if name_row is None else name_row + 1,
+        name_column=None if name_byte is None else char_column(
+            lines[name_row], name_byte
+        ),
     )
 
 
@@ -103,6 +112,31 @@ def _smallest_containing(root, offset: int):
         best = node
         stack.extend(node.children)
     return best
+
+
+def locate_definition(session, path: str | Path, name: str) -> tuple[int, int]:
+    """The (line, column) of the identifier that defines `name`.
+
+    Raises ValueError when the file has no definition or several,
+    listing the candidates; a caller can then pass a position."""
+    matches = [
+        info
+        for info in outline(session, path)
+        if info.name == name and info.name_column is not None
+    ]
+    display = display_path(session.canon(path))
+    if len(matches) == 1:
+        return matches[0].name_line, matches[0].name_column
+    if not matches:
+        raise ValueError(f"no definition of {name!r} in {display}")
+    listed = "; ".join(
+        f"{info.name} at line {info.name_line}, column {info.name_column}"
+        for info in matches
+    )
+    raise ValueError(
+        f"{name!r} is defined {len(matches)} times in {display}: "
+        f"{listed} -- pass line and column"
+    )
 
 
 def node_at(session, path: str | Path, line: int, column: int) -> NodeInfo:

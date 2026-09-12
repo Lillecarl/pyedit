@@ -20,6 +20,10 @@ class NodeInfo:
     end_line: int
     end_column: int
     text: str
+    # where the definition's NAME sits, when the node has one:
+    # the position rename_symbol and references expect
+    name_line: int | None = None
+    name_column: int | None = None
     # the nearest enclosing node that names something, set by node_at
     enclosing: "NodeInfo | None" = None
 

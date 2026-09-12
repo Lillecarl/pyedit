@@ -235,28 +235,49 @@ class LspSession:
     def rename_symbol(
         self,
         path: str | Path,
-        line: int,
-        column: int,
+        line: int | None,
+        column: int | None,
         old_name: str,
         new_name: str,
     ) -> list[Path]:
-        """Rename the symbol at (line, column) server-wide.
+        """Rename the symbol at (line, column) server-wide; pass
+        line=None, column=None to resolve the definition by
+        `old_name` instead.
 
         `old_name` must match the token at the position, so a cursor
         slightly off fails loudly instead of renaming the wrong thing.
         Returns staged paths; the diff shows the coverage.
         """
+        from pyedit import syntax
+
+        if line is None or column is None:
+            if line is not None or column is not None:
+                raise ValueError("pass both line and column, or neither")
+            line, column = syntax.locate_definition(
+                self._session, path, old_name
+            )
         return self._call(
             self._rename_symbol(self._session.canon(path), line, column, old_name, new_name)
         )
 
     def references(
-        self, path: str | Path, line: int, column: int, name: str
+        self,
+        path: str | Path,
+        line: int | None,
+        column: int | None,
+        name: str,
     ) -> list[Reference]:
-        """Every reference to the symbol at (line, column).
+        """Every reference to the symbol at (line, column); pass
+        line=None, column=None to locate the definition by `name`.
 
         `name` must match the token at the position.
         """
+        from pyedit import syntax
+
+        if line is None or column is None:
+            if line is not None or column is not None:
+                raise ValueError("pass both line and column, or neither")
+            line, column = syntax.locate_definition(self._session, path, name)
         return self._call(
             self._references(self._session.canon(path), line, column, name)
         )

@@ -443,14 +443,22 @@ class EditSession:
     def rename_symbol(
         self,
         path: str | Path,
-        line: int,
-        column: int,
+        line: int | None,
+        column: int | None,
         old_name: str,
         new_name: str,
     ) -> list[Path]:
         """LSP-grade rename of the symbol at (line, column). `old_name`
         must match what the position resolves to. Stages every changed
-        file."""
+        file. Pass line=None, column=None to resolve the definition
+        by `old_name` instead; an ambiguous name lists the candidates
+        and asks for a position."""
+        from pyedit import syntax
+
+        if line is None or column is None:
+            if line is not None or column is not None:
+                raise ValueError("pass both line and column, or neither")
+            line, column = syntax.locate_definition(self, path, old_name)
         from pyedit import rope
 
         return rope.rename_symbol(self, path, line, column, old_name, new_name)
@@ -463,12 +471,22 @@ class EditSession:
         return rope.rename_module(self, path, old_name, new_name)
 
     def references(
-        self, path: str | Path, line: int, column: int, name: str
+        self,
+        path: str | Path,
+        line: int | None,
+        column: int | None,
+        name: str,
     ) -> list["Reference"]:
         """Every occurrence of the symbol at (line, column); `name` must
-        match the identifier there. Lines are 1-based."""
+        match the identifier there. Lines are 1-based. Pass
+        line=None, column=None to locate the definition by `name`."""
         from pyedit import rope
+        from pyedit import syntax
 
+        if line is None or column is None:
+            if line is not None or column is not None:
+                raise ValueError("pass both line and column, or neither")
+            line, column = syntax.locate_definition(self, path, name)
         return rope.references(self, path, line, column, name)
 
     def node_at(self, path: str | Path, line: int, column: int) -> "syntax.NodeInfo":

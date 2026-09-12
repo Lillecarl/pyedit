@@ -90,6 +90,12 @@ def test_node_at_unknown_suffix_raises(session):
         node_at(session, "blob.xyz", 1, 0)
 
 
+def test_outline_carries_the_name_position(session):
+    session.write("g.py", "def greet(name):\n    return name\n")
+    [info] = outline(session, "g.py")
+    assert (info.name_line, info.name_column) == (1, 4)
+
+
 def test_outline_lists_python_definitions_without_noise(session):
     session.write("a.py", PYTHON_TEXT)
     entries = outline(session, "a.py")

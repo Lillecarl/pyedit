@@ -138,14 +138,20 @@ read-your-writes holds. Anything you can write in Python works.
                                      links
     pyedit.symlink(target, path)     stage a symlink; the target is
                                      stored as the link's target
-    pyedit.rename_symbol(path,       rename the symbol at (1-based
-                line, column,        line, 0-based column) everywhere
-                old_name, new_name)  import-aware; old_name must match
-                                     what the position resolves to
+    pyedit.rename_symbol(path,       rename a symbol everywhere,
+                old_name,            import-aware; without a position
+                new_name,            the definition is found by
+                line=None,           old_name (an ambiguous name
+                column=None)         lists its candidates and asks
+                                     for line/column; with a
+                                     position, old_name must match
+                                     what it resolves to
     pyedit.rename_module(path,       rename a module file or package
                 old_name, new_name)  folder and update importers
-    pyedit.references(path,          every occurrence of the symbol at
-                line, column, name)  the position
+    pyedit.references(path,         every occurrence of the symbol;
+                name,               located by name or at a given
+                line=None,          (line, column); lines are 1-based
+                column=None)
     pyedit.apply_v4a(text)           stage an OpenAI apply_patch (V4A)
                                      envelope; apply_patch(text) is
                                      the same thing under its
@@ -211,15 +217,22 @@ rope-backed and Python-only. Other languages go through their language
 server, which pyedit never downloads: the command comes from PATH or
 is absolute.
 
-    with pyedit.lsp(["rust-analyzer"]) as lsp:
-        lsp.rename_symbol(path, line, column, old_name, new_name)
-        lsp.references(path, line, column, name)
+    # the command is the SERVER binary, not the CLI wrapper:
+    # pyright's is pyright-langserver --stdio
+    with pyedit.lsp(["pyright-langserver", "--stdio"],
+                    python_path=sys.executable) as lsp:
+        lsp.rename_symbol(path, old_name=old, new_name=new)
+        lsp.references(path, name=name)
 
-Same position-based API as the rope functions. The server sees staged
-content (files reach it as didOpen/didChange), so renames account for
-earlier edits in the session; returned edits are staged like any other
-edit. `old_name`/`name` must match the token at the position. Heavy
-servers may need a moment after startup before results are complete.
+Same resolution rules as the rope functions, but the server does the
+symbol search: it handles namespace packages (no __init__.py), which
+rope cannot -- a rope rename in a namespace package silently stays
+definition-local. The server sees staged content (files reach it as
+didOpen/didChange), so renames account for earlier edits in the
+session; returned edits are staged like any other edit.
+`old_name`/`name` must match the token at the position when one is
+given. Heavy servers may need a moment after startup before results
+are complete.
 
 ## Syntax awareness
 
@@ -234,10 +247,13 @@ Override with `--force`, which keeps the problems on record and
 the write revertible. Position queries run on staged content:
 
     pyedit.node_at(path, line, column)   what is at a position: kind,
-                                         name, span, source text and
+                                         name, start_line,
+                                         start_column, end_line,
+                                         end_column, text,
+                                         name_line/name_column (the
+                                         identifier position) and
                                          `enclosing` (the named node
-                                         around it, e.g. the method
-                                         the position sits in)
+                                         around it)
     pyedit.outline(path)                 every named definition with
                                          its span, ordered by position
     pyedit.check(path)                   syntax problems: list of
