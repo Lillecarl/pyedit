@@ -114,11 +114,12 @@ read-your-writes holds. Anything you can write in Python works.
     pyedit.read(path) -> str|bytes   staged content if touched, else
                                      disk
     pyedit.write(path, content)      stage str or bytes; new paths ok
-    pyedit.edit(path, old, new,      replace; ValueError when old is
-                count=-1,            absent; returns replacement count;
-                start_line=None,     start_line/stop_line bound the
-                stop_line=None)      replacement to 1-based inclusive
-                                     lines, for duplicate patterns
+    pyedit.edit(path, old, new,      replace old with new; ValueError
+                count=-1,            when old is absent. count=-1 is
+                start_line=None,     the default and replaces EVERY
+                stop_line=None)      occurrence: scope duplicates with
+                                     a line range or count=1; returns
+                                     the replacement count
     pyedit.delete(path)              stage deletion
     pyedit.rename(old, new)          stage move (content kept, source
                                      deleted)
@@ -295,6 +296,9 @@ Create, move and prune with stdlib tools:
 
 ## Behavior notes
 
+- `edit()` replaces EVERY occurrence of `old` by default
+  (count=-1). A short token rewrites the whole file: pass
+  `count=1`, a line range, or a longer unique pattern.
 - Subprocesses and raw file descriptors (`os.open`, `os.fdopen`)
   bypass the overlay.
 - Directories are not tracked: parents of new files are created on
