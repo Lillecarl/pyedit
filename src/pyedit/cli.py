@@ -18,7 +18,9 @@ import traceback
 from pathlib import Path
 
 import pyedit
+from pyedit import patch as _patch
 from pyedit import store
+from pyedit import udiff as _udiff
 from pyedit import vfs
 from pyedit.diff import unified_diffs, original
 from pyedit.session import EditSession, display_path
@@ -248,16 +250,21 @@ def main(argv: list[str] | None = None) -> int:
     )
     pyedit.session = session
 
+    failures: list[str] = []
     if mode == "patch":
         try:
-            session.apply_patch(text)
+            _operations, failures = _patch.apply_patch(
+                session, text, strict=not args.force
+            )
         except Exception:
             traceback.print_exc()
             print("pyedit: patch failed; nothing was written", file=sys.stderr)
             return EXIT_SCRIPT_ERROR
     elif mode == "diff":
         try:
-            session.apply_diff(text)
+            _applied, failures = _udiff.apply_diff(
+                session, text, strict=not args.force
+            )
         except Exception:
             traceback.print_exc()
             print("pyedit: unified diff failed; nothing was written", file=sys.stderr)
@@ -284,6 +291,12 @@ def main(argv: list[str] | None = None) -> int:
                 return EXIT_SCRIPT_ERROR
         finally:
             sys.dont_write_bytecode = previous_dont_write
+
+    for path in failures:
+        print(
+            f"pyedit: --force: skipped {path}: its hunks do not apply",
+            file=sys.stderr,
+        )
 
     session.prune_unchanged()
     staged = {

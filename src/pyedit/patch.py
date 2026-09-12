@@ -56,19 +56,33 @@ def parse_patch(text: str) -> list[PatchOperation]:
     return operations
 
 
-def apply_patch(session, text: str) -> list[PatchOperation]:
-    """Parse a patch envelope and stage every operation on the session."""
+def apply_patch(session, text: str, strict: bool = True) -> tuple[list[PatchOperation], list[str]]:
+    """Parse a patch envelope and stage every operation on the session.
+
+    Fails closed: a failed operation rolls the whole input back.
+    strict=False skips failed operations (the caller warns) and
+    stages the rest."""
     operations = parse_patch(text)
+    failures: list[str] = []
+    mark = session.checkpoint()
     for operation in operations:
-        if operation.type == "create_file":
-            session.write(operation.path, apply_diff("", operation.diff or "", mode="create"))
-        elif operation.type == "update_file":
-            _stage_update(session, operation)
-        elif operation.type == "delete_file":
-            session.delete(operation.path)
-        else:
-            raise ValueError(f"unknown patch operation type: {operation.type}")
-    return operations
+        op_mark = session.checkpoint()
+        try:
+            if operation.type == "create_file":
+                session.write(operation.path, apply_diff("", operation.diff or "", mode="create"))
+            elif operation.type == "update_file":
+                _stage_update(session, operation)
+            elif operation.type == "delete_file":
+                session.delete(operation.path)
+            else:
+                raise ValueError(f"unknown patch operation type: {operation.type}")
+        except Exception:
+            session.rollback(op_mark)
+            if strict:
+                session.rollback(mark)
+                raise
+            failures.append(operation.path)
+    return operations, failures
 
 
 def _stage_update(session, operation: PatchOperation) -> None:

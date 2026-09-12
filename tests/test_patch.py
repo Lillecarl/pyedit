@@ -44,7 +44,7 @@ def test_parse_patch_move_to():
 
 def test_apply_patch_stages_all_operations(project):
     session = EditSession()
-    applied = apply_patch(session, ENVELOPE)
+    applied, _failures = apply_patch(session, ENVELOPE)
     assert len(applied) == 3
     staged = session.staged()
     assert staged[project / "src" / "a.py"] == "alpha = 42\nbeta = 2\n"

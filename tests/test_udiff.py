@@ -17,7 +17,7 @@ diff --git a/src/a.py b/src/a.py
 
 def test_update_single_hunk(project):
     session = EditSession()
-    applied = apply_diff(session, GIT_DIFF)
+    applied, _failures = apply_diff(session, GIT_DIFF)
     assert applied[0].path == "src/a.py"
     assert applied[0].action == "updated"
     assert session.staged()[project / "src" / "a.py"] == "alpha = 42\nbeta = 2\n"
@@ -134,7 +134,7 @@ def test_binary_source_raises(project):
 
 def test_rename_without_hunks(project):
     session = EditSession()
-    applied = apply_diff(
+    applied, _failures = apply_diff(
         session,
         "diff --git a/src/a.py b/src/renamed.py\n"
         "similarity index 100%\n"

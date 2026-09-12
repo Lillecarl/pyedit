@@ -96,6 +96,12 @@ the same context fuzzing as Codex:
 pure renames and `\\ No newline at end of file` markers. Binary
 patches are not supported.
 
+Both structured inputs fail closed: one hunk that cannot anchor
+fails the whole input -- nothing is staged, nothing is written, exit
+1. With `--force` the files whose hunks fail are SKIPPED (a warning
+per skip on stderr) and the rest applies; scripts stay fail-closed,
+since a script can write its own try/except.
+
 ## Writing scripts
 
 The script is plain Python, run in-process. The global `pyedit` is an

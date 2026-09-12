@@ -24,16 +24,33 @@ class AppliedFile:
     action: str
 
 
-def apply_diff(session, text: str) -> list[AppliedFile]:
-    """Parse a unified diff and stage every file on the session."""
+def apply_diff(session, text: str, strict: bool = True) -> list[AppliedFile]:
+    """Parse a unified diff and stage every file on the session.
+
+    Fails closed: a file whose hunks do not apply raises and rolls
+    the whole input back, so a caught error never leaves part of
+    the patch staged. strict=False skips the failed files (the
+    caller warns) and stages the rest."""
     try:
         patch_set = PatchSet.from_string(text)
     except Exception as err:
         raise UnifiedDiffError(f"invalid unified diff: {err}") from err
     applied: list[AppliedFile] = []
+    failures: list[str] = []
+    mark = session.checkpoint()
     for patched in patch_set:
-        applied.append(_apply_file(session, patched))
-    return applied
+        file_mark = session.checkpoint()
+        try:
+            applied.append(_apply_file(session, patched))
+        except Exception:
+            session.rollback(file_mark)
+            if strict:
+                session.rollback(mark)
+                raise
+            failures.append(_strip_prefix(patched.target_file)
+                            or _strip_prefix(patched.source_file)
+                            or "?")
+    return applied, failures
 
 
 def _apply_file(session, patched: PatchedFile) -> AppliedFile:

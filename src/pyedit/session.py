@@ -214,6 +214,23 @@ class EditSession:
                 found.add(staged_path)
         return self.filter_ignored(sorted(found))
 
+    # --- staging checkpoints ---
+
+    def checkpoint(self):
+        """A restorable snapshot of the staged map, for inputs that
+        must stage atomically or not at all."""
+        return (
+            dict(self._staged),
+            self._bytes_used,
+            self._files_used,
+        )
+
+    def rollback(self, checkpoint) -> None:
+        staged, used_bytes, used_files = checkpoint
+        self._staged = staged
+        self._bytes_used = used_bytes
+        self._files_used = used_files
+
     # --- overlay IO ---
 
     def read(self, path: str | Path) -> str | bytes:
@@ -300,19 +317,29 @@ class EditSession:
         self._stage(self.canon(new), content)
 
     def apply_patch(self, text: str) -> list["PatchOperation"]:
-        """Stage an OpenAI apply_patch (V4A) envelope on this session."""
+        """Stage an OpenAI apply_patch (V4A) envelope on this session.
+
+        Fails closed. For per-operation skips call
+        pyedit.patch.apply_patch(session, text, strict=False) directly.
+        """
         from pyedit import patch
 
-        return patch.apply_patch(self, text)
+        operations, _failures = patch.apply_patch(self, text)
+        return operations
 
     # the same operation under its format name
     apply_v4a = apply_patch
 
     def apply_diff(self, text: str) -> list["AppliedFile"]:
-        """Stage a unified diff (git-style) on this session."""
+        """Stage a unified diff (git-style) on this session.
+
+        Fails closed. For per-file skips call
+        pyedit.udiff.apply_diff(session, text, strict=False) directly.
+        """
         from pyedit import udiff
 
-        return udiff.apply_diff(self, text)
+        applied, _failures = udiff.apply_diff(self, text)
+        return applied
 
     def rename_symbol(
         self,
