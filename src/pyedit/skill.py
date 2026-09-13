@@ -152,6 +152,18 @@ read-your-writes holds. Anything you can write in Python works.
                 name,               located by name or at a given
                 line=None,          (line, column); lines are 1-based
                 column=None)
+    pyedit.splice(path, spans)       apply many position splices in
+                                     one pass; each span is
+                                     (start_line, start_col,
+                                     end_line, end_col,
+                                     replacement), lines 1-based,
+                                     columns utf-8 byte offsets (the
+                                     convention ast reports); spans
+                                     must not overlap; returns the
+                                     count
+    pyedit.free_names(path)          names the module uses but does
+                                     not bind: the raw material for
+                                     synthesizing an import block
     pyedit.apply_v4a(text)           stage an OpenAI apply_patch (V4A)
                                      envelope; apply_patch(text) is
                                      the same thing under its
@@ -306,6 +318,21 @@ Targeted replacement across files:
 
     for p in pyedit.glob("**/*.py"):
         pyedit.edit(p, "old_name", "new_name")
+
+Structural rewrites with ast + splice -- parse the staged text,
+compute spans from the nodes, replace them all in one call:
+
+    import ast
+    text = pyedit.read("src/app.py")
+    tree = ast.parse(text)
+    spans = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id == "legacy":
+            spans.append((node.lineno, node.col_offset,
+                          node.end_lineno, node.end_col_offset, "modern"))
+    pyedit.splice("src/app.py", spans)
+    # for per-unit rewrites that may fail: one scope per unit, and
+    # a failing scope discards only itself
 
 Create, move and prune with stdlib tools:
 

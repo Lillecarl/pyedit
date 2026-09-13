@@ -11,6 +11,56 @@ def session(project):
     return EditSession()
 
 
+def test_splice_applies_many_spans_in_one_pass(session, project):
+    session.write("s.py", "alpha = 1\nbeta = 2\ngamma = 3\n")
+    n = session.splice(
+        "s.py",
+        [
+            (1, 8, 1, 9, "42"),
+            (3, 0, 3, 5, "delta"),
+        ],
+    )
+    assert n == 2
+    assert session.staged()[project / "s.py"] == (
+        "alpha = 42\nbeta = 2\ndelta = 3\n"
+    )
+
+
+def test_splice_converts_ast_byte_columns(session, project):
+    text = 's = "ααα"\ntotal = α + x\n'
+    session.write("u.py", text)
+    import ast
+
+    tree = ast.parse(text)
+    name = tree.body[1].value.right
+    assert name.col_offset != 0
+    n = session.splice(
+        "u.py", [(2, name.col_offset, 2, name.end_col_offset, "y")]
+    )
+    assert n == 1
+    assert session.staged()[project / "u.py"] == 's = "ααα"\ntotal = α + y\n'
+
+
+def test_splice_spans_across_lines_and_checks_overlap(session, project):
+    session.write("m.py", "aa = 1\nbb = 2\ncc = 3\n")
+    n = session.splice("m.py", [(1, 0, 3, 0, "ab = 12\n")])
+    assert n == 1
+    assert session.staged()[project / "m.py"] == "ab = 12\ncc = 3\n"
+    with pytest.raises(ValueError, match="overlap"):
+        session.splice(
+            "m.py",
+            [(1, 0, 1, 4, "x"), (1, 2, 1, 6, "y")],
+        )
+
+
+def test_free_names_finds_uses_without_bindings(session, project):
+    session.write(
+        "f.py",
+        "import os\n\n\ndef main(x):\n    return os.sep + str(x) + SEP\n",
+    )
+    assert session.free_names("f.py") == {"SEP"}
+
+
 def test_glob_matches_relative_paths(session):
     assert [p.name for p in session.glob("src/*.py")] == ["a.py", "b.py"]
 

@@ -114,6 +114,41 @@ def _smallest_containing(root, offset: int):
     return best
 
 
+def free_names(text: str) -> set[str]:
+    """Names the module text uses but does not bind."""
+    import ast
+
+    names: set[str] = set()
+    bound: set[str] = set()
+
+    def visit(n):
+        if isinstance(n, ast.Name):
+            (bound if isinstance(n.ctx, (ast.Store, ast.Del)) else names).add(n.id)
+        elif isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name):
+            names.add(n.value.id)
+        elif isinstance(n, ast.arg):
+            bound.add(n.arg)
+        elif isinstance(n, ast.Import):
+            for a in n.names:
+                bound.add(a.asname or a.name.split(".")[0])
+        elif isinstance(n, ast.ImportFrom):
+            for a in n.names:
+                bound.add(a.asname or a.name)
+        elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(n.name)
+        elif isinstance(n, ast.ExceptHandler) and n.name:
+            bound.add(n.name)
+        for child in ast.iter_child_nodes(n):
+            visit(child)
+
+    visit(ast.parse(text))
+    import builtins
+
+    return names - bound - {
+        n for n in dir(builtins) if not n.startswith("_")
+    }
+
+
 def locate_definition(session, path: str | Path, name: str) -> tuple[int, int]:
     """The (line, column) of the identifier that defines `name`.
 

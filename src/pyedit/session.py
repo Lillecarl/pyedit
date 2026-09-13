@@ -91,6 +91,18 @@ def _disk_tree(path: Path) -> tuple[list[Path], list[Path]]:
     return found, links
 
 
+def _byte_to_char(line: str, byte_col: int) -> int:
+    if byte_col == 0:
+        return 0
+    raw = line.encode("utf-8")
+    try:
+        return len(raw[:byte_col].decode("utf-8"))
+    except UnicodeDecodeError:
+        raise ValueError(
+            f"column {byte_col} splits a utf-8 character in {line!r}"
+        ) from None
+
+
 def _slurp(path: Path) -> str | bytes:
     """Read the whole file from disk through raw os calls.
 
@@ -309,6 +321,64 @@ class EditSession:
         if _disk_exists(p) or (existing is not _MISSING and existing is not None):
             raise FileExistsError(f"cannot link onto an existing path: {p}")
         self._stage(p, Symlink(target))
+
+    def splice(self, path: str | Path, spans) -> int:
+        """Apply many position splices in one pass; return the count.
+
+        Each span is (start_line, start_col, end_line, end_col,
+        replacement): lines 1-based, columns utf-8 byte offsets, the
+        convention ast reports. Spans must not overlap; crossing a
+        line boundary joins the lines it spans."""
+        text = self.read(path)
+        if not isinstance(text, str):
+            raise ValueError(f"{self.canon(path)} is binary; splice works on text")
+        lines = text.split("\n")
+        norm = []
+        for start_line, start_col, end_line, end_col, replacement in spans:
+            if not 1 <= start_line <= len(lines) or not 1 <= end_line <= len(lines):
+                raise ValueError(
+                    f"splice line out of range {start_line}-{end_line} "
+                    f"for {self.canon(path)} ({len(lines)} lines)"
+                )
+            if (start_line, start_col) > (end_line, end_col):
+                raise ValueError(
+                    f"splice span ends before it starts: "
+                    f"{start_line}:{start_col}-{end_line}:{end_col}"
+                )
+            norm.append(
+                (
+                    (start_line, _byte_to_char(lines[start_line - 1], start_col)),
+                    (end_line, _byte_to_char(lines[end_line - 1], end_col)),
+                    replacement,
+                )
+            )
+        norm.sort()
+        for i in range(len(norm) - 1):
+            if norm[i + 1][0] < norm[i][1]:
+                raise ValueError(
+                    f"spans overlap at "
+                    f"{norm[i + 1][0][0]}:{norm[i + 1][0][1]}"
+                )
+        for (start, end, replacement) in reversed(norm):
+            sline, scol = start
+            eline, ecol = end
+            joined = (
+                lines[sline - 1][:scol]
+                + replacement
+                + lines[eline - 1][ecol:]
+            )
+            lines[sline - 1 : eline] = [joined]
+        self.write(path, "\n".join(lines))
+        return len(norm)
+
+    def free_names(self, path: str | Path) -> set[str]:
+        """Names the module uses but does not bind: the raw material
+        for synthesizing an import block."""
+        import ast
+
+        from pyedit import syntax
+
+        return syntax.free_names(self.read(path))
 
     def edit(
         self,

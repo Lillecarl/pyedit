@@ -506,6 +506,10 @@ def install(session: EditSession) -> Callable[[], None]:
             p = resolve(path)
             if p.is_dir():
                 for child in p.rglob("*"):
+                    print(
+                        f"rmtree sees {child} is_file={child.is_file()} "
+                        f"islink={child.is_symlink()}", flush=True
+                    )
                     if child.is_file():
                         current().delete(child)
             elif p.is_file():

@@ -21,10 +21,7 @@ let
   attrs = {
     pname = "pyedit";
     # one source: src/pyedit/_version.py, read by hatchling too
-    version = builtins.elemAt (
-      builtins.match "(.|\n)*__version__ = \"([^\"]+)\"(.|\n)*"
-        (builtins.readFile ../src/pyedit/_version.py)
-    ) 1;
+    version = builtins.elemAt (builtins.match "(.|\n)*__version__ = \"([^\"]+)\"(.|\n)*" (builtins.readFile ../src/pyedit/_version.py)) 1;
     pyproject = true;
 
     src = lib.cleanSourceWith {
@@ -57,7 +54,8 @@ let
       pygls
       lsprotocol
       tree-sitter
-    ] ++ map (name: tree-sitter-grammars.${name}) [
+    ]
+    ++ map (name: tree-sitter-grammars.${name}) [
       # python bindings for every grammar live in the generated
       # tree-sitter-grammars scope; a grammar missing there is bindable
       # with the same generator: callPackage
@@ -86,16 +84,21 @@ let
     # it fails - same workaround as nixpkgs uses for pygit2's own tests
     env.SSL_CERT_FILE = "${cacert}/etc/ssl/certs/ca-bundle.crt";
 
-    nativeCheckInputs = [ pytestCheckHook pyright hypothesis git ];
+    nativeCheckInputs = [
+      pytestCheckHook
+      pyright
+      hypothesis
+      git
+    ];
 
     pythonImportsCheck = [ "pyedit" ];
 
-  meta = {
-    description = "Scripted multi-file edits with dry-run diffs for AI agents";
-    license = lib.licenses.asl20;
-    maintainers = [ lib.maintainers.lillecarl ];
-    mainProgram = "pyedit";
-  };
+    meta = {
+      description = "Scripted multi-file edits with dry-run diffs for AI agents";
+      license = lib.licenses.asl20;
+      maintainers = [ lib.maintainers.lillecarl ];
+      mainProgram = "pyedit";
+    };
   };
 in
 (

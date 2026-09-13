@@ -3,6 +3,7 @@
 }:
 rec {
   pyedit = pkgs.python3Packages.callPackage ./pyedit { git = pkgs.git; };
+  pyedit-nocheck = pyedit.overrideAttrs { doCheck = false; doInstallCheck = false; };
 
   shell = pkgs.mkShell {
     packages = [
