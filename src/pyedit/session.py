@@ -428,6 +428,61 @@ class EditSession:
         )
         return n if count < 0 else min(n, count)
 
+    def find(self, path: str | Path, pattern: str) -> list[tuple[int, int, str]]:
+        """Every regex match as (line, column, text): lines 1-based,
+        columns 0-based characters, matched one line at a time --
+        positions that feed edit()'s ranges and splice()'s spans."""
+        rx = re.compile(pattern)
+        text = self.read(path)
+        if not isinstance(text, str):
+            raise ValueError(f"{self.canon(path)} is binary; find works on text")
+        out = []
+        for lineno, line in enumerate(text.split("\n"), start=1):
+            for m in rx.finditer(line):
+                if m.group():
+                    out.append((lineno, m.start(), m.group()))
+        return out
+
+    def edit_re(
+        self,
+        path: str | Path,
+        pattern: str,
+        repl: str,
+        count: int = -1,
+        start_line: int | None = None,
+        stop_line: int | None = None,
+    ) -> int:
+        """Regex replace with edit()'s contract: zero matches raise,
+        count=-1 replaces every occurrence inside the (1-based,
+        inclusive) line range; repl is a re.sub template and may use
+        backreferences. Returns the replacement count."""
+        rx = re.compile(pattern)
+        text = self.read(path)
+        if not isinstance(text, str):
+            raise ValueError(
+                f"{self.canon(path)} is binary; edit_re works on text"
+            )
+        lines = text.split("\n")
+        n_lines = len(lines)
+        start = 1 if start_line is None else start_line
+        stop = n_lines if stop_line is None else stop_line
+        if start < 1 or stop < start or stop > n_lines:
+            raise ValueError(
+                f"invalid line range {start_line}-{stop_line} for "
+                f"{self.canon(path)} ({n_lines} lines)"
+            )
+        line_start = sum(len(part) + 1 for part in lines[: start - 1])
+        range_end = sum(len(part) + 1 for part in lines[: stop - 1]) + len(
+            lines[stop - 1]
+        )
+        new, n = rx.subn(repl, text[line_start:range_end], count=max(count, 0))
+        if n == 0:
+            raise ValueError(
+                f"pattern not found in {self.canon(path)}: {pattern!r}"
+            )
+        self.write(path, text[:line_start] + new + text[range_end:])
+        return n
+
     def delete(self, path: str | Path) -> None:
         p = self.canon(path)
         if p not in self._staged and not _disk_is_file(p):

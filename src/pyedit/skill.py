@@ -138,6 +138,14 @@ read-your-writes holds. Anything you can write in Python works.
                                      links
     pyedit.symlink(target, path)     stage a symlink; the target is
                                      stored as the link's target
+    pyedit.find(path, pattern)       every regex match as
+                                     (line, column, text) --
+                                     positions for edit ranges
+                                     and splice spans
+    pyedit.edit_re(path, pattern,    regex replace with edit()'s
+                repl, count=-1,      contract (zero matches
+                start_line=None,     raise; repl is a re.sub
+                stop_line=None)      template with backrefs)
     pyedit.rename_symbol(path,       rename a symbol everywhere,
                 old_name,            import-aware; without a position
                 new_name,            the definition is found by
@@ -318,6 +326,11 @@ Targeted replacement across files:
 
     for p in pyedit.glob("**/*.py"):
         pyedit.edit(p, "old_name", "new_name")
+
+Mechanical pattern rewrites, when the shape is textual and the
+semantics live in the caller:
+
+    pyedit.edit_re("src/app.py", r"variables\[\"(\w+)\"\]", r"args.\1")
 
 Structural rewrites with ast + splice -- parse the staged text,
 compute spans from the nodes, replace them all in one call:

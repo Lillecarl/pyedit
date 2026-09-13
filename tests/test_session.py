@@ -197,6 +197,40 @@ def test_edit_rejects_invalid_line_ranges(session, project):
             session.edit("r.txt", "one", "ONE", **kwargs)
 
 
+def test_edit_re_replaces_with_backrefs_and_counts(session, project):
+    session.write("r.py", 'x = variables["key"]\ny = other["keep"]\n')
+    n = session.edit_re("r.py", r'variables\["(\w+)"\]', r'args.\1')
+    assert n == 1
+    assert session.staged()[project / "r.py"] == 'x = args.key\ny = other["keep"]\n'
+
+
+def test_edit_re_fails_on_zero_matches(session, project):
+    session.write("r.py", "a = 1\n")
+    with pytest.raises(ValueError, match="pattern not found"):
+        session.edit_re("r.py", r"nothing", "x")
+
+
+def test_edit_re_respects_count_and_range(session, project):
+    session.write("r.py", "cmd 1\ncmd 2\ncmd 3\n")
+    n = session.edit_re("r.py", r"cmd \d", "run", count=1)
+    assert n == 1
+    assert session.staged()[project / "r.py"] == "run\ncmd 2\ncmd 3\n"
+    n = session.edit_re("r.py", r"cmd", "run", start_line=2, stop_line=3)
+    assert n == 2
+    assert session.staged()[project / "r.py"] == "run\nrun 2\nrun 3\n"
+
+
+def test_find_returns_positions_that_feed_splice(session, project):
+    session.write("f.py", "alpha one\nbeta two\nalpha three\n")
+    hits = session.find("f.py", r"alpha (\w+)")
+    assert hits == [(1, 0, "alpha one"), (3, 0, "alpha three")]
+    n = session.splice(
+        "f.py", [(ln, c, ln, c + len(t), "X") for ln, c, t in hits]
+    )
+    assert n == 2
+    assert session.staged()[project / "f.py"] == "X\nbeta two\nX\n"
+
+
 def test_edit_binary_raises(session, project):
     session.write("bin.dat", b"\x00\x01")
     with pytest.raises(ValueError, match="binary"):
