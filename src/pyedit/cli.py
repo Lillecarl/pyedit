@@ -334,14 +334,14 @@ def main(argv: list[str] | None = None) -> int:
 
     # dry-runs store the diff so the printed id alone can apply it later;
     # applies store the reverse diff so the printed id alone can revert.
-    # What is stored carries binary payloads; what is printed keeps the
-    # one-line summary, so a stored id replays a binary change that the
-    # printed diff only describes.
+    # What is stored replays binary and link changes; what is printed
+    # keeps the one-line note that only describes them. Match a note at
+    # the start of a line: the words appear inside diffs of this file.
     stored_text = diff_text
-    if "Binary file " in diff_text:
+    if any(line.startswith(NOTE_PREFIXES) for line in diff_text.splitlines()):
         stored_text = "".join(
             diff
-            for _, diff in unified_diffs(staged, context=args.context, binary=True)
+            for _, diff in unified_diffs(staged, context=args.context, replayable=True)
         )
     stored_id = store.save(stored_text) if staged and not args.apply else None
     if stored_id:
@@ -412,7 +412,9 @@ def _prepare_undo(
         return None
     undo_text = "".join(
         diff
-        for _, diff in unified_diffs(pre, context=context, base=staged, binary=True)
+        for _, diff in unified_diffs(
+            pre, context=context, base=staged, replayable=True
+        )
     )
     if not undo_text:
         return None

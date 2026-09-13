@@ -46,7 +46,7 @@ def unified_diffs(
     staged: dict[Path, str | bytes | None],
     context: int = 3,
     base: dict[Path, str | bytes | None] | None = None,
-    binary: bool = False,
+    replayable: bool = False,
 ) -> list[tuple[str, str]]:
     """Return (display path, diff text) for every staged change.
 
@@ -55,10 +55,10 @@ def unified_diffs(
     diff means swapping the maps: undo = unified_diffs(pre_apply,
     base=post_apply).
 
-    `binary` swaps the one-line summary of a binary change for a real
-    `GIT binary patch` section, which re-applies. It is off by default
-    because the payload is base85 noise in a diff an agent reads; the
-    undo diff, which is stored and never printed, turns it on.
+    `replayable` swaps the one-line note of a binary or symlink change
+    for a real git section that applies back. It is off by default
+    because a base85 payload is noise in a diff an agent reads; the
+    stored diffs, which no one reads, turn it on.
     """
     entries = []
     for path, new in sorted(staged.items()):
@@ -109,7 +109,10 @@ def unified_diffs(
         rel = display_path(path)
         if isinstance(new, Symlink) or isinstance(old, Symlink):
             if new != old:
-                results.append((rel, symlink_note(rel, old, new)))
+                if replayable:
+                    results.append((rel, file_patch(rel, old, new, context)))
+                else:
+                    results.append((rel, symlink_note(rel, old, new)))
             continue
         if isinstance(new, bytes) or isinstance(old, bytes):
             # _slurp decodes NUL-free files to str: compare encoded
@@ -118,8 +121,8 @@ def unified_diffs(
             new_bytes = new.encode() if isinstance(new, str) else new
             if new_bytes == old_bytes:
                 continue
-            if binary:
-                results.append((rel, binary_patch(rel, old_bytes, new_bytes)))
+            if replayable:
+                results.append((rel, file_patch(rel, old, new, context)))
             else:
                 results.append((rel, binary_note(rel, old_bytes, new_bytes)))
             continue
@@ -153,38 +156,29 @@ def symlink_note(rel: str, old, new) -> str:
     return f"Symlink {rel} -> {old} replaced by a regular file\n"
 
 
-_ZERO_OID = "0" * 40
+def file_patch(rel: str, old, new, context: int = 3) -> str:
+    """A git patch section for one file, written by libgit2.
 
-
-def binary_patch(rel: str, old: bytes | None, new: bytes | None) -> str:
-    """A `git diff --binary` section for one file.
-
-    libgit2 writes the payload and pyedit adds the headers it needs to
-    parse back: the paths, the mode line for a create or a delete, and
-    the blob ids. pyedit does not track file modes, so every regular
-    file is 100644.
+    This is what a binary or symlink change needs to replay: git's own
+    mode lines and base85 payloads, which pyedit has no format of its
+    own for. A change of type renders as two sections, exactly as git
+    writes it.
     """
     from pyedit.memgit import MemoryRepo
 
+    repo = MemoryRepo()
+    return repo.patch(_git_side(rel, old), _git_side(rel, new), context)
+
+
+def _git_side(rel: str, value) -> dict:
+    """One side of a change as memgit's {path: (content, mode)} map."""
     import pygit2
 
-    repo = MemoryRepo()
-    old_bytes = b"" if old is None else old
-    new_bytes = b"" if new is None else new
-    body = (
-        repo.blob(old_bytes)
-        .diff(repo.blob(new_bytes), flags=pygit2.enums.DiffOption.SHOW_BINARY)
-        .text
-    )
-    old_oid = _ZERO_OID if old is None else str(repo.write(old_bytes))
-    new_oid = _ZERO_OID if new is None else str(repo.write(new_bytes))
-    header = f"diff --git a/{rel} b/{rel}\n"
-    if old is None:
-        header += "new file mode 100644\n"
-    elif new is None:
-        header += "deleted file mode 100644\n"
-    header += f"index {old_oid}..{new_oid} 100644\n"
-    return header + "GIT binary patch" + body.split("GIT binary patch", 1)[1]
+    if value is None:
+        return {}
+    if isinstance(value, Symlink):
+        return {rel: (str(value), pygit2.enums.FileMode.LINK)}
+    return {rel: (value, pygit2.enums.FileMode.BLOB)}
 
 
 def binary_note(rel: str, old: str | bytes | None, new: str | bytes | None) -> str:

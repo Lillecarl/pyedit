@@ -173,6 +173,19 @@ def test_stored_dry_run_replays_a_binary_change(project, capsys):
     assert (project / "data.bin").read_bytes() == b"\xff\xfe"
 
 
+def test_symlink_retarget_undoes(project, capsys):
+    (project / "link").symlink_to("src/a.py")
+    script = project / "s.py"
+    script.write_text('pyedit.symlink("src/b.py", "link", force=True)\n')
+    assert run(project, "--apply", script=script) == 0
+    out, _err = capsys.readouterr()
+    assert "Symlink link retargeted (src/a.py -> src/b.py)" in out
+    assert (project / "link").readlink().name == "b.py"
+
+    assert run(project, "--apply", undo_token(out)) == 0
+    assert (project / "link").readlink().name == "a.py"
+
+
 def test_binary_create_undoes(project, capsys):
     binary = project / "bin.py"
     binary.write_text('pyedit.write("data.bin", b"\\x00\\x01\\x02")\n')

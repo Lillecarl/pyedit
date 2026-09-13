@@ -69,13 +69,29 @@ class _PatchedFile:
     target_file: str | None = None
     is_rename: bool = False
     hunks: list[_Hunk] = field(default_factory=list)
-    # the verbatim "diff --git" section of a binary patch, which
-    # libgit2 applies; None for every text file
-    binary: list[str] | None = None
+    # the verbatim "diff --git" section, kept because libgit2 applies
+    # the sections pyedit has no format for; None without such a header
+    section: list[str] | None = None
+    binary: bool = False
 
     @property
-    def binary_patch(self) -> str | None:
-        return "".join(self.binary) if self.binary is not None else None
+    def patch_text(self) -> str:
+        return "".join(self.section or ())
+
+    @property
+    def needs_git(self) -> bool:
+        """True when libgit2 must apply this section, not pyedit.
+
+        A binary payload has no text form, and a symlink's content is
+        its target behind a 120000 mode that pyedit's hunks cannot
+        carry.
+        """
+        if self.binary:
+            return True
+        return any(
+            line.startswith(_MODE_PREFIXES) and line.rstrip().endswith("120000")
+            for line in self.section or ()
+        )
 
     @property
     def is_added_file(self) -> bool:
@@ -95,6 +111,14 @@ _HUNK_RE = re.compile(
 
 _GIT_HEADER_RE = re.compile(r"^diff --git (\S+) (\S+)\s*$")
 
+_MODE_PREFIXES = (
+    "new file mode ",
+    "deleted file mode ",
+    "old mode ",
+    "new mode ",
+    "index ",
+)
+
 
 def _parse(text: str) -> list[_PatchedFile]:
     """Parse pyedit-style unified diffs; raises UnifiedDiffError.
@@ -112,15 +136,9 @@ def _parse(text: str) -> list[_PatchedFile]:
     header: str | None = None
     binary = False
     for raw in lines:
-        if hunk is not None:
-            if raw.startswith("\\"):
-                hunk.lines.append(_Line("\\", raw[1:]))
-                continue
-            if raw[:1] in (" ", "+", "-"):
-                if hunk.feed(_Line(raw[0], raw[1:])):
-                    hunk = None
-                continue
-            raise UnifiedDiffError(f"cannot parse hunk line: {raw!r}")
+        # the section is captured before anything consumes the line:
+        # a hunk body belongs to it too, and libgit2 rejects a section
+        # whose hunks are missing
         if raw.startswith("diff --git "):
             section = [raw]
             header = raw
@@ -130,6 +148,15 @@ def _parse(text: str) -> list[_PatchedFile]:
         if binary:
             # base85 payload lines; the whole section goes to libgit2
             continue
+        if hunk is not None:
+            if raw.startswith("\\"):
+                hunk.lines.append(_Line("\\", raw[1:]))
+                continue
+            if raw[:1] in (" ", "+", "-"):
+                if hunk.feed(_Line(raw[0], raw[1:])):
+                    hunk = None
+                continue
+            raise UnifiedDiffError(f"cannot parse hunk line: {raw!r}")
         if raw.startswith("GIT binary patch"):
             current = _binary_file(header, section)
             files.append(current)
@@ -147,7 +174,7 @@ def _parse(text: str) -> list[_PatchedFile]:
                 and _strip_prefix(source) == current.source_file
             )
             if not same:
-                current = _PatchedFile(source_file=source)
+                current = _PatchedFile(source_file=source, section=section)
                 files.append(current)
             expect = "target"
             continue
@@ -222,7 +249,10 @@ def _binary_file(header: str | None, section: list[str]) -> _PatchedFile:
             f"cannot read the paths of a binary patch from: {header.rstrip()}"
         )
     return _PatchedFile(
-        source_file=match.group(1), target_file=match.group(2), binary=section
+        source_file=match.group(1),
+        target_file=match.group(2),
+        section=section,
+        binary=True,
     )
 
 
@@ -262,8 +292,8 @@ def _apply_file(session, patched: PatchedFile) -> AppliedFile:
     target = _strip_prefix(patched.target_file)
     hunks = list(patched)
 
-    if patched.binary is not None:
-        return _apply_binary(session, patched, source, target)
+    if patched.needs_git:
+        return _apply_through_git(session, patched, source, target)
 
     if patched.is_removed_file:
         session.delete(source)
@@ -294,39 +324,88 @@ def _apply_file(session, patched: PatchedFile) -> AppliedFile:
     return AppliedFile(path=target, action="updated")
 
 
-def _apply_binary(session, patched, source: str, target: str) -> AppliedFile:
-    """Stage a ``GIT binary patch`` section through libgit2.
+_LINK_MODE = 0o120000
 
-    pyedit has no binary differ of its own, so the whole section goes
-    to `pyedit.memgit`, which applies it to a one-file tree holding
-    what the session has now. libgit2 verifies the patch by reversing
-    it back onto the preimage, so a payload that does not belong to
-    this file fails here rather than corrupting it.
+
+def _apply_through_git(session, patched, source: str, target: str) -> AppliedFile:
+    """Stage a section that only libgit2 can read.
+
+    A binary payload and a symlink's 120000 mode have no form in
+    pyedit's own hunks, so the whole section goes to `pyedit.memgit`,
+    which applies it to a one-file tree holding what the session has
+    now. libgit2 verifies a binary patch by reversing it back onto the
+    preimage, so a payload that does not belong to this file fails
+    here rather than corrupting it.
     """
     from pyedit.memgit import MemGitError, MemoryRepo
 
+    # a create says "--- /dev/null", so there is no source to seed from
     before = {}
-    try:
-        # absent means the patch creates the file; every other read
-        # failure (a staged symlink, say) belongs to the caller
-        before[source] = session.read(source)
-    except FileNotFoundError:
-        pass
+    if source is not None:
+        existing = _session_entry(session, source)
+        if existing is not None:
+            before[source] = existing
 
     repo = MemoryRepo()
     try:
-        result = repo.apply(repo.tree(before), patched.binary_patch)
+        result = repo.apply(repo.tree(before), patched.patch_text)
     except MemGitError as err:
-        raise UnifiedDiffError(f"{target}: {err}") from err
+        raise UnifiedDiffError(f"{target or source}: {err}") from err
 
     for path, entry in result.items():
-        session.write(path, entry.data)
-    if source not in result:
+        if entry.mode == _LINK_MODE:
+            _stage_link(session, path, entry.data.decode())
+        else:
+            session.write(path, entry.data)
+    if source is not None and source not in result:
         session.delete(source)
         if not result:
             return AppliedFile(path=source, action="deleted")
         return AppliedFile(path=target, action="renamed")
     return AppliedFile(path=target, action="created" if not before else "updated")
+
+
+def _session_entry(session, path):
+    """What the session holds for `path`, as memgit's (content, mode).
+
+    None when nothing is there: the patch creates the file.
+    """
+    import pygit2
+
+    from pyedit.session import Symlink
+
+    # staged state wins over the disk: a script may have written text
+    # onto a path that is still a symlink out there
+    staged = session.staged().get(session.canon(path), _UNSET)
+    if staged is None:
+        return None
+    if isinstance(staged, Symlink):
+        return (str(staged), pygit2.enums.FileMode.LINK)
+    if staged is not _UNSET:
+        return (staged, pygit2.enums.FileMode.BLOB)
+    target = _disk_link_target(path)
+    if target is not None:
+        return (target, pygit2.enums.FileMode.LINK)
+    try:
+        return (session.read(path), pygit2.enums.FileMode.BLOB)
+    except FileNotFoundError:
+        return None
+
+
+_UNSET = object()
+
+
+def _disk_link_target(path) -> str | None:
+    from pyedit.session import _disk_is_link, _disk_readlink
+
+    from pathlib import Path
+
+    p = Path(path)
+    return _disk_readlink(p) if _disk_is_link(p) else None
+
+
+def _stage_link(session, path, target: str) -> None:
+    session.symlink(target, path, force=True)
 
 
 def _strip_prefix(path: str) -> str | None:

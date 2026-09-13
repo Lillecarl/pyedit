@@ -1,7 +1,7 @@
 import pytest
 
-from pyedit.diff import binary_patch as _binary_patch
-from pyedit.session import EditSession
+from pyedit.diff import file_patch as _binary_patch
+from pyedit.session import EditSession, Symlink
 from pyedit.udiff import UnifiedDiffError, apply_diff
 
 
@@ -262,3 +262,48 @@ def test_binary_patch_without_a_git_header_raises(project):
     session = EditSession()
     with pytest.raises(UnifiedDiffError, match="diff --git"):
         apply_diff(session, "GIT binary patch\nliteral 0\n\n")
+
+
+def test_staged_text_wins_over_a_symlink_on_disk(project):
+    # the path is a link out there, but the session already replaced
+    # it with text: the patch must see the text
+    (project / "link").symlink_to("src/a.py")
+    session = EditSession()
+    session.write("link", "now text\n")
+    apply_diff(session, _binary_patch("link", "now text\n", b"\x00\x01"))
+    assert session.staged()[project / "link"] == b"\x00\x01"
+
+
+def test_symlink_patch_creates_a_link(project):
+    session = EditSession()
+    applied, _failures = apply_diff(
+        session, _binary_patch("link", None, Symlink("a.py"))
+    )
+    assert applied[0].action == "created"
+    assert session.staged()[project / "link"] == Symlink("a.py")
+
+
+def test_symlink_patch_retargets_a_link(project):
+    (project / "link").symlink_to("src/a.py")
+    session = EditSession()
+    apply_diff(session, _binary_patch("link", Symlink("src/a.py"), Symlink("src/b.py")))
+    assert session.staged()[project / "link"] == Symlink("src/b.py")
+
+
+def test_symlink_patch_deletes_a_link(project):
+    (project / "link").symlink_to("src/a.py")
+    session = EditSession()
+    applied, _failures = apply_diff(
+        session, _binary_patch("link", Symlink("src/a.py"), None)
+    )
+    assert applied[0].action == "deleted"
+    assert session.staged()[project / "link"] is None
+
+
+def test_symlink_patch_replaces_a_link_with_a_file(project):
+    # git writes this as two sections: delete the 120000 entry, then
+    # create a regular one
+    (project / "link").symlink_to("src/a.py")
+    session = EditSession()
+    apply_diff(session, _binary_patch("link", Symlink("src/a.py"), "real file\n"))
+    assert session.staged()[project / "link"] == "real file\n"

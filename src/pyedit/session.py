@@ -313,13 +313,25 @@ class EditSession:
             )
         self._stage(self.canon(path), content)
 
-    def symlink(self, target: str, path: str | Path) -> None:
+    def symlink(self, target: str, path: str | Path, force: bool = False) -> None:
+        """Stage a symlink at `path` pointing to `target`.
+
+        An occupied path is refused, so a typo cannot silently replace
+        a file. `force` retargets or replaces whatever is there, which
+        is the only way to move an existing link: a staged deletion
+        does not clear the path while the file is still on disk.
+        """
         if not isinstance(target, str) or not target:
             raise ValueError("symlink target must be a non-empty string")
         p = self.canon(path)
         existing = self.staged_content(p)
-        if _disk_exists(p) or (existing is not _MISSING and existing is not None):
-            raise FileExistsError(f"cannot link onto an existing path: {p}")
+        occupied = _disk_exists(p) or (
+            existing is not _MISSING and existing is not None
+        )
+        if occupied and not force:
+            raise FileExistsError(
+                f"cannot link onto an existing path: {p} (pass force=True to replace it)"
+            )
         self._stage(p, Symlink(target))
 
     def splice(self, path: str | Path, spans) -> int:

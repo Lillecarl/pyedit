@@ -384,13 +384,14 @@ Create, move and prune with stdlib tools:
 - Subprocesses and raw file descriptors (`os.open`, `os.fdopen`)
   bypass the overlay.
 - Symlinks are first-class: `rename` moves the link itself and
-  `symlink()` creates one. Link changes render as one-line notes
-  in the diff and a stored-id undo cannot replay them; pyedit's
-  own `--apply` handles them exactly. Binary changes render as
-  notes too, but stored diffs carry a real payload, so those do
-  replay. Printed output fed back in applies its hunks and warns,
-  naming each note-only change it skipped. Reads and open() cannot
-  follow a staged link -- they resolve after apply.
+  `symlink(target, path)` creates one. An occupied path is refused;
+  `symlink(..., force=True)` retargets or replaces it. Link and
+  binary changes render as one-line notes in the printed diff, but
+  stored diffs carry git's own sections for them, so a dry-run id
+  and an undo id both replay them. Printed output fed back in
+  applies its hunks and warns, naming each note-only change it
+  skipped. Reads and open() cannot follow a staged link -- they
+  resolve after apply.
 - Directories are not tracked: parents of new files are created on
   `--apply`; empty directories never appear in diffs.
 - Binary files stage as bytes; their diffs are one-line summaries.

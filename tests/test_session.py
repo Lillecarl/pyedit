@@ -319,6 +319,12 @@ def test_symlink_creates_a_link(session, project):
     assert os.readlink(project / "CLAUDE.md") == "AGENTS.md"
 
 
+def test_symlink_force_retargets_an_existing_link(session, project):
+    (project / "link.txt").symlink_to("target.txt")
+    session.symlink("other.txt", "link.txt", force=True)
+    assert session.staged()[project / "link.txt"] == Symlink("other.txt")
+
+
 def test_symlink_onto_existing_path_raises(session):
     session.write("docs/anchor.md", "x\n")
     with pytest.raises(FileExistsError):

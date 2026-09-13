@@ -206,6 +206,20 @@ class MemoryRepo:
             index.add(self._pygit2.IndexEntry(path, self.write(content), mode))
         return self._repo[index.write_tree(self._repo)]
 
+    def patch(self, before, after, context: int = 3) -> str:
+        """The git patch that turns one file map into the other.
+
+        libgit2 writes it, so the mode lines a symlink needs (120000)
+        and the base85 payload a binary change needs are both there,
+        and `apply` takes the result back.
+        """
+        diff = self.tree(before).diff_to_tree(
+            self.tree(after),
+            flags=self._pygit2.enums.DiffOption.SHOW_BINARY,
+            context_lines=context,
+        )
+        return diff.patch or ""
+
     def apply(self, tree, patch: str | bytes) -> dict[str, Entry]:
         """Apply a git patch to a tree; returns the whole postimage.
 
