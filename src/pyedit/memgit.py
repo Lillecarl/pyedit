@@ -175,6 +175,14 @@ class MemoryRepo:
             data = data.encode()
         return self._repo.create_blob(data)
 
+    def blob(self, data: bytes | str):
+        """Store a blob and return the pygit2 object.
+
+        Its `.data` raises KeyError - see the read_prefix note above.
+        `diff()` on it works, and `read` gives the content.
+        """
+        return self._repo[self.write(data)]
+
     def read(self, oid) -> bytes:
         out = self._ffi.new("git_odb_object **")
         self._check(
