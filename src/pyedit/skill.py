@@ -93,8 +93,11 @@ the same context fuzzing as Codex:
 ## Unified diffs
 
 `--diff` handles create (`--- /dev/null`), delete (`+++ /dev/null`),
-pure renames and `\\ No newline at end of file` markers. Binary
-patches are not supported.
+pure renames and `\\ No newline at end of file` markers. A `GIT
+binary patch` section applies too, through libgit2, which verifies
+the payload against the file it patches. pyedit's own diffs still
+summarise binary changes in one line instead of carrying a payload,
+so a binary change is not undoable.
 
 Both structured inputs fail closed: one hunk that cannot anchor
 fails the whole input -- nothing is staged, nothing is written, exit

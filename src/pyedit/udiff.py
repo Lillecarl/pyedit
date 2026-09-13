@@ -69,6 +69,13 @@ class _PatchedFile:
     target_file: str | None = None
     is_rename: bool = False
     hunks: list[_Hunk] = field(default_factory=list)
+    # the verbatim "diff --git" section of a binary patch, which
+    # libgit2 applies; None for every text file
+    binary: list[str] | None = None
+
+    @property
+    def binary_patch(self) -> str | None:
+        return "".join(self.binary) if self.binary is not None else None
 
     @property
     def is_added_file(self) -> bool:
@@ -86,6 +93,8 @@ _HUNK_RE = re.compile(
     r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@"
 )
 
+_GIT_HEADER_RE = re.compile(r"^diff --git (\S+) (\S+)\s*$")
+
 
 def _parse(text: str) -> list[_PatchedFile]:
     """Parse pyedit-style unified diffs; raises UnifiedDiffError.
@@ -99,6 +108,9 @@ def _parse(text: str) -> list[_PatchedFile]:
     current: _PatchedFile | None = None
     hunk: _Hunk | None = None
     expect = None
+    section: list[str] | None = None
+    header: str | None = None
+    binary = False
     for raw in lines:
         if hunk is not None:
             if raw.startswith("\\"):
@@ -109,6 +121,20 @@ def _parse(text: str) -> list[_PatchedFile]:
                     hunk = None
                 continue
             raise UnifiedDiffError(f"cannot parse hunk line: {raw!r}")
+        if raw.startswith("diff --git "):
+            section = [raw]
+            header = raw
+            binary = False
+        elif section is not None:
+            section.append(raw)
+        if binary:
+            # base85 payload lines; the whole section goes to libgit2
+            continue
+        if raw.startswith("GIT binary patch"):
+            current = _binary_file(header, section)
+            files.append(current)
+            binary = True
+            continue
         if raw.startswith("\\"):
             if files and files[-1].hunks:
                 files[-1].hunks[-1].lines.append(_Line("\\", raw[1:]))
@@ -182,6 +208,24 @@ def _parse(text: str) -> list[_PatchedFile]:
     return files
 
 
+def _binary_file(header: str | None, section: list[str]) -> _PatchedFile:
+    """A binary section's paths come from its ``diff --git`` header.
+
+    A binary patch carries no ``---``/``+++`` pair, so the header is
+    the only source of the paths.
+    """
+    if header is None:
+        raise UnifiedDiffError("binary patch without a 'diff --git' header")
+    match = _GIT_HEADER_RE.match(header)
+    if not match:
+        raise UnifiedDiffError(
+            f"cannot read the paths of a binary patch from: {header.rstrip()}"
+        )
+    return _PatchedFile(
+        source_file=match.group(1), target_file=match.group(2), binary=section
+    )
+
+
 def apply_diff(session, text: str, strict: bool = True) -> list[AppliedFile]:
     """Parse a unified diff and stage every file on the session.
 
@@ -218,6 +262,9 @@ def _apply_file(session, patched: PatchedFile) -> AppliedFile:
     target = _strip_prefix(patched.target_file)
     hunks = list(patched)
 
+    if patched.binary is not None:
+        return _apply_binary(session, patched, source, target)
+
     if patched.is_removed_file:
         session.delete(source)
         return AppliedFile(path=source, action="deleted")
@@ -233,7 +280,7 @@ def _apply_file(session, patched: PatchedFile) -> AppliedFile:
         return AppliedFile(path=target, action="renamed")
 
     if not hunks:
-        raise UnifiedDiffError(f"{target}: binary patches are not supported")
+        raise UnifiedDiffError(f"{target}: no hunks and no binary payload")
 
     content = session.read(source)
     if isinstance(content, bytes):
@@ -245,6 +292,41 @@ def _apply_file(session, patched: PatchedFile) -> AppliedFile:
     else:
         session.write(source, patched_content)
     return AppliedFile(path=target, action="updated")
+
+
+def _apply_binary(session, patched, source: str, target: str) -> AppliedFile:
+    """Stage a ``GIT binary patch`` section through libgit2.
+
+    pyedit has no binary differ of its own, so the whole section goes
+    to `pyedit.memgit`, which applies it to a one-file tree holding
+    what the session has now. libgit2 verifies the patch by reversing
+    it back onto the preimage, so a payload that does not belong to
+    this file fails here rather than corrupting it.
+    """
+    from pyedit.memgit import MemGitError, MemoryRepo
+
+    before = {}
+    try:
+        # absent means the patch creates the file; every other read
+        # failure (a staged symlink, say) belongs to the caller
+        before[source] = session.read(source)
+    except FileNotFoundError:
+        pass
+
+    repo = MemoryRepo()
+    try:
+        result = repo.apply(repo.tree(before), patched.binary_patch)
+    except MemGitError as err:
+        raise UnifiedDiffError(f"{target}: {err}") from err
+
+    for path, entry in result.items():
+        session.write(path, entry.data)
+    if source not in result:
+        session.delete(source)
+        if not result:
+            return AppliedFile(path=source, action="deleted")
+        return AppliedFile(path=target, action="renamed")
+    return AppliedFile(path=target, action="created" if not before else "updated")
 
 
 def _strip_prefix(path: str) -> str | None:
