@@ -72,8 +72,9 @@ as a comment, so a second-guessed apply can be reverted:
 
 The undo is a patch against the disk exactly as this run left it:
 apply it before anything else touches the files, and undo the latest
-apply first. Binary changes cannot be undone (they are skipped with a
-note on stderr); undoing an undo just reapplies the original diff.
+apply first. Binary changes undo too: the stored undo carries a real
+binary payload even though the printed diff summarises. Undoing an
+undo just reapplies the original diff.
 
 ## OpenAI apply_patch (V4A)
 
@@ -95,9 +96,9 @@ the same context fuzzing as Codex:
 `--diff` handles create (`--- /dev/null`), delete (`+++ /dev/null`),
 pure renames and `\\ No newline at end of file` markers. A `GIT
 binary patch` section applies too, through libgit2, which verifies
-the payload against the file it patches. pyedit's own diffs still
-summarise binary changes in one line instead of carrying a payload,
-so a binary change is not undoable.
+the payload against the file it patches. The diffs pyedit prints keep
+summarising binary changes in one line, since the payload is base85
+noise to read; the stored undo diff carries the real payload.
 
 Both structured inputs fail closed: one hunk that cannot anchor
 fails the whole input -- nothing is staged, nothing is written, exit

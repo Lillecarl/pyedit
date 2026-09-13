@@ -1,5 +1,6 @@
 import pytest
 
+from pyedit.diff import binary_patch as _binary_patch
 from pyedit.session import EditSession
 from pyedit.udiff import UnifiedDiffError, apply_diff
 
@@ -214,35 +215,6 @@ def test_roundtrip_through_pyedit_output(project):
     assert roundtrip.staged()[project / "src" / "a.py"] == "ALPHA = 1\nbeta = 2\n"
 
 
-_ZERO_OID = "0" * 40
-
-
-def _binary_patch(path: str, old: bytes, new: bytes) -> str:
-    """A `git diff --binary` section for these two contents.
-
-    libgit2 writes the payload, so this is the same generator pyedit
-    would use to emit one.
-    """
-    import pygit2
-
-    from pyedit.memgit import MemoryRepo
-
-    repo = MemoryRepo()
-    body = (
-        repo.blob(old)
-        .diff(repo.blob(new), flags=pygit2.enums.DiffOption.SHOW_BINARY)
-        .text
-    )
-    old_oid = _ZERO_OID if not old else str(repo.write(old))
-    new_oid = _ZERO_OID if not new else str(repo.write(new))
-    header = f"diff --git a/{path} b/{path}\n"
-    if not old:
-        header += "new file mode 100644\n"
-    elif not new:
-        header += "deleted file mode 100644\n"
-    header += f"index {old_oid}..{new_oid} 100644\n"
-    return header + "GIT binary patch" + body.split("GIT binary patch", 1)[1]
-
 
 def test_binary_patch_updates_a_file(project):
     (project / "x.bin").write_bytes(b"\x00\x01\x02\x03")
@@ -257,7 +229,7 @@ def test_binary_patch_updates_a_file(project):
 def test_binary_patch_creates_a_file(project):
     session = EditSession()
     applied, _failures = apply_diff(
-        session, _binary_patch("fresh.bin", b"", b"\x00\x01\x02")
+        session, _binary_patch("fresh.bin", None, b"\x00\x01\x02")
     )
     assert applied[0].action == "created"
     assert session.staged()[project / "fresh.bin"] == b"\x00\x01\x02"
@@ -266,7 +238,9 @@ def test_binary_patch_creates_a_file(project):
 def test_binary_patch_deletes_a_file(project):
     (project / "x.bin").write_bytes(b"\x00\x01\x02")
     session = EditSession()
-    applied, _failures = apply_diff(session, _binary_patch("x.bin", b"\x00\x01\x02", b""))
+    applied, _failures = apply_diff(
+        session, _binary_patch("x.bin", b"\x00\x01\x02", None)
+    )
     assert applied[0].action == "deleted"
     assert session.staged()[project / "x.bin"] is None
 

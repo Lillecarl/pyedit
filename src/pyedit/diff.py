@@ -42,6 +42,7 @@ def unified_diffs(
     staged: dict[Path, str | bytes | None],
     context: int = 3,
     base: dict[Path, str | bytes | None] | None = None,
+    binary: bool = False,
 ) -> list[tuple[str, str]]:
     """Return (display path, diff text) for every staged change.
 
@@ -49,6 +50,11 @@ def unified_diffs(
     the file was not there), otherwise from disk truth. Reversing a
     diff means swapping the maps: undo = unified_diffs(pre_apply,
     base=post_apply).
+
+    `binary` swaps the one-line summary of a binary change for a real
+    `GIT binary patch` section, which re-applies. It is off by default
+    because the payload is base85 noise in a diff an agent reads; the
+    undo diff, which is stored and never printed, turns it on.
     """
     entries = []
     for path, new in sorted(staged.items()):
@@ -108,7 +114,10 @@ def unified_diffs(
             new_bytes = new.encode() if isinstance(new, str) else new
             if new_bytes == old_bytes:
                 continue
-            results.append((rel, binary_note(rel, old_bytes, new_bytes)))
+            if binary:
+                results.append((rel, binary_patch(rel, old_bytes, new_bytes)))
+            else:
+                results.append((rel, binary_note(rel, old_bytes, new_bytes)))
             continue
         fromfile = f"a/{rel}" if old is not None else "/dev/null"
         tofile = f"b/{rel}" if new is not None else "/dev/null"
@@ -138,6 +147,40 @@ def symlink_note(rel: str, old, new) -> str:
     if isinstance(new, Symlink):
         return f"Symlink {rel} -> {new} (replaces a regular file)\n"
     return f"Symlink {rel} -> {old} replaced by a regular file\n"
+
+
+_ZERO_OID = "0" * 40
+
+
+def binary_patch(rel: str, old: bytes | None, new: bytes | None) -> str:
+    """A `git diff --binary` section for one file.
+
+    libgit2 writes the payload and pyedit adds the headers it needs to
+    parse back: the paths, the mode line for a create or a delete, and
+    the blob ids. pyedit does not track file modes, so every regular
+    file is 100644.
+    """
+    from pyedit.memgit import MemoryRepo
+
+    import pygit2
+
+    repo = MemoryRepo()
+    old_bytes = b"" if old is None else old
+    new_bytes = b"" if new is None else new
+    body = (
+        repo.blob(old_bytes)
+        .diff(repo.blob(new_bytes), flags=pygit2.enums.DiffOption.SHOW_BINARY)
+        .text
+    )
+    old_oid = _ZERO_OID if old is None else str(repo.write(old_bytes))
+    new_oid = _ZERO_OID if new is None else str(repo.write(new_bytes))
+    header = f"diff --git a/{rel} b/{rel}\n"
+    if old is None:
+        header += "new file mode 100644\n"
+    elif new is None:
+        header += "deleted file mode 100644\n"
+    header += f"index {old_oid}..{new_oid} 100644\n"
+    return header + "GIT binary patch" + body.split("GIT binary patch", 1)[1]
 
 
 def binary_note(rel: str, old: str | bytes | None, new: str | bytes | None) -> str:

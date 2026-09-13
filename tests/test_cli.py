@@ -157,13 +157,30 @@ def test_undo_reverses_a_rename(project, capsys):
     assert not (project / "src" / "renamed.py").exists()
 
 
-def test_binary_changes_cannot_be_undone(project, capsys):
+def test_binary_create_undoes(project, capsys):
     binary = project / "bin.py"
     binary.write_text('pyedit.write("data.bin", b"\\x00\\x01\\x02")\n')
     assert run(project, "--apply", script=binary) == 0
-    out, err = capsys.readouterr()
-    assert "# pyedit undo" not in out
-    assert "binary changes cannot be undone" in err
+    out, _err = capsys.readouterr()
+    # the printed diff keeps its one-line summary; the stored undo
+    # carries the payload that puts the bytes back
+    assert "Binary file data.bin created (3 bytes)" in out
+    assert "GIT binary patch" not in out
+    assert (project / "data.bin").read_bytes() == b"\x00\x01\x02"
+
+    assert run(project, "--apply", undo_token(out)) == 0
+    assert not (project / "data.bin").exists()
+
+
+def test_binary_change_undoes(project, capsys):
+    (project / "data.bin").write_bytes(b"\x00\x01\x02")
+    binary = project / "bin.py"
+    binary.write_text('pyedit.write("data.bin", b"\\xff\\xfe")\n')
+    assert run(project, "--apply", script=binary) == 0
+    out, _err = capsys.readouterr()
+    assert (project / "data.bin").read_bytes() == b"\xff\xfe"
+
+    assert run(project, "--apply", undo_token(out)) == 0
     assert (project / "data.bin").read_bytes() == b"\x00\x01\x02"
 
 

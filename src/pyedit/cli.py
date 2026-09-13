@@ -344,14 +344,9 @@ def main(argv: list[str] | None = None) -> int:
 
     undo_id = None
     if args.apply and (not problems or args.force):
-        undo_id, skipped = _prepare_undo(staged, args.context)
+        undo_id = _prepare_undo(staged, args.context)
         if undo_id:
             marker = f"# pyedit undo {undo_id} (pyedit --apply {undo_id} to revert)\n"
-        if skipped:
-            print(
-                "pyedit: binary changes cannot be undone: " + ", ".join(skipped),
-                file=sys.stderr,
-            )
 
     if args.output == "-":
         sys.stdout.write(marker + diff_text + marker)
@@ -395,27 +390,21 @@ def main(argv: list[str] | None = None) -> int:
 
 def _prepare_undo(
     staged: dict[Path, str | bytes | None], context: int
-) -> tuple[str | None, list[str]]:
+) -> str | None:
     """Render the reverse of what is about to be applied, and store it.
 
-    Returns (stored id or None, binary paths that cannot be undone).
     The undo diff must be rendered before the staged state reaches the
     disk: its old side is the post-apply state, its new side the
-    pre-apply disk truth.
+    pre-apply disk truth. It is stored and never printed, so binary
+    changes carry a real payload here and undo like any other change.
     """
-    pre: dict[Path, str | bytes | None] = {}
-    skipped: list[str] = []
-    for path, applied in staged.items():
-        before = original(path)
-        if isinstance(before, bytes) or isinstance(applied, bytes):
-            skipped.append(display_path(path))
-        else:
-            pre[path] = before
+    pre = {path: original(path) for path in staged}
     if not pre:
-        return None, skipped
+        return None
     undo_text = "".join(
-        diff for _, diff in unified_diffs(pre, context=context, base=staged)
+        diff
+        for _, diff in unified_diffs(pre, context=context, base=staged, binary=True)
     )
     if not undo_text:
-        return None, skipped
-    return store.save(undo_text), skipped
+        return None
+    return store.save(undo_text)
