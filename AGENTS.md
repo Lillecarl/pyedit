@@ -29,6 +29,12 @@ If pyedit cannot perform an edit on its own codebase, that is a bug:
 file an issue instead of reaching for sed. Watchdog timeouts dump all
 thread stacks to `$XDG_STATE_HOME/pyedit/dumps/`.
 
+## Architecture
+
+`ARCHITECTURE.md` explains how the pieces fit: the one invariant, the
+shape of a run, why diffs have two audiences, and which parts of the
+job belong to libgit2. Read it before changing anything structural.
+
 ## Module map
 
 | module | job |
