@@ -1,6 +1,7 @@
 {
   lib,
   pkgs,
+  cffi,
   hatchling,
   unidiff,
   pathspec,
@@ -66,6 +67,7 @@ let
     build-system = [ hatchling ];
 
     dependencies = [
+      cffi
       unidiff
       pathspec
       rope

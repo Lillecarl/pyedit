@@ -39,6 +39,7 @@ thread stacks to `$XDG_STATE_HOME/pyedit/dumps/`.
 | `src/pyedit/vfs.py` | stdlib overlay patching so edit scripts see staged state |
 | `src/pyedit/cli.py` | arguments, dry-run/apply/undo, syntax gate, watchdog hookup |
 | `src/pyedit/diff.py`, `render.py` | git-style unified diffs (libgit2) |
+| `src/pyedit/memgit.py` | in-memory git objects and `git apply` (libgit2) |
 | `src/pyedit/patch.py` | OpenAI apply_patch (V4A) envelopes |
 | `src/pyedit/udiff.py` | unified diff parse and apply |
 | `src/pyedit/store.py` | dry-run/undo id store |
