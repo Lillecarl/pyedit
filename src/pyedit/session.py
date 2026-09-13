@@ -676,7 +676,9 @@ class EditSession:
                     payload = content
                 else:
                     payload = content.encode("utf-8")
-                fd = _REAL_OPEN(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
+                # os.open defaults to mode 0o777, which leaves every new
+                # file executable; 0o666 is what open() and the shell use
+                fd = _REAL_OPEN(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o666)
                 try:
                     _REAL_WRITE(fd, payload)
                 finally:

@@ -305,6 +305,12 @@ def test_rename_preserves_a_symlink(session, project):
     assert not (project / "link.txt").exists()
 
 
+def test_created_file_is_not_executable(session, project):
+    session.write("src/fresh.py", "alpha = 1\n")
+    session.apply()
+    assert not (project / "src" / "fresh.py").stat().st_mode & 0o111
+
+
 def test_symlink_creates_a_link(session, project):
     session.symlink("AGENTS.md", "CLAUDE.md")
     assert session.staged()[project / "CLAUDE.md"] == Symlink("AGENTS.md")
