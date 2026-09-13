@@ -3,7 +3,6 @@
   pkgs,
   cffi,
   hatchling,
-  unidiff,
   pathspec,
   rope,
   pygit2,
@@ -68,7 +67,6 @@ let
 
     dependencies = [
       cffi
-      unidiff
       pathspec
       rope
       pygit2

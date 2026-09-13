@@ -32,7 +32,7 @@ rec {
           scripts = {
             pyedit = "pyedit.cli:main";
           };
-          dependencies = with pkgs.python3Packages; [ unidiff ];
+          dependencies = [ ];
         })
       ]))
     ];
