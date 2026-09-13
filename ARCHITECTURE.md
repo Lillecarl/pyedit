@@ -38,8 +38,8 @@ Break this and the tool loses its reason to exist.
       +-- include/exclude filter
       +-- syntax check on staged text     warns; gates --apply
       |
-      +-- diff.unified_diffs(staged)      printed: notes for bytes and links
-      +-- diff.unified_diffs(replayable)  stored: git sections that re-apply
+      +-- diff.unified_diffs(staged)      printed: for an agent to read
+      +-- diff.replayable_patch(staged)   stored: one canonical git patch
       |     store.save -> dry-run id
       |     _prepare_undo -> undo id      (reverse, rendered before the write)
       |
@@ -110,13 +110,18 @@ symlink changes appear as one-line notes. They are *not* a patch for
 another tool; the ids in the surrounding comments are how a diff gets
 replayed.
 
-**Stored** diffs -- dry-run ids and undo ids -- are pyedit talking to
-itself. Nobody reads them, so they carry git's own sections for binary
-payloads and 120000 symlink modes, and they replay exactly.
+**Stored** patches -- dry-run ids and undo ids -- are pyedit talking to
+itself. Nobody reads them, so they are git-canonical: `diff --git`
+headers, mode lines, base85 payloads, 120000 symlink entries.
 
-`unified_diffs(..., replayable=True)` is the switch. `cli.py` turns it
-on only for the stored copies, and only when a note is present, so text
-runs render once.
+`diff.replayable_patch` writes one through libgit2 (tree to tree), and
+`gitpatch.apply_patch` reads it back the same way. **No Python parses a
+diff on this path.** Line numbers are exact by construction, so
+libgit2's one-position matching is enough.
+
+That loop is verified by round-tripping a change set -- text edit,
+create, delete, binary, symlink, no-EOL -- and comparing the staged
+state byte for byte.
 
 ## What git owns, and what pyedit owns
 
@@ -131,8 +136,12 @@ It owns the formats git invented and pyedit has no version of:
 - symlink entries, which are blobs with mode 120000
 - applying both, through `git_apply_to_tree`
 
-pyedit owns parsing and text application, and that is not an accident.
-libgit2's parser rejects most of what pyedit is handed:
+For its own patches pyedit owns nothing: libgit2 writes them and
+libgit2 applies them.
+
+A parser survives only for the formats something *else* wrote, reached
+from a script through `pyedit.apply_diff(text)`. libgit2 refuses those,
+because it rejects:
 
 - a diff with no `diff --git` line -- agents write these constantly
 - a create or delete with no `new file mode` / `deleted file mode`
@@ -144,9 +153,8 @@ And libgit2's applier has **no fuzz at all**: one line position,
 from the hint and falls back to whitespace-insensitive matching, which
 is what makes an agent's approximate line numbers land.
 
-So `udiff.py` parses everything, applies text hunks itself, and routes a
-section to libgit2 only when it declares a binary payload or a 120000
-mode (`_PatchedFile.needs_git`).
+So `udiff.py` exists for foreign input only. Anything pyedit generated
+goes the `gitpatch.py` way instead.
 
 `memgit.py`'s docstring carries three rules that will segfault or
 silently lie if you break them. Read it before adding a call there.
@@ -189,6 +197,7 @@ degrades: checking skips it, position queries raise.
 | a new input format | its own module beside `patch.py` / `udiff.py`, staging into the session |
 | a new language for checks or positions | `syntax/rules.py` plus the grammar in the nix expression |
 | anything needing real git | `memgit.py` -- read its docstring first |
+| the internal patch loop | `diff.replayable_patch` out, `gitpatch.py` back in |
 | changing what a diff looks like | `diff.py`, and decide printed or stored |
 
 Tests are the spec. Find the test that demonstrates a behaviour before

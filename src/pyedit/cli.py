@@ -20,9 +20,10 @@ from pathlib import Path
 import pyedit
 from pyedit import patch as _patch
 from pyedit import store
+from pyedit import gitpatch as _gitpatch
 from pyedit import udiff as _udiff
 from pyedit import vfs
-from pyedit.diff import NOTE_PREFIXES, unified_diffs, original
+from pyedit.diff import NOTE_PREFIXES, replayable_patch, unified_diffs, original
 from pyedit.session import Symlink
 from pyedit.session import EditSession, display_path
 from pyedit.skill import render_skill
@@ -162,7 +163,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def read_input(args: argparse.Namespace) -> tuple[str, str, str]:
-    """Return (input text, mode, filename for tracebacks); mode is 'patch', 'diff' or 'script'."""
+    """Return (input text, mode, filename for tracebacks).
+
+    'stored' is pyedit's own canonical patch, replayed from an id;
+    'patch' and 'diff' are formats something else wrote."""
     if isinstance(args.apply, str):
         if args.script or args.patch is not None or args.diff is not None:
             raise SystemExit("pyedit: --apply ID takes no other input")
@@ -172,7 +176,7 @@ def read_input(args: argparse.Namespace) -> tuple[str, str, str]:
                 f"pyedit: no stored dry-run {args.apply!r}; ids are printed "
                 "by earlier dry-runs"
             )
-        return stored.read_text(), "diff", stored.as_posix()
+        return stored.read_text(), "stored", stored.as_posix()
     for mode, option in (("patch", args.patch), ("diff", args.diff)):
         if option is not None and option != "-":
             path = Path(option)
@@ -252,7 +256,17 @@ def main(argv: list[str] | None = None) -> int:
     pyedit.session = session
 
     failures: list[str] = []
-    if mode == "patch":
+    if mode == "stored":
+        # pyedit's own patch: git wrote it, so git applies it
+        try:
+            _gitpatch.apply_patch(session, text)
+        except Exception:
+            traceback.print_exc()
+            print(
+                "pyedit: stored patch failed; nothing was written", file=sys.stderr
+            )
+            return EXIT_SCRIPT_ERROR
+    elif mode == "patch":
         try:
             _operations, failures = _patch.apply_patch(
                 session, text, strict=not args.force
@@ -332,17 +346,11 @@ def main(argv: list[str] | None = None) -> int:
         diff for _, diff in unified_diffs(staged, context=args.context)
     )
 
-    # dry-runs store the diff so the printed id alone can apply it later;
-    # applies store the reverse diff so the printed id alone can revert.
-    # What is stored replays binary and link changes; what is printed
-    # keeps the one-line note that only describes them. Match a note at
-    # the start of a line: the words appear inside diffs of this file.
-    stored_text = diff_text
-    if any(line.startswith(NOTE_PREFIXES) for line in diff_text.splitlines()):
-        stored_text = "".join(
-            diff
-            for _, diff in unified_diffs(staged, context=args.context, replayable=True)
-        )
+    # dry-runs store the patch so the printed id alone can apply it
+    # later; applies store the reverse so the id alone can revert. What
+    # is printed is for reading; what is stored is git-canonical and
+    # replays through libgit2.
+    stored_text = replayable_patch(staged, context=args.context)
     stored_id = store.save(stored_text) if staged and not args.apply else None
     if stored_id:
         marker = (
@@ -410,12 +418,7 @@ def _prepare_undo(
     pre = {path: original(path) for path in staged}
     if not pre:
         return None
-    undo_text = "".join(
-        diff
-        for _, diff in unified_diffs(
-            pre, context=context, base=staged, replayable=True
-        )
-    )
+    undo_text = replayable_patch(pre, context=context, base=staged)
     if not undo_text:
         return None
     return store.save(undo_text)

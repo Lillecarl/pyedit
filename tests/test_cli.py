@@ -65,8 +65,11 @@ def test_dry_run_prints_id_comments_and_stores_pure_diff(
     assert lines[-1] == lines[0]
     stored = dryrun_store / f"{token}.diff"
     text = stored.read_text()
-    assert text.startswith("--- a/src/a.py")
+    # the stored patch is git-canonical so libgit2 replays it; the
+    # printed diff is the readable rendering and has no such header
+    assert text.startswith("diff --git a/src/a.py b/src/a.py")
     assert "# pyedit" not in text
+    assert "diff --git" not in out
     assert f"saved as {token}" in err
 
 

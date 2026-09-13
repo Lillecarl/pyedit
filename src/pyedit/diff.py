@@ -156,6 +156,27 @@ def symlink_note(rel: str, old, new) -> str:
     return f"Symlink {rel} -> {old} replaced by a regular file\n"
 
 
+def replayable_patch(staged, context: int = 3, base=None) -> str:
+    """The whole change set as one git-canonical patch.
+
+    This is pyedit's internal representation: libgit2 writes it and
+    `pyedit.gitpatch` applies it back, so nothing in between parses a
+    diff. Unlike `unified_diffs` it is not for reading -- it carries
+    base85 payloads and 120000 modes.
+    """
+    before, after = {}, {}
+    for path, new in sorted(staged.items()):
+        old = base.get(path) if base is not None else original(path)
+        rel = display_path(path)
+        before.update(_git_side(rel, old))
+        after.update(_git_side(rel, new))
+    if before == after:
+        return ""
+    from pyedit.memgit import MemoryRepo
+
+    return MemoryRepo().patch(before, after, context)
+
+
 def file_patch(rel: str, old, new, context: int = 3) -> str:
     """A git patch section for one file, written by libgit2.
 

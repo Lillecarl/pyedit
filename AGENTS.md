@@ -47,7 +47,8 @@ job belong to libgit2. Read it before changing anything structural.
 | `src/pyedit/diff.py`, `render.py` | git-style unified diffs (libgit2) |
 | `src/pyedit/memgit.py` | in-memory git objects and `git apply` (libgit2) |
 | `src/pyedit/patch.py` | OpenAI apply_patch (V4A) envelopes |
-| `src/pyedit/udiff.py` | unified diff parse and apply |
+| `src/pyedit/udiff.py` | unified diff parse and apply (foreign input) |
+| `src/pyedit/gitpatch.py` | apply pyedit's own canonical patch (libgit2) |
 | `src/pyedit/store.py` | dry-run/undo id store |
 | `src/pyedit/syntax/` | tree-sitter position queries, outlines, syntax checks |
 | `src/pyedit/rope.py` | Python refactors: rename_symbol, rename_module, references |
