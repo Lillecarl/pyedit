@@ -1,10 +1,14 @@
 """Unified diff rendering for staged changes.
 
 Headers follow git conventions (``a/`` and ``b/`` prefixes, ``/dev/null``
-for added and deleted files), so text output can be piped to ``git
-apply`` or ``patch -p1``. Hunk bodies come from ``pyedit.render``
-(libgit2); this module handles per-file orchestration and headers.
-Changes involving bytes render as one-line summaries instead of hunks.
+for added and deleted files), because an agent reads these diffs and
+git is the format it knows. The output is a representation, not a
+patch for another tool to apply: bytes and symlinks render as one-line
+summaries. ``binary=True`` swaps a binary summary for a real payload,
+and only the stored diffs -- dry-run ids and undo -- ask for it.
+
+Hunk bodies come from ``pyedit.render`` (libgit2); this module handles
+per-file orchestration and headers.
 """
 
 from __future__ import annotations

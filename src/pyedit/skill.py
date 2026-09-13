@@ -41,8 +41,11 @@ Options:
 Exit codes: 0 ok, 1 input failed (nothing written), 2 usage error,
 124 watchdog timeout (thread stacks in
 `$XDG_STATE_HOME/pyedit/dumps`, default `~/.local/state/pyedit/dumps`).
-Diffs are git-style (`a/`, `b/`, `/dev/null`); the output pipes to
-`git apply` or `patch -p1`.
+Diffs are git-style (`a/`, `b/`, `/dev/null`) because that is the
+format you already read. They are a representation of what changed,
+not a patch for another tool: binary and link changes appear as
+one-line notes. Replay a diff through the stored ids below, not by
+piping the printed text.
 
 ## Dry-run ids and undo
 
@@ -110,8 +113,8 @@ since a script can write its own try/except.
 
 A pure rename -- a moved file or directory whose content is
 unchanged -- renders as git rename headers (`similarity index
-100%`) instead of delete+create, and re-applies through `-d`, undo
-and `git apply`.
+100%`) instead of delete+create, and re-applies through `-d` and
+undo.
 
 ## Writing scripts
 
@@ -382,11 +385,11 @@ Create, move and prune with stdlib tools:
   bypass the overlay.
 - Symlinks are first-class: `rename` moves the link itself and
   `symlink()` creates one. Link changes render as one-line notes
-  in the diff (like binaries), so `git apply` cannot recreate
-  them and a stored-id undo cannot replay them; pyedit's own
-  `--apply` handles both exactly. A diff input carrying notes
-  (an undo, re-fed output) applies its hunks and warns, naming
-  each note-only change it skipped. Reads and open() cannot
+  in the diff and a stored-id undo cannot replay them; pyedit's
+  own `--apply` handles them exactly. Binary changes render as
+  notes too, but stored diffs carry a real payload, so those do
+  replay. Printed output fed back in applies its hunks and warns,
+  naming each note-only change it skipped. Reads and open() cannot
   follow a staged link -- they resolve after apply.
 - Directories are not tracked: parents of new files are created on
   `--apply`; empty directories never appear in diffs.
