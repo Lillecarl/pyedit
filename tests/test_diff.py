@@ -10,6 +10,23 @@ def staged(project, actions):
     return session.staged()
 
 
+def test_create_without_trailing_newline_reparses(project):
+    # the 0.1.x renderer lost the last line and the no-newline
+    # marker on creates like these, which unidiff then refused
+    bind = "\n".join(
+        ["import argparse", "", "def register(subparsers):", "    pass"]
+    )
+    session = EditSession()
+    session.write("bind_key.py", bind)
+    session.write("next.py", "y\n")
+    text = "".join(t for _, t in unified_diffs(session.staged()))
+    assert "No newline" in text
+    replay = EditSession()
+    applied, _failures = apply_diff(replay, text)
+    assert [a.action for a in applied] == ["created", "created"]
+    assert replay.staged()[project / "bind_key.py"] == bind
+
+
 def test_symlink_changes_render_as_notes(project):
     session = EditSession()
     session.symlink("AGENTS.md", "CLAUDE.md")

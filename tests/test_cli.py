@@ -109,6 +109,20 @@ def test_undo_reverts_an_apply(project, script, capsys):
     assert (project / "src" / "a.py").read_text() == original
 
 
+def test_stored_id_replay_of_create_heavy_diffs(project, capsys):
+    script = project / "edit.py"
+    body = "\n".join(
+        f'pyedit.write("mod{i}.py", "line1\\nline2\\n")' for i in range(10)
+    )
+    script.write_text(body + "\n")
+    assert run(project, script=script) == 0
+    token = re.search(
+        r"dry-run ([0-9a-f]{8})", capsys.readouterr().out
+    ).group(1)
+    assert run(project, "--apply", token) == 0
+    assert all((project / f"mod{i}.py").exists() for i in range(10))
+
+
 def test_undo_recreates_a_deleted_file(project, capsys):
     victim = project / "src" / "b.py"
     assert victim.read_text() == "beta = 2\n"

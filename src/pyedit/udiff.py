@@ -1,17 +1,18 @@
 """Unified diff support.
 
-Parsing uses ``unidiff``; application stages every file into the edit
-session overlay, so a unified diff is a dry-run like any other input.
-Matching is newline-tolerant (files may or may not end in a newline)
-with a whitespace-insensitive fallback pass, mirroring the fuzz
-behaviour of the V4A applier.
+Parsing is pyedit's own: unidiff rejects git-canonical sections it
+should accept (a no-newline create followed by anything, a delete
+next to a ``diff --git`` header), and the stored-id replay path
+parses pyedit's own output. Application stages every file into the
+edit session overlay, so a unified diff is a dry-run like any other
+input. Matching is newline-tolerant with a whitespace-insensitive
+fallback pass, mirroring the fuzz behaviour of the V4A applier.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
-from unidiff import PatchSet, PatchedFile
+import re
+from dataclasses import dataclass, field
 
 
 class UnifiedDiffError(ValueError):
@@ -24,6 +25,163 @@ class AppliedFile:
     action: str
 
 
+@dataclass
+class _Line:
+    line_type: str
+    value: str
+
+    def __str__(self) -> str:
+        return f"{self.line_type}{self.value}"
+
+
+@dataclass
+class _Hunk:
+    source_start: int
+    source_length: int
+    target_start: int
+    target_length: int
+    lines: list[_Line] = field(default_factory=list)
+    source_seen: int = 0
+    target_seen: int = 0
+
+    def __iter__(self):
+        return iter(self.lines)
+
+    def feed(self, line: _Line) -> bool:
+        """Consume one hunk line; True when the hunk is complete."""
+        self.lines.append(line)
+        if line.line_type == " ":
+            self.source_seen += 1
+            self.target_seen += 1
+        elif line.line_type == "+":
+            self.target_seen += 1
+        elif line.line_type == "-":
+            self.source_seen += 1
+        return (
+            self.source_seen >= self.source_length
+            and self.target_seen >= self.target_length
+        )
+
+
+@dataclass
+class _PatchedFile:
+    source_file: str | None = None
+    target_file: str | None = None
+    is_rename: bool = False
+    hunks: list[_Hunk] = field(default_factory=list)
+
+    @property
+    def is_added_file(self) -> bool:
+        return self.source_file == "/dev/null"
+
+    @property
+    def is_removed_file(self) -> bool:
+        return self.target_file == "/dev/null"
+
+    def __iter__(self):
+        return iter(self.hunks)
+
+
+_HUNK_RE = re.compile(
+    r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@"
+)
+
+
+def _parse(text: str) -> list[_PatchedFile]:
+    """Parse pyedit-style unified diffs; raises UnifiedDiffError.
+
+    Line values keep their newline: the hunk consumers expect the
+    git convention. The ``\\ No newline`` marker attaches to the
+    open hunk, or to the last closed one when the counts already
+    consumed every line."""
+    files: list[_PatchedFile] = []
+    lines = text.splitlines(keepends=True)
+    current: _PatchedFile | None = None
+    hunk: _Hunk | None = None
+    expect = None
+    for raw in lines:
+        if hunk is not None:
+            if raw.startswith("\\"):
+                hunk.lines.append(_Line("\\", raw[1:]))
+                continue
+            if raw[:1] in (" ", "+", "-"):
+                if hunk.feed(_Line(raw[0], raw[1:])):
+                    hunk = None
+                continue
+            raise UnifiedDiffError(f"cannot parse hunk line: {raw!r}")
+        if raw.startswith("\\"):
+            if files and files[-1].hunks:
+                files[-1].hunks[-1].lines.append(_Line("\\", raw[1:]))
+            continue
+        if raw.startswith("--- "):
+            source = raw[4:].rstrip("\n").split("\t")[0]
+            same = (
+                current is not None
+                and current.target_file is not None
+                and _strip_prefix(source) == current.source_file
+            )
+            if not same:
+                current = _PatchedFile(source_file=source)
+                files.append(current)
+            expect = "target"
+            continue
+        if raw.startswith("+++ "):
+            if current is None:
+                raise UnifiedDiffError(
+                    f"target without source: {raw.rstrip()}"
+                )
+            current.target_file = raw[4:].rstrip("\n").split("\t")[0]
+            expect = None
+            continue
+        if raw.startswith("rename from "):
+            if current is None:
+                current = _PatchedFile()
+                files.append(current)
+            current.source_file = raw[12:].rstrip("\n")
+            continue
+        if raw.startswith("rename to "):
+            if current is None:
+                current = _PatchedFile()
+                files.append(current)
+            current.target_file = raw[10:].rstrip("\n")
+            current.is_rename = True
+            continue
+        m = _HUNK_RE.match(raw)
+        if m and current is not None:
+            hunk = _Hunk(
+                int(m.group(1)),
+                int(m.group(2) or "1"),
+                int(m.group(3)),
+                int(m.group(4) or "1"),
+            )
+            current.hunks.append(hunk)
+            continue
+        if raw.startswith(
+            (
+                "#",
+                "diff --git",
+                "index ",
+                "similarity ",
+                "new file mode",
+                "deleted file mode",
+                "old mode",
+                "new mode",
+                "copy from",
+                "copy to",
+                "Binary file",
+                "Symlink ",
+            )
+        ):
+            continue
+        if raw.strip() == "":
+            continue
+        raise UnifiedDiffError(f"cannot parse line: {raw!r}")
+    for f in files:
+        if f.source_file is None and f.target_file is None:
+            raise UnifiedDiffError("file section without source and target")
+    return files
+
+
 def apply_diff(session, text: str, strict: bool = True) -> list[AppliedFile]:
     """Parse a unified diff and stage every file on the session.
 
@@ -32,7 +190,9 @@ def apply_diff(session, text: str, strict: bool = True) -> list[AppliedFile]:
     the patch staged. strict=False skips the failed files (the
     caller warns) and stages the rest."""
     try:
-        patch_set = PatchSet.from_string(text)
+        patch_set = _parse(text)
+    except UnifiedDiffError:
+        raise
     except Exception as err:
         raise UnifiedDiffError(f"invalid unified diff: {err}") from err
     applied: list[AppliedFile] = []
