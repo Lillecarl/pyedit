@@ -113,6 +113,16 @@ def test_apply_matches_context_despite_trailing_whitespace(project):
     assert session.staged()[project / "src" / "a.py"] == "alpha = 42\nbeta = 2\n"
 
 
+def test_context_line_keeps_the_file_whitespace(project):
+    (project / "src" / "a.py").write_text("alpha = 1\nbeta = 2\n")
+    session = EditSession()
+    apply_diff(
+        session,
+        "--- a/src/a.py\n+++ b/src/a.py\n@@ -1,2 +1,2 @@\n alpha = 1  \n-beta = 2\n+beta = 42\n",
+    )
+    assert session.staged()[project / "src" / "a.py"] == "alpha = 1\nbeta = 42\n"
+
+
 def test_context_mismatch_raises(project):
     session = EditSession()
     with pytest.raises(UnifiedDiffError, match="context not found"):

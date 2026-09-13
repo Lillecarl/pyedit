@@ -259,7 +259,7 @@ def _assemble_new(hunks) -> str:
     text = ""
     new_no_nl = False
     for hunk in hunks:
-        _, new_block, marker = _split_hunk(hunk)
+        _, new_block, _context, marker = _split_hunk(hunk)
         new_no_nl = new_no_nl or marker
         text += "".join(new_block)
     if new_no_nl and text.endswith("\n"):
@@ -274,7 +274,7 @@ def _apply_hunks(content: str, hunks) -> str:
     ends_without_newline = False
 
     for hunk in hunks:
-        old_block, new_block, new_no_nl = _split_hunk(hunk)
+        old_block, new_block, context, new_no_nl = _split_hunk(hunk)
 
         hint = hunk.source_start - 1 if hunk.source_length else hunk.source_start
         index = _find_block(lines, old_block, hint)
@@ -283,7 +283,13 @@ def _apply_hunks(content: str, hunks) -> str:
         if new_no_nl and index + len(old_block) >= len(lines):
             ends_without_newline = True
         result.extend(lines[cursor:index])
-        result.extend(new_block)
+        # context lines come from the file, not from the patch: the
+        # match may have come from the whitespace-insensitive pass,
+        # and the file's own spacing is the one that survives
+        block = list(new_block)
+        for new_at, old_at in context:
+            block[new_at] = lines[index + old_at]
+        result.extend(block)
         cursor = index + len(old_block)
 
     result.extend(lines[cursor:])
@@ -297,14 +303,20 @@ def _apply_hunks(content: str, hunks) -> str:
     return "".join(body)
 
 
-def _split_hunk(hunk) -> tuple[list[str], list[str], bool]:
-    """Split hunk lines into (old block, new block, new side ends without newline).
+def _split_hunk(hunk) -> tuple[list[str], list[str], list[tuple[int, int]], bool]:
+    """Split hunk lines into (old block, new block, context map, new side
+    ends without newline).
+
+    The context map pairs each context line's index in the new block
+    with its index in the old block, so a caller can substitute the
+    file's own line for the patch's copy.
 
     A '\\ No newline at end of file' marker annotates the '-' or '+' line
     right before it; only the '+' side matters when assembling.
     """
     old_block: list[str] = []
     new_block: list[str] = []
+    context: list[tuple[int, int]] = []
     pending: str | None = None
     new_no_nl = False
     for line in hunk:
@@ -319,9 +331,10 @@ def _split_hunk(hunk) -> tuple[list[str], list[str], bool]:
         else:
             old_block.append(str(line)[1:])
             if line_type == " ":
+                context.append((len(new_block), len(old_block) - 1))
                 new_block.append(str(line)[1:])
             pending = None if line_type == " " else "old"
-    return old_block, new_block, new_no_nl
+    return old_block, new_block, context, new_no_nl
 
 
 def _find_block(lines: list[str], block: list[str], hint: int) -> int:
