@@ -27,10 +27,7 @@ rec {
         p.pytest
         (p.mkPythonEditablePackage {
           pname = "pyedit";
-          version = builtins.elemAt (
-            builtins.match "(.|\n)*__version__ = \"([^\"]+)\"(.|\n)*"
-              (builtins.readFile ./src/pyedit/_version.py)
-          ) 1;
+          version = (builtins.fromTOML (builtins.readFile ./pyproject.toml)).project.version;
           root = toString ./src;
           scripts = {
             pyedit = "pyedit.cli:main";

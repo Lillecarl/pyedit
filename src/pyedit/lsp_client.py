@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+from importlib import metadata
 from pathlib import Path
 from urllib.parse import urlparse
 from urllib.request import url2pathname
@@ -27,7 +28,6 @@ from pygls.lsp.client import LanguageClient as _LanguageClient
 
 from pyedit.rope import Reference, _require_token
 from pyedit.session import EditSession
-from pyedit._version import __version__
 
 logger = logging.getLogger(__name__)
 
@@ -297,7 +297,7 @@ class LspSession:
         self._loop.run_forever()
 
     async def _connect(self) -> None:
-        client = _LanguageClient("pyedit", __version__)
+        client = _LanguageClient("pyedit", metadata.version("pyedit"))
         self._client = client
         if self._in_memory is not None:
             to_server = asyncio.StreamReader()

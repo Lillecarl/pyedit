@@ -40,8 +40,7 @@ let
 
   attrs = {
     pname = "pyedit";
-    # one source: src/pyedit/_version.py, read by hatchling too
-    version = builtins.elemAt (builtins.match "(.|\n)*__version__ = \"([^\"]+)\"(.|\n)*" (builtins.readFile ../src/pyedit/_version.py)) 1;
+    version = (builtins.fromTOML (builtins.readFile ../pyproject.toml)).project.version;
     pyproject = true;
 
     src = lib.cleanSourceWith {

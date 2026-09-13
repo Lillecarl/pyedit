@@ -1,12 +1,16 @@
 """pyedit: scripted multi-file edits with dry-run diffs for AI agents."""
 
 from collections.abc import Sequence
+from importlib.metadata import version as _installed_version
 from pathlib import Path
 
-from pyedit._version import __version__
 from pyedit.lsp_client import LspSession
 from pyedit.merge import Collision, VFS
 from pyedit.session import Symlink
+
+# hatchling writes the pyproject version into the installed metadata;
+# reading it back keeps the number in one file, which Nix parses as TOML
+__version__ = _installed_version("pyedit")
 
 __all__ = [
     "LspSession",
