@@ -353,11 +353,16 @@ def _find_block(lines: list[str], block: list[str], hint: int) -> int:
 
 
 def _search_order(length: int, size: int, hint: int):
-    # hint, hint-1, hint+1, hint-2, hint+2 ...
-    for offset in range(length - size + 1):
-        if offset % 2 == 0:
-            position = hint + offset // 2
-        else:
-            position = hint - (offset + 1) // 2
-        if 0 <= position <= length - size:
-            yield position
+    # hint, hint-1, hint+1, hint-2, hint+2 ... Walk to both edges:
+    # counting candidates instead spends the count on positions
+    # outside the file and gives up early on a hint near an edge
+    last = length - size
+    if last < 0:
+        return
+    hint = max(0, min(hint, last))
+    yield hint
+    for offset in range(1, last + 1):
+        if hint - offset >= 0:
+            yield hint - offset
+        if hint + offset <= last:
+            yield hint + offset

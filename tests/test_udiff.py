@@ -123,6 +123,32 @@ def test_context_line_keeps_the_file_whitespace(project):
     assert session.staged()[project / "src" / "a.py"] == "alpha = 1\nbeta = 42\n"
 
 
+def test_anchor_found_when_the_hint_is_past_the_end(project):
+    (project / "src" / "a.py").write_text("one\ntwo\nthree\nfour\nfive\n")
+    session = EditSession()
+    apply_diff(
+        session,
+        "--- a/src/a.py\n+++ b/src/a.py\n@@ -5,3 +5,3 @@\n two\n-three\n+THREE\n four\n",
+    )
+    assert (
+        session.staged()[project / "src" / "a.py"]
+        == "one\ntwo\nTHREE\nfour\nfive\n"
+    )
+
+
+def test_anchor_found_at_the_far_end_from_a_zero_hint(project):
+    (project / "src" / "a.py").write_text("one\ntwo\nthree\nfour\nfive\n")
+    session = EditSession()
+    apply_diff(
+        session,
+        "--- a/src/a.py\n+++ b/src/a.py\n@@ -1,3 +1,3 @@\n three\n-four\n+FOUR\n five\n",
+    )
+    assert (
+        session.staged()[project / "src" / "a.py"]
+        == "one\ntwo\nthree\nFOUR\nfive\n"
+    )
+
+
 def test_context_mismatch_raises(project):
     session = EditSession()
     with pytest.raises(UnifiedDiffError, match="context not found"):
