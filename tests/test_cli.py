@@ -157,6 +157,22 @@ def test_undo_reverses_a_rename(project, capsys):
     assert not (project / "src" / "renamed.py").exists()
 
 
+def test_stored_dry_run_replays_a_binary_change(project, capsys):
+    (project / "data.bin").write_bytes(b"\x00\x01\x02")
+    binary = project / "bin.py"
+    binary.write_text('pyedit.write("data.bin", b"\\xff\\xfe")\n')
+    assert run(project, script=binary) == 0
+    out, _err = capsys.readouterr()
+    # printed as a summary, stored with the payload
+    assert "Binary file data.bin changed (3 -> 2 bytes)" in out
+    assert "GIT binary patch" not in out
+    assert (project / "data.bin").read_bytes() == b"\x00\x01\x02"
+
+    token = re.search(r"# pyedit dry-run ([0-9a-f]{8})", out).group(1)
+    assert run(project, "--apply", token) == 0
+    assert (project / "data.bin").read_bytes() == b"\xff\xfe"
+
+
 def test_binary_create_undoes(project, capsys):
     binary = project / "bin.py"
     binary.write_text('pyedit.write("data.bin", b"\\x00\\x01\\x02")\n')

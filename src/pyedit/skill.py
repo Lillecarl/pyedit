@@ -98,7 +98,9 @@ pure renames and `\\ No newline at end of file` markers. A `GIT
 binary patch` section applies too, through libgit2, which verifies
 the payload against the file it patches. The diffs pyedit prints keep
 summarising binary changes in one line, since the payload is base85
-noise to read; the stored undo diff carries the real payload.
+noise to read. Stored diffs carry the real payload, so a dry-run id
+and an undo id both replay a binary change; a printed diff piped back
+in does not, and says so on stderr.
 
 Both structured inputs fail closed: one hunk that cannot anchor
 fails the whole input -- nothing is staged, nothing is written, exit

@@ -333,8 +333,17 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     # dry-runs store the diff so the printed id alone can apply it later;
-    # applies store the reverse diff so the printed id alone can revert
-    stored_id = store.save(diff_text) if staged and not args.apply else None
+    # applies store the reverse diff so the printed id alone can revert.
+    # What is stored carries binary payloads; what is printed keeps the
+    # one-line summary, so a stored id replays a binary change that the
+    # printed diff only describes.
+    stored_text = diff_text
+    if "Binary file " in diff_text:
+        stored_text = "".join(
+            diff
+            for _, diff in unified_diffs(staged, context=args.context, binary=True)
+        )
+    stored_id = store.save(stored_text) if staged and not args.apply else None
     if stored_id:
         marker = (
             f"# pyedit dry-run {stored_id} (pyedit --apply {stored_id} to apply)\n"
