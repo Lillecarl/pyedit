@@ -40,7 +40,7 @@ def test_restaging_identical_bytes_is_a_no_op(project):
     (project / "img.bin").write_bytes(b"raw bytes")
     session = EditSession()
     session.write("img.bin", b"raw bytes")
-    assert not session.diff().strip()
+    assert not session.diff_git().strip()
     session.prune_unchanged()
     assert project / "img.bin" not in session.staged()
 
@@ -129,11 +129,11 @@ def test_identical_binary_stage_renders_nothing(project):
     session = EditSession()
     assert isinstance(session.read("data.bin"), bytes)
     session.write("data.bin", blob)
-    assert session.diff() == ""
+    assert session.diff_git() == ""
     session.write("data.bin", b"")
-    assert "changed (4 -> 0 bytes)" in session.diff()
+    assert "changed (4 -> 0 bytes)" in session.diff_git()
     session.write("data.bin", b"\xff")
-    assert "changed (4 -> 1 bytes)" in session.diff()
+    assert "changed (4 -> 1 bytes)" in session.diff_git()
 
 
 def test_deleted_diff_to_dev_null(project):

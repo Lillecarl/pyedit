@@ -72,8 +72,8 @@ def test_apply_patch_stages_all_operations(project):
 def test_deleting_a_pre_existing_file_renders_a_removal(project):
     session = EditSession()
     apply_patch(session, "*** Begin Patch\n*** Delete File: src/a.py\n*** End Patch\n")
-    assert "+++ /dev/null" in session.diff()
-    assert "-alpha = 1" in session.diff()
+    assert "+++ /dev/null" in session.diff_git()
+    assert "-alpha = 1" in session.diff_git()
 
 
 def test_create_then_delete_nets_to_nothing(project):
@@ -82,7 +82,7 @@ def test_create_then_delete_nets_to_nothing(project):
     session = EditSession()
     apply_patch(session, "*** Begin Patch\n*** Add File: src/tmp.py\n+x = 1\n*** End Patch\n")
     apply_patch(session, "*** Begin Patch\n*** Delete File: src/tmp.py\n*** End Patch\n")
-    assert session.diff() == ""
+    assert session.diff_git() == ""
 
 
 def test_apply_patch_update_with_move_to(project):

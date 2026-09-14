@@ -212,8 +212,8 @@ read-your-writes holds. Anything you can write in Python works.
     pyedit.apply_diff_unidiff(text)  stage a unified diff read by the
                                      unidiff library (text hunks,
                                      anchored by search)
-    pyedit.diff(context=3)           the staged changes as one diff
-                                     text
+    pyedit.diff_git(context=3)       the staged changes as one diff
+                                     text, rendered by libgit2
     pyedit.apply(paths=None)         write the staged state to disk
                                      now, even in a dry-run; prefer
                                      the CLI's --apply

@@ -332,7 +332,7 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
                 content = content.encode()
             if content != base:
                 pending = True
-        assert bool(self.session.diff().strip()) == pending
+        assert bool(self.session.diff_git().strip()) == pending
 
     @rule()
     def rmtree_the_dir(self):
@@ -596,7 +596,7 @@ class ScopeMachine(RuleBasedStateMachine):
             rel in self.overlay and self.overlay[rel] != self.disk.get(rel)
             for rel in self.known
         )
-        assert bool(self.session.diff().strip()) == changed
+        assert bool(self.session.diff_git().strip()) == changed
 
     def teardown(self):
         self.restore()

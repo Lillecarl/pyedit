@@ -204,7 +204,7 @@ def test_apply_writes_merged_state(root, project):
 def test_diff_renders_the_merged_state(root):
     with VFS():
         pyedit.edit("src/a.py", "alpha", "ALPHA")
-    diff = root.diff()
+    diff = root.diff_git()
     assert "--- a/src/a.py" in diff
     assert "+ALPHA = 1" in diff
 

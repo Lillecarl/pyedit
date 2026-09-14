@@ -666,8 +666,14 @@ class EditSession:
     def staged(self) -> dict[Path, str | bytes | None]:
         return dict(self._staged)
 
-    def diff(self, context: int = 3) -> str:
-        """The staged changes as one git-style unified diff text."""
+    def diff_git(self, context: int = 3) -> str:
+        """The staged changes as one git-style unified diff text.
+
+        Named for the renderer, like the apply entry points. Not
+        `diff`: `pyedit.diff` is this package's diff module, so the
+        module wins the attribute lookup and a script calling it gets
+        "'module' object is not callable" instead of a diff.
+        """
         from pyedit.diff import unified_diffs
 
         return "".join(d for _, d in unified_diffs(self.staged(), context))
