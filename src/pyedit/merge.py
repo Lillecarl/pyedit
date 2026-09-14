@@ -84,6 +84,15 @@ class VFS:
         return False
 
     def _merge(self, child: EditSession) -> None:
+        import os
+
+        if os.environ.get("PYEDIT_GIT_MERGE"):
+            from pyedit import gitmerge
+
+            try:
+                return gitmerge.merge(self._parent, child)
+            except gitmerge.GitMergeError as err:
+                raise Collision(str(err)) from err
         child.prune_unchanged()
         results: list[tuple[Path, str | bytes | None]] = []
         for path, content in sorted(child.staged().items()):
