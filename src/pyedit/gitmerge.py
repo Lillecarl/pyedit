@@ -49,7 +49,7 @@ def merge(parent, child) -> None:
         if entry is not None:
             base[keys[path]] = entry
 
-    merged = repo._repo.merge_trees(
+    merged = repo.merge(
         repo.tree(base),
         repo.tree(_side(base, keys, ours)),
         repo.tree(_side(base, keys, theirs)),

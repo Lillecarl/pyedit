@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 import pyedit
@@ -149,6 +151,11 @@ def test_binary_conflict(root):
             pyedit.write("blob.bin", b"\x00second")
 
 
+@pytest.mark.skipif(
+    bool(os.environ.get("PYEDIT_GIT_MERGE")),
+    reason="git pairs the delete with the add and carries the edit over; "
+    "test_gitmerge.py pins that verdict instead",
+)
 def test_rename_as_delete_plus_create(root):
     with VFS():
         pyedit.rename("src/a.py", "src/renamed.py")

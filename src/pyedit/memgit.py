@@ -206,6 +206,15 @@ class MemoryRepo:
             index.add(self._pygit2.IndexEntry(path, self.write(content), mode))
         return self._repo[index.write_tree(self._repo)]
 
+    def merge(self, ancestor, ours, theirs):
+        """Three-way merge of three trees; returns the index.
+
+        A conflicted path carries every stage, so iterating the result
+        yields it once per stage. Read `conflicts` first and skip those
+        paths, or the last stage silently wins.
+        """
+        return self._repo.merge_trees(ancestor, ours, theirs)
+
     def patch(self, before, after, context: int = 3) -> str:
         """The git patch that turns one file map into the other.
 
