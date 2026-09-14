@@ -240,7 +240,10 @@ def test_cli_patch_without_trailing_newline_renders_git_apply_clean_diff(
 ):
     envelope = "*** Begin Patch\n*** Add File: fresh.txt\n+first\n*** End Patch\n"
     (project / "nl.envelope").write_text(envelope)
+    (project / "edit.py").write_text(
+        'pyedit.apply_v4a(open("nl.envelope").read())\n'
+    )
     target = project / "nl.diff"
-    assert cli.main(["--patch", "nl.envelope", "-o", str(target)]) == 0
+    assert cli.main(["--script", "edit.py", "-o", str(target)]) == 0
     rendered = target.read_text()
     assert rendered.endswith("+first\n\\ No newline at end of file\n")

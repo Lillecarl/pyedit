@@ -1,12 +1,14 @@
 """pyedit command line interface.
 
-Input is a Python edit script (-s/--script), an OpenAI apply_patch (V4A)
-envelope (-p/--patch) or a unified diff (-d/--diff); bare stdin is
-auto-detected between the three. Input runs against an in-memory
-overlay: the result prints as a unified diff and nothing is written to
-disk unless --apply is given. A dry-run's diff is also saved under a
-short id in a temp store, printed as a comment around the diff, so the
-id alone can apply it later (--apply ID).
+Input is a Python edit script, from -s/--script or from stdin. It runs
+against an in-memory overlay: the result prints as a unified diff and
+nothing is written to disk unless --apply is given. A dry-run's diff is
+also saved under a short id in a temp store, printed as a comment around
+the diff, so the id alone can apply it later (--apply ID).
+
+Foreign patch formats are script APIs, not input modes. A script calls
+pyedit.apply_v4a(text) or pyedit.apply_diff(text) and keeps every other
+pyedit call around it.
 """
 
 from __future__ import annotations
@@ -18,12 +20,10 @@ import traceback
 from pathlib import Path
 
 import pyedit
-from pyedit import patch as _patch
 from pyedit import store
 from pyedit import gitpatch as _gitpatch
-from pyedit import udiff as _udiff
 from pyedit import vfs
-from pyedit.diff import NOTE_PREFIXES, replayable_patch, unified_diffs, original
+from pyedit.diff import replayable_patch, unified_diffs, original
 from pyedit.session import Symlink
 from pyedit.session import EditSession, display_path
 from pyedit.skill import render_skill
@@ -43,37 +43,11 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         epilog="Run 'pyedit skill' for the agent-facing usage guide.",
     )
-    source = parser.add_mutually_exclusive_group()
-    source.add_argument(
+    parser.add_argument(
         "-s",
         "--script",
         metavar="FILE",
         help="edit script to run (default: read from stdin, '-' is stdin)",
-    )
-    source.add_argument(
-        "-p",
-        "--patch",
-        nargs="?",
-        const="-",
-        default=None,
-        metavar="FILE",
-        help=(
-            "apply an OpenAI apply_patch (V4A) envelope from FILE instead of "
-            "running a script ('-' is stdin; bare '*** Begin Patch' input on "
-            "stdin is auto-detected)"
-        ),
-    )
-    source.add_argument(
-        "-d",
-        "--diff",
-        nargs="?",
-        const="-",
-        default=None,
-        metavar="FILE",
-        help=(
-            "apply a unified diff from FILE instead of running a script "
-            "('-' is stdin; git-style diffs on stdin are auto-detected)"
-        ),
     )
     parser.add_argument(
         "-a",
@@ -165,10 +139,12 @@ def build_parser() -> argparse.ArgumentParser:
 def read_input(args: argparse.Namespace) -> tuple[str, str, str]:
     """Return (input text, mode, filename for tracebacks).
 
-    'stored' is pyedit's own canonical patch, replayed from an id;
-    'patch' and 'diff' are formats something else wrote."""
+    'script' is python to run; 'stored' is pyedit's own canonical patch,
+    replayed from an id. Nothing here sniffs a format: stdin is a
+    script, and a patch a script wants to stage goes through
+    pyedit.apply_v4a or pyedit.apply_diff."""
     if isinstance(args.apply, str):
-        if args.script or args.patch is not None or args.diff is not None:
+        if args.script:
             raise SystemExit("pyedit: --apply ID takes no other input")
         stored = store.resolve(args.apply)
         if stored is None:
@@ -177,33 +153,15 @@ def read_input(args: argparse.Namespace) -> tuple[str, str, str]:
                 "by earlier dry-runs"
             )
         return stored.read_text(), "stored", stored.as_posix()
-    for mode, option in (("patch", args.patch), ("diff", args.diff)):
-        if option is not None and option != "-":
-            path = Path(option)
-            if not path.is_file() and mode == "diff":
-                stored = store.resolve(option)
-                if stored is not None:
-                    path = stored
-            return path.read_text(), mode, path.as_posix()
     if args.script and args.script != "-":
         path = Path(args.script)
         return path.read_text(), "script", path.as_posix()
     if sys.stdin.isatty():
         raise SystemExit(
-            "pyedit: no input: pipe a script, patch or diff on stdin, or pass "
-            "--script FILE / --patch FILE / --diff FILE"
+            "pyedit: no input: pipe an edit script on stdin, or pass "
+            "--script FILE"
         )
-    text = sys.stdin.read()
-    stripped = text.lstrip()
-    if stripped.startswith("*** Begin Patch"):
-        mode = "patch"
-    elif stripped.startswith("# pyedit") or stripped.startswith(
-        "diff --git "
-    ) or stripped.startswith("--- "):
-        mode = "diff"
-    else:
-        mode = "script"
-    return text, mode, "<stdin>"
+    return sys.stdin.read(), "script", "<stdin>"
 
 
 def allowed(
@@ -255,7 +213,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     pyedit.session = session
 
-    failures: list[str] = []
     if mode == "stored":
         # pyedit's own patch: git wrote it, so git applies it
         try:
@@ -266,30 +223,6 @@ def main(argv: list[str] | None = None) -> int:
                 "pyedit: stored patch failed; nothing was written", file=sys.stderr
             )
             return EXIT_SCRIPT_ERROR
-    elif mode == "patch":
-        try:
-            _operations, failures = _patch.apply_patch(
-                session, text, strict=not args.force
-            )
-        except Exception:
-            traceback.print_exc()
-            print("pyedit: patch failed; nothing was written", file=sys.stderr)
-            return EXIT_SCRIPT_ERROR
-    elif mode == "diff":
-        try:
-            _applied, failures = _udiff.apply_diff(
-                session, text, strict=not args.force
-            )
-        except Exception:
-            traceback.print_exc()
-            print("pyedit: unified diff failed; nothing was written", file=sys.stderr)
-            return EXIT_SCRIPT_ERROR
-        for line in text.splitlines():
-            if line.startswith(NOTE_PREFIXES):
-                print(
-                    f"pyedit: not applied by this diff (link or binary): {line}",
-                    file=sys.stderr,
-                )
     else:
         previous_dont_write = sys.dont_write_bytecode
         sys.dont_write_bytecode = True
@@ -312,12 +245,6 @@ def main(argv: list[str] | None = None) -> int:
                 return EXIT_SCRIPT_ERROR
         finally:
             sys.dont_write_bytecode = previous_dont_write
-
-    for path in failures:
-        print(
-            f"pyedit: --force: skipped {path}: its hunks do not apply",
-            file=sys.stderr,
-        )
 
     session.prune_unchanged()
     staged = {

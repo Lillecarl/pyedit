@@ -14,18 +14,16 @@ Report breaking bugs at https://github.com/lillecarl/pyedit
 
 ## Invocation
 
-    pyedit [OPTIONS]            # script, patch or diff on stdin
-    pyedit -s SCRIPT [OPTIONS]  # python script from a file
-    pyedit -p PATCH [OPTIONS]   # OpenAI apply_patch envelope from a file
-    pyedit -d DIFF [OPTIONS]    # unified diff from a file
+    pyedit [OPTIONS]            # edit script on stdin
+    pyedit -s SCRIPT [OPTIONS]  # edit script from a file
+
+The input is always a Python edit script. To stage a patch somebody
+else wrote, call `pyedit.apply_v4a(text)` or `pyedit.apply_diff(text)`
+from inside a script; every other pyedit call stays available around it.
 
 Options:
 
 - `-s, --script FILE`: edit script (default: stdin; `-` is stdin)
-- `-p, --patch [FILE]`: OpenAI apply_patch (V4A) envelope; input starting
-  with `*** Begin Patch` on stdin is auto-detected
-- `-d, --diff [FILE]`: unified diff; input starting with `diff --git`,
-  `--- a/` or a pyedit dry-run comment on stdin is auto-detected
 - `-a, --apply`: write staged changes to disk (default: dry-run); with a
   dry-run id, `--apply ID` applies that stored diff
 - `--force`: with `--apply`, write even when staged files have syntax
@@ -81,8 +79,9 @@ undo just reapplies the original diff.
 
 ## OpenAI apply_patch (V4A)
 
-Create, update, delete and `*** Move to:` renames are supported with
-the same context fuzzing as Codex:
+`pyedit.apply_v4a(text)` stages an envelope. Create, update, delete and
+`*** Move to:` renames are supported with the same context fuzzing as
+Codex:
 
     *** Begin Patch
     *** Update File: src/app.py
@@ -96,25 +95,24 @@ the same context fuzzing as Codex:
 
 ## Unified diffs
 
-`--diff` handles create (`--- /dev/null`), delete (`+++ /dev/null`),
-pure renames and `\\ No newline at end of file` markers. A `GIT
+`pyedit.apply_diff(text)` handles create (`--- /dev/null`), delete
+(`+++ /dev/null`), pure renames and `\\ No newline at end of file`
+markers. A `GIT
 binary patch` section applies too, through libgit2, which verifies
 the payload against the file it patches. The diffs pyedit prints keep
 summarising binary changes in one line, since the payload is base85
 noise to read. Stored diffs carry the real payload, so a dry-run id
-and an undo id both replay a binary change; a printed diff piped back
-in does not, and says so on stderr.
+and an undo id both replay a binary change. A printed diff is a
+representation for you to read, not a patch to feed back in; the ids
+around it are how it replays.
 
-Both structured inputs fail closed: one hunk that cannot anchor
-fails the whole input -- nothing is staged, nothing is written, exit
-1. With `--force` the files whose hunks fail are SKIPPED (a warning
-per skip on stderr) and the rest applies; scripts stay fail-closed,
-since a script can write its own try/except.
+Both APIs fail closed: one hunk that cannot anchor raises, and the
+script stops with nothing staged and nothing written. Catch the
+exception yourself if you want to continue past a bad hunk.
 
 A pure rename -- a moved file or directory whose content is
 unchanged -- renders as git rename headers (`similarity index
-100%`) instead of delete+create, and re-applies through `-d` and
-undo.
+100%`) instead of delete+create, and replays through an id.
 
 ## Writing scripts
 

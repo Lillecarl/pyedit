@@ -266,23 +266,17 @@ def test_force_applies_broken_syntax_with_undo(project, capsys):
     assert "# pyedit undo" in out  # the forced write is still revertible
 
 
-def test_diff_flag_resolves_stored_id(project, script, capsys):
-    assert run(project, script=script) == 0
-    out = capsys.readouterr().out
-    token = re.search(r"# pyedit dry-run ([0-9a-f]{8})", out).group(1)
-    # re-rendering the stored diff chains a fresh dry-run with a fresh id
-    assert run(project, "-d", token) == 0
-    out = capsys.readouterr().out
-    assert out.count("# pyedit dry-run") == 2
-    assert re.search(r"# pyedit dry-run ([0-9a-f]{8})", out).group(1) != token
+def test_patch_formats_are_not_cli_input(project, capsys):
+    """Foreign formats are script APIs. stdin is always a script."""
+    for flag in ("-p", "--patch", "-d", "--diff"):
+        with pytest.raises(SystemExit):
+            run(project, flag, "plan.patch")
 
 
-def test_commented_stdin_round_trips(project, script, capsys, monkeypatch):
-    assert run(project, script=script) == 0
-    out = capsys.readouterr().out
-    monkeypatch.setattr(sys, "stdin", io.StringIO(out))
-    assert run(project, "--apply") == 0
-    assert (project / "src" / "a.py").read_text() == "ALPHA = 1\n"
+def test_stdin_is_always_a_script(project, capsys, monkeypatch):
+    monkeypatch.setattr(sys, "stdin", io.StringIO("*** Begin Patch\n"))
+    assert run(project) == 1
+    assert "edit script failed" in capsys.readouterr().err
 
 
 def test_output_file_keeps_pure_diff(project, script, capsys):
@@ -466,9 +460,17 @@ def test_import_and_global_session_are_equivalent(project, capsys):
     assert "+ALPHA = 1" in out
 
 
-def test_patch_file_mode(project, capsys):
-    patch = project / "plan.patch"
-    patch.write_text(
+def _script(project, body):
+    path = project / "edit.py"
+    path.write_text(body)
+    return path
+
+
+def test_patch_api_stages_an_update(project, capsys):
+    script = _script(project, (
+        'pyedit.apply_v4a(open("plan.patch").read())\n'
+    ))
+    (project / "plan.patch").write_text(
         "*** Begin Patch\n"
         "*** Update File: src/a.py\n"
         "@@\n"
@@ -476,37 +478,32 @@ def test_patch_file_mode(project, capsys):
         "+alpha = 42\n"
         "*** End Patch\n"
     )
-    assert run(project, "--patch", patch) == 0
+    assert run(project, script=script) == 0
     out = capsys.readouterr().out
     assert "+alpha = 42" in out
     assert (project / "src" / "a.py").read_text() == "alpha = 1\n"
 
 
-def test_patch_stdin_auto_detect(project, capsys, monkeypatch):
-    monkeypatch.setattr(
-        sys,
-        "stdin",
-        io.StringIO(
-            "*** Begin Patch\n"
-            "*** Add File: notes/todo.txt\n"
-            "+write tests\n"
-            "*** End Patch\n"
-        ),
-    )
-    assert run(project) == 0
+def test_patch_api_adds_a_file(project, capsys):
+    script = _script(project, (
+        'pyedit.apply_v4a("*** Begin Patch\\n"\n'
+        '                 "*** Add File: notes/todo.txt\\n"\n'
+        '                 "+write tests\\n"\n'
+        '                 "*** End Patch\\n")\n'
+    ))
+    assert run(project, script=script) == 0
     out = capsys.readouterr().out
     assert "+++ b/notes/todo.txt" in out
     assert not (project / "notes" / "todo.txt").exists()
 
 
-def test_patch_apply_writes(project, capsys):
-    patch = project / "plan.patch"
-    patch.write_text(
-        "*** Begin Patch\n"
-        "*** Delete File: src/b.py\n"
-        "*** End Patch\n"
-    )
-    assert run(project, "--patch", patch, "--apply") == 0
+def test_patch_api_apply_writes(project, capsys):
+    script = _script(project, (
+        'pyedit.apply_v4a("*** Begin Patch\\n"\n'
+        '                 "*** Delete File: src/b.py\\n"\n'
+        '                 "*** End Patch\\n")\n'
+    ))
+    assert run(project, "--apply", script=script) == 0
     assert not (project / "src" / "b.py").exists()
 
 
@@ -517,44 +514,27 @@ def test_symlink_target_is_not_syntax_checked(project):
     assert (project / "broken.py").is_symlink()
 
 
-def test_diff_file_mode(project, capsys):
-    diff = project / "plan.diff"
-    diff.write_text(
+def test_diff_api_stages_an_update(project, capsys):
+    (project / "plan.diff").write_text(
         "--- a/src/a.py\n"
         "+++ b/src/a.py\n"
         "@@ -1 +1 @@\n"
         "-alpha = 1\n"
         "+alpha = 42\n"
     )
-    assert run(project, "--diff", diff) == 0
+    script = _script(project, 'pyedit.apply_diff(open("plan.diff").read())\n')
+    assert run(project, script=script) == 0
     out = capsys.readouterr().out
     assert "+alpha = 42" in out
     assert (project / "src" / "a.py").read_text() == "alpha = 1\n"
 
 
-def test_diff_stdin_auto_detect(project, capsys, monkeypatch):
-    monkeypatch.setattr(
-        sys,
-        "stdin",
-        io.StringIO(
-            "diff --git a/src/a.py b/src/a.py\n"
-            "--- a/src/a.py\n"
-            "+++ b/src/a.py\n"
-            "@@ -1 +1 @@\n"
-            "-alpha = 1\n"
-            "+alpha = 42\n"
-        ),
-    )
-    assert run(project) == 0
-    assert "+alpha = 42" in capsys.readouterr().out
-
-
-def test_diff_apply_writes(project, capsys):
-    diff = project / "plan.diff"
-    diff.write_text(
+def test_diff_api_apply_writes(project, capsys):
+    (project / "plan.diff").write_text(
         "--- /dev/null\n+++ b/src/fresh.txt\n@@ -0,0 +1 @@\n+new\n"
     )
-    assert run(project, "--diff", diff, "--apply") == 0
+    script = _script(project, 'pyedit.apply_diff(open("plan.diff").read())\n')
+    assert run(project, "--apply", script=script) == 0
     assert (project / "src" / "fresh.txt").read_text() == "new\n"
 
 
@@ -596,16 +576,15 @@ def test_patch_inline_from_script(project, capsys):
 
 
 def test_patch_failure_returns_1(project, capsys):
-    patch = project / "plan.patch"
-    patch.write_text(
-        "*** Begin Patch\n"
-        "*** Update File: src/missing.py\n"
-        "@@\n"
-        "-x\n"
-        "+y\n"
-        "*** End Patch\n"
-    )
-    assert run(project, "--patch", patch) == 1
+    script = _script(project, (
+        'pyedit.apply_v4a("*** Begin Patch\\n"\n'
+        '                 "*** Update File: src/missing.py\\n"\n'
+        '                 "@@\\n"\n'
+        '                 "-x\\n"\n'
+        '                 "+y\\n"\n'
+        '                 "*** End Patch\\n")\n'
+    ))
+    assert run(project, script=script) == 1
     _, err = capsys.readouterr()
     assert "nothing was written" in err
 

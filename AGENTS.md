@@ -25,6 +25,10 @@ Use pyedit itself -- that is the whole point of this tool. The
     bin/pyedit --apply               write
     bin/pyedit -a <id>               apply a stored dry-run, or undo
 
+An edit script is the only input. A patch somebody else wrote is
+staged from inside a script, with `pyedit.apply_v4a` or
+`pyedit.apply_diff`.
+
 If pyedit cannot perform an edit on its own codebase, that is a bug:
 file an issue instead of reaching for sed. Watchdog timeouts dump all
 thread stacks to `$XDG_STATE_HOME/pyedit/dumps/`.
@@ -46,8 +50,8 @@ job belong to libgit2. Read it before changing anything structural.
 | `src/pyedit/cli.py` | arguments, dry-run/apply/undo, syntax gate, watchdog hookup |
 | `src/pyedit/diff.py`, `render.py` | git-style unified diffs (libgit2) |
 | `src/pyedit/memgit.py` | in-memory git objects and `git apply` (libgit2) |
-| `src/pyedit/patch.py` | OpenAI apply_patch (V4A) envelopes |
-| `src/pyedit/udiff.py` | unified diff parse and apply (foreign input) |
+| `src/pyedit/patch.py` | OpenAI apply_patch (V4A) envelopes, via `pyedit.apply_v4a` |
+| `src/pyedit/udiff.py` | unified diff parse and apply (foreign input), via `pyedit.apply_diff` |
 | `src/pyedit/gitpatch.py` | apply pyedit's own canonical patch (libgit2) |
 | `src/pyedit/store.py` | dry-run/undo id store |
 | `src/pyedit/syntax/` | tree-sitter position queries, outlines, syntax checks |

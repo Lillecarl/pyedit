@@ -29,10 +29,9 @@ Break this and the tool loses its reason to exist.
       |
       +-- EditSession()                   the overlay: {path: str|bytes|Symlink|None}
       |
-      +-- dispatch on input               exactly one of:
+      +-- dispatch on input               one of:
       |     script  -> vfs.install(session), exec(), restore
-      |     V4A     -> patch.apply_patch    -> session.write/delete
-      |     diff    -> udiff.apply_diff     -> session.write/delete/symlink
+      |     stored  -> gitpatch.apply_patch  (--apply ID)
       |
       +-- session.prune_unchanged()       a read is not a change
       +-- include/exclude filter
@@ -91,10 +90,15 @@ Nothing else touches that stack.
 `vfs.py` redirects `open`, `pathlib`, `os` and `shutil` into the
 overlay, and returns a callable that puts every attribute back.
 
-**It is installed for script input only.** V4A and diff input call the
-session API directly and need no patching. Anything that escapes the
-patched stdlib -- a subprocess, a raw fd -- escapes the overlay, and
-that is documented rather than defended against.
+A script is the only input, so the patch is always installed for it.
+Anything that escapes the patched stdlib -- a subprocess, a raw fd --
+escapes the overlay, and that is documented rather than defended
+against.
+
+`patch.py` and `udiff.py` are reached from inside a script, through
+`pyedit.apply_v4a(text)` and `pyedit.apply_diff(text)`. They are
+foreign formats: something else wrote them, so they need a tolerant
+reader. They are not an input mode, and pyedit never writes them.
 
 `watchdog.py` captures the real `os` and `open` at import time for
 exactly this reason: it must write a stack dump while the process is
