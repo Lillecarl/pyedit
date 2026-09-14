@@ -678,6 +678,21 @@ class EditSession:
 
         return "".join(d for _, d in unified_diffs(self.staged(), context))
 
+    def diff_difflib(self, context: int = 3) -> str:
+        """The staged changes, hunks written by difflib.
+
+        The standard library instead of libgit2. Headers, renames and
+        the one-line notes for bytes and symlinks are the same. The
+        hunks agree on every case measured, except that git names the
+        enclosing context after the `@@` pair and difflib does not.
+        """
+        from pyedit.diff import difflib_hunks, unified_diffs
+
+        return "".join(
+            d
+            for _, d in unified_diffs(self.staged(), context, render=difflib_hunks)
+        )
+
     def apply(self, paths=None) -> None:
         """Write staged content to disk now (raw os calls, so this is
         safe inside a scope whose filesystem patches are installed).

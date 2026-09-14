@@ -49,7 +49,7 @@ job belong to libgit2. Read it before changing anything structural.
 | `src/pyedit/gitmerge.py` | merge a scope into its parent (libgit2 three-way) |
 | `src/pyedit/vfs.py` | stdlib overlay patching so edit scripts see staged state |
 | `src/pyedit/cli.py` | arguments, dry-run/apply/undo, syntax gate, watchdog hookup |
-| `src/pyedit/diff.py`, `render.py` | git-style unified diffs (libgit2) |
+| `src/pyedit/diff.py`, `render.py` | git-style unified diffs; hunks from libgit2 (`pyedit.diff_git`) or difflib (`pyedit.diff_difflib`) |
 | `src/pyedit/memgit.py` | in-memory git objects and `git apply` (libgit2) |
 | `src/pyedit/patch.py` | OpenAI apply_patch (V4A) envelopes, via `pyedit.apply_v4a` |
 | `src/pyedit/udiff.py` | unified diffs read by the `unidiff` library, applied with fuzz, via `pyedit.apply_diff_unidiff` |

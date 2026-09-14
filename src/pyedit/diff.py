@@ -7,12 +7,16 @@ patch for another tool to apply: bytes and symlinks render as one-line
 summaries. ``binary=True`` swaps a binary summary for a real payload,
 and only the stored diffs -- dry-run ids and undo -- ask for it.
 
-Hunk bodies come from ``pyedit.render`` (libgit2); this module handles
-per-file orchestration and headers.
+Hunk bodies come from a renderer; this module handles per-file
+orchestration and headers. Two renderers exist, named for what writes
+them: ``pyedit.render`` (libgit2) and ``difflib`` from the standard
+library. libgit2 is the default and the only one the stored patches
+use, because only it writes binary payloads and 120000 modes.
 """
 
 from __future__ import annotations
 
+import difflib
 from pathlib import Path
 
 from pyedit.render import DiffRenderer
@@ -42,11 +46,44 @@ def original(path: Path) -> str | bytes | None:
     return _slurp(path)
 
 
+def difflib_hunks(old: str, new: str, context: int = 3) -> str:
+    """Hunk bodies from the standard library, no libgit2 involved.
+
+    Same shape as `render.DiffRenderer.hunks`: `@@` headers and bodies
+    only, no file headers, empty string when nothing differs.
+
+    Measured against `render.DiffRenderer.hunks` over changes near the
+    edges, adjacent and far apart, creates, deletes and missing
+    trailing newlines: the bodies and the hunk boundaries agree. One
+    thing differs -- git writes the enclosing context after the `@@`
+    pair (`@@ -16,5 +16,5 @@ l14`) and difflib writes none. Both are
+    valid unified diffs; only git's tells you which function you are
+    in. Nothing guarantees the two agree on every input.
+    """
+    lines = list(
+        difflib.unified_diff(
+            old.splitlines(keepends=True),
+            new.splitlines(keepends=True),
+            n=context,
+        )
+    )
+    if not lines:
+        return ""
+    out = []
+    for line in lines[2:]:  # difflib writes its own --- / +++ pair
+        if line.endswith("\n"):
+            out.append(line)
+        else:
+            out.append(line + "\n\\ No newline at end of file\n")
+    return "".join(out)
+
+
 def unified_diffs(
     staged: dict[Path, str | bytes | None],
     context: int = 3,
     base: dict[Path, str | bytes | None] | None = None,
     replayable: bool = False,
+    render=None,
 ) -> list[tuple[str, str]]:
     """Return (display path, diff text) for every staged change.
 
@@ -59,7 +96,13 @@ def unified_diffs(
     for a real git section that applies back. It is off by default
     because a base85 payload is noise in a diff an agent reads; the
     stored diffs, which no one reads, turn it on.
+
+    `render` picks what writes the hunk bodies; libgit2 by default,
+    `difflib_hunks` for the standard library. It has no say over
+    binary or symlink sections: only libgit2 writes those, so
+    `replayable` output is always git's.
     """
+    hunks_of = render or _RENDERER.hunks
     entries = []
     for path, new in sorted(staged.items()):
         old = base.get(path) if base is not None else original(path)
@@ -130,7 +173,7 @@ def unified_diffs(
         tofile = f"b/{rel}" if new is not None else "/dev/null"
         old_text = "" if old is None else old
         new_text = "" if new is None else new
-        hunks = _RENDERER.hunks(old_text, new_text, context)
+        hunks = hunks_of(old_text, new_text, context)
         if not hunks:
             if old is None or new is None:
                 # an empty file created or deleted renders as headers
