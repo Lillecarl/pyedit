@@ -16,10 +16,15 @@ Report breaking bugs at https://github.com/lillecarl/pyedit
 
     pyedit [OPTIONS]            # edit script on stdin
     pyedit -s SCRIPT [OPTIONS]  # edit script from a file
+    pyedit --apply ID           # replay a stored dry-run or undo
 
-The input is always a Python edit script. To stage a patch somebody
+Python is the only way to describe an edit. To stage a patch somebody
 else wrote, call `pyedit.apply_v4a(text)` or `pyedit.apply_diff(text)`
 from inside a script; every other pyedit call stays available around it.
+
+`--apply ID` is not an edit: it replays a patch pyedit already wrote
+and stored. No script runs, and nothing parses the patch in Python --
+git wrote it, so git applies it.
 
 Options:
 
@@ -54,15 +59,14 @@ it as a comment at the start and end of the diff:
     ... diff ...
     # pyedit dry-run ab12cd34 (pyedit --apply ab12cd34 to apply)
 
-Apply a stored dry-run later without resending the script or diff:
+Apply a stored dry-run later without resending the script:
 
     pyedit --apply ab12cd34
 
-`-d ab12cd34` also accepts a stored id and re-renders the diff as a
-fresh dry-run with a fresh id. Iterate by feeding the commented output
-back on stdin: the comments parse as diff comments and a fresh dry-run
-prints a fresh id. Stored diffs live in a temp directory the OS reaps;
-ids are not stable across reboots.
+The id is the only way to replay a dry-run. The printed diff is a
+representation for you to read, not a patch to feed back in. Stored
+patches live in a temp directory the OS reaps; ids are not stable
+across reboots.
 
 Every `--apply` run stores the reverse diff the same way and prints it
 as a comment, so a second-guessed apply can be reverted:

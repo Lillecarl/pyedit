@@ -19,11 +19,6 @@ pyedit [OPTIONS] < plan.py
 ```
 
 - `-s, --script FILE`: edit script (default: stdin)
-- `-p, --patch [FILE]`: apply an OpenAI apply_patch (V4A) envelope
-  instead of a script; `*** Begin Patch` input on stdin is
-  auto-detected
-- `-d, --diff [FILE]`: apply a unified diff instead of a script;
-  `diff --git` / `--- a/` input on stdin is auto-detected
 - `-a, --apply [ID]`: write staged changes to disk (default:
   dry-run). With a stored dry-run id, applies that stored diff
   instead; an applied change saves a reverse diff whose id reverts it
@@ -37,9 +32,15 @@ pyedit [OPTIONS] < plan.py
   and applied (repeatable)
 - `-U, --context N`: diff context lines (default 3)
 
+A Python edit script is the only way to describe an edit. To stage a
+patch somebody else wrote -- an OpenAI apply_patch (V4A) envelope or a
+unified diff -- call `pyedit.apply_v4a(text)` or
+`pyedit.apply_diff(text)` from inside a script.
+
 A dry-run wraps its diff in `# pyedit dry-run <id>` comments;
-`--apply <id>` applies that stored diff later, and an applied run
-prints an undo id that reverts it.
+`--apply <id>` applies that stored patch later, and an applied run
+prints an undo id that reverts it. That patch is git's own, written
+and applied by libgit2, so the replay path parses nothing in Python.
 
 There are no input path arguments: the script works on any path, and
 files read but left unchanged never appear in the diff.
