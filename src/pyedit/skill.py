@@ -307,9 +307,9 @@ body ends the scope merges into what it was opened in.
 The point is making several edits to the SAME file without the edits
 stepping on each other: write each one against the file as you first
 read it. A scope starts from DISK truth, so edit two does not have to
-reproduce what edit one already changed; at merge time every hunk
-re-anchors by context, so lines another scope inserted or removed
-above it change nothing:
+reproduce what edit one already changed. git merges the scopes, with
+disk as the common ancestor, so line numbers never matter and lines
+another scope inserted or removed above an edit change nothing:
 
     with pyedit.VFS():
         pyedit.edit("src/app.py", "def parse(cfg):", "def parse(cfg, strict):")
@@ -323,14 +323,21 @@ Plain sequential edits would force the second and third to match the
 text the first left behind. Scopes nest; each merges into the scope
 it was opened in.
 
-Merging re-anchors hunks by context; line numbers are ignored. It
-refuses instead of guessing: `pyedit.Collision` is raised when a hunk
-cannot find its context, matches several places, or two scopes
-changed the same region incompatibly (delete/edit, double-create and
-binary conflicts included). A scope whose body raises is discarded
-whole -- nothing of it merges, and earlier merges in the parent
-stand. Edits that depend on an earlier edit's result belong in the
-same scope, where they run in order on the staged state.
+**Two scopes must not edit neighbouring lines.** git merges two
+changed regions only when at least one unchanged line separates them.
+Edits with nothing unchanged between them collide, and belong in ONE
+scope, where they run in order on the staged state. The same goes for
+an edit that depends on an earlier edit's result.
+
+Merging refuses instead of guessing. `pyedit.Collision` is raised for
+that neighbouring-lines case, and when two scopes change the same
+region, one deletes what another changes, both create a path with
+different content, or a binary file diverges. The message says which.
+A scope whose body raises is discarded whole -- nothing of it merges,
+and earlier merges in the parent stand.
+
+Renaming a file in one scope and editing it under the old name in
+another is a collision, not a silent move. Do both in one scope.
 
 ## Examples
 

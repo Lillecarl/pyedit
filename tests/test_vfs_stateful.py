@@ -10,7 +10,9 @@ allowed to differ from it in *when* bytes land, never *what* lands.
 The scope machine covers what the oracle cannot see: VFS scopes
 merging into their parent. Its rules partition regions (the parent
 edits a file's first token, scopes the last) so merge outcomes stay
-predictable without reimplementing the merge.
+predictable without reimplementing the merge. Every seed file keeps an
+unchanged line between those two regions, because git merges two
+changes only when one separates them.
 """
 
 import binascii
@@ -32,7 +34,11 @@ from pyedit.session import EditSession, Symlink
 
 FILES = ["a.txt", "b.txt", "dir/c.txt"]
 BIN = "img.bin"
-SEED = {"a.txt": "A0\nA1\n", "b.txt": "B0\nB1\n", "dir/c.txt": "C0\nC1\nC2\n"}
+SEED = {
+    "a.txt": "A0\nmid\nA1\n",
+    "b.txt": "B0\nmid\nB1\n",
+    "dir/c.txt": "C0\nC1\nC2\n",
+}
 BIN_SEED = {BIN: b"\x00\x01\x02\n"}
 FIRST = {"a.txt": "A0", "b.txt": "B0", "dir/c.txt": "C0"}
 LAST = {"a.txt": "A1", "b.txt": "B1", "dir/c.txt": "C2"}
@@ -472,7 +478,7 @@ class ScopeMachine(RuleBasedStateMachine):
             # the parent rewrote or deleted the region: the scope
             # refuses (Collision), fails on disk truth, or no-ops
             # when its result equals the parent's state. Either way
-            # the parent ends exactly as it was.
+            # this path ends exactly as it was.
             try:
                 with VFS():
                     pyedit.edit(path, last, repl)
@@ -521,10 +527,17 @@ class ScopeMachine(RuleBasedStateMachine):
                     merged = None
                 assert merged == view
             else:
-                with VFS():
-                    pyedit.edit(path, first, repl)
-                assert pyedit.read(path) == view.replace(first, repl)
-                self.overlay[path] = view.replace(first, repl)
+                # the parent may have changed a line next to this one,
+                # and git merges two changes only with an unchanged
+                # line between them
+                try:
+                    with VFS():
+                        pyedit.edit(path, first, repl)
+                except Collision:
+                    assert pyedit.read(path) == view
+                else:
+                    assert pyedit.read(path) == view.replace(first, repl)
+                    self.overlay[path] = view.replace(first, repl)
         else:
             view = self.view(path)
             if first not in view:

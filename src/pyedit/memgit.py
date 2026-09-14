@@ -212,8 +212,15 @@ class MemoryRepo:
         A conflicted path carries every stage, so iterating the result
         yields it once per stage. Read `conflicts` first and skip those
         paths, or the last stage silently wins.
+
+        Rename detection is OFF. libgit2 turns it on by default, and it
+        pairs a delete with an add by content similarity, not by
+        history: a side that deletes one path and adds another with
+        similar content reads as a rename, and the other side's edit
+        moves to the new path. That resolves a conflict by guessing,
+        so pyedit raises instead. `flags=0` is the whole of it.
         """
-        return self._repo.merge_trees(ancestor, ours, theirs)
+        return self._repo.merge_trees(ancestor, ours, theirs, flags=0)
 
     def patch(self, before, after, context: int = 3) -> str:
         """The git patch that turns one file map into the other.

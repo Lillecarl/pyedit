@@ -74,12 +74,19 @@ contains a NUL, not because of its name.
 
 `merge.py` gives `with pyedit.VFS():` an independent overlay over disk
 truth. It sees neither the parent's staged state nor a sibling's. On
-exit its changes render as hunks and re-anchor on the parent **by
-context alone** -- line numbers are advisory -- so two scopes editing
-the same file do not have to account for each other's line shifts.
+exit, `gitmerge.py` merges it with git's own three-way merge: disk is
+the ancestor, the parent is ours, the scope is theirs. Line numbers
+never enter into it.
 
-Ambiguity is a `Collision`, never a guess. A scope whose body raises
-merges nothing.
+git decides, and pyedit does not argue. It merges two changed regions
+only when an unchanged line separates them, so two scopes editing
+neighbouring lines collide -- those edits belong in one scope. Being
+cleverer than git here is not a goal; a better merge would be a better
+library, not a second algorithm beside this one.
+
+A conflict is a `Collision`, never a guess, and nothing is staged
+before every conflict is known. A scope whose body raises merges
+nothing.
 
 `active.py` is the stack that makes this work: `pyedit.*` routes to the
 top of it, the root session normally, a scope inside its `with` body.

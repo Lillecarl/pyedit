@@ -1,19 +1,33 @@
 """Merge a VFS scope into its parent with git's three-way merge.
 
-PROTOTYPE. Under evaluation against `merge.py`, which does the same
-job by re-anchoring hunks on context.
-
-The shape of the job is already three-way, so libgit2 fits it exactly:
+The job is already three-way, so libgit2 fits it exactly:
 
     ancestor  disk truth for every touched path
     ours      what the parent has staged
     theirs    what the scope staged
 
-`Repository.merge_trees` takes the ancestor as an argument, so no
-commits are needed -- a scope is a tree plus a remembered ancestor.
+``merge_trees`` takes the ancestor as an argument, so no commits are
+needed: a scope is a tree plus a remembered ancestor.
 
-Every side must carry the ancestor's entry for a path it does not
-touch. A tree built from one side's overlay alone reads as "this side
+git decides, and pyedit does not argue with it. git merges two changed
+regions only when an unchanged line separates them; two edits to
+neighbouring lines are a conflict, and they belong in one scope. Being
+cleverer than git is not a goal here -- a better engine would be a
+better library, not a second algorithm beside this one.
+
+Rename detection is off (`MemoryRepo.merge`), because it is the one
+place git resolves a conflict by guessing rather than by reading the
+ancestor.
+
+Two traps, each one a silently wrong answer:
+
+**A conflicted path is yielded once per stage.** Iterating the merged
+index gives every stage of a conflict, not just stage 0. Take them in
+order and the last stage wins, which resolves the conflict to "theirs"
+with no error at all.
+
+**Every side must carry the ancestor's entry for a path it does not
+touch.** A tree built from one side's overlay alone reads as "this side
 deleted everything it did not mention", and the merge deletes the
 repository.
 """
@@ -23,15 +37,24 @@ from __future__ import annotations
 from pathlib import Path
 
 from pyedit.memgit import MemoryRepo
-from pyedit.session import Symlink, _disk_is_file, _disk_is_link, _disk_readlink, _slurp
+from pyedit.merge import Collision
+from pyedit.session import (
+    Symlink,
+    _disk_is_file,
+    _disk_is_link,
+    _disk_readlink,
+    _slurp,
+)
 
-
-class GitMergeError(ValueError):
-    pass
+_LINK_MODE = 0o120000
 
 
 def merge(parent, child) -> None:
-    """Stage the scope's changes on the parent, resolved by git."""
+    """Stage the scope's changes on the parent, resolved by git.
+
+    Fails closed: one conflict raises and the parent keeps the state it
+    had, so a scope merges whole or not at all.
+    """
     child.prune_unchanged()
     theirs = child.staged()
     ours = parent.staged()
@@ -54,38 +77,44 @@ def merge(parent, child) -> None:
         repo.tree(_side(base, keys, ours)),
         repo.tree(_side(base, keys, theirs)),
     )
-    stuck = set()
-    if merged.conflicts is not None:
-        stuck = {(a or b or c).path for a, b, c in merged.conflicts}
-    conflicted = {back[key] for key in stuck}
 
-    # The index carries full paths; a Tree only yields its top level.
-    # Iterating a conflicted index yields every stage of a conflicted
-    # path, not just stage 0, so those must be skipped by hand -- take
-    # them and the last stage silently wins.
+    # every conflict is reported before anything is staged
+    if merged.conflicts is not None:
+        raise Collision(
+            "; ".join(
+                sorted(_conflict(repo, back, triple) for triple in merged.conflicts)
+            )
+        )
+
     seen = set()
     for entry in merged:
-        if entry.path in stuck:
-            continue
         path = back[entry.path]
         seen.add(path)
         data = repo.read(entry.id)
-        if entry.mode == 0o120000:
+        if entry.mode == _LINK_MODE:
             parent._stage(path, Symlink(data.decode()))
         else:
             parent._stage(path, _decoded(data))
     for path in paths:
-        if path not in seen and path not in conflicted:
+        if path not in seen:
             parent._stage(path, None)
 
-    # git conflicts on changed regions with no unchanged line between
-    # them -- two scopes editing neighbouring lines. That is the case
-    # pyedit exists for, so its context re-anchoring gets the path.
-    if conflicted:
-        from pyedit.merge import _merge_one
 
-        for path in sorted(conflicted):
-            parent._stage(path, _merge_one(parent, path, theirs[path]))
+def _conflict(repo: MemoryRepo, back: dict, triple) -> str:
+    ancestor, ours, theirs = triple
+    path = back[(ancestor or ours or theirs).path]
+    if ours is None:
+        return f"{path}: deleted by an earlier edit, changed here"
+    if theirs is None:
+        return f"{path}: changed by an earlier edit, deleted here"
+    if ancestor is None:
+        return f"{path}: created by two edits with different content"
+    if any(b"\x00" in repo.read(entry.id) for entry in (ours, theirs)):
+        return f"{path}: binary file changed by two edits"
+    return (
+        f"{path}: two edits changed lines with nothing unchanged between "
+        "them; git will not merge that, so make both edits in one scope"
+    )
 
 
 def _side(base: dict, keys: dict, overlay: dict) -> dict:

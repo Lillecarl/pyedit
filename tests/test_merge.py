@@ -1,5 +1,3 @@
-import os
-
 import pytest
 
 import pyedit
@@ -31,29 +29,38 @@ def test_scope_edits_route_through_pyedit_without_a_name(root):
     assert root.staged_content(root.canon("src/a.py")) == "ALPHA = 1\nbeta = 2\n"
 
 
-def test_root_edits_do_not_route_through_scopes(root):
+def test_root_edits_do_not_route_through_scopes(root, project):
+    (project / "src" / "a.py").write_text("alpha = 1\nmiddle\nbeta = 2\n")
     pyedit.edit("src/a.py", "alpha", "ALPHA")
     with VFS():
-        assert pyedit.read("src/a.py") == "alpha = 1\nbeta = 2\n"  # disk truth
+        # disk truth, not the root's staged edit
+        assert pyedit.read("src/a.py") == "alpha = 1\nmiddle\nbeta = 2\n"
         pyedit.edit("src/a.py", "beta", "BETA")
     # the scope merged on top of the root's edit; its fresh-disk read
     # did not clobber it
-    assert root.staged_content(root.canon("src/a.py")) == "ALPHA = 1\nBETA = 2\n"
+    assert root.staged_content(root.canon("src/a.py")) == (
+        "ALPHA = 1\nmiddle\nBETA = 2\n"
+    )
 
 
 def test_second_scope_ignores_lines_moved_by_the_first(root, project):
+    """Line numbers are never consulted: the second edit does not have
+    to account for lines the first one inserted above it."""
+    (project / "src" / "a.py").write_text("alpha = 1\nmiddle\nbeta = 2\n")
     with VFS():
-        pyedit.edit("src/a.py", "alpha = 1\n", "alpha = 1\n# inserted header\n# more\n# lines\n")
+        pyedit.edit(
+            "src/a.py", "alpha = 1\n", "alpha = 1\n# inserted header\n# more\n"
+        )
     with VFS():
         pyedit.edit("src/a.py", "beta = 2\n", "beta = 22\n")
     merged = root.staged_content(project / "src" / "a.py")
-    assert merged == "alpha = 1\n# inserted header\n# more\n# lines\nbeta = 22\n"
+    assert merged == "alpha = 1\n# inserted header\n# more\nmiddle\nbeta = 22\n"
 
 
 def test_conflicting_edits_of_the_same_line_raise(root):
     with VFS():
         pyedit.edit("src/a.py", "beta = 2\n", "beta = 20\n")
-    with pytest.raises(Collision, match="context not found"):
+    with pytest.raises(Collision, match="nothing unchanged between"):
         with VFS():
             pyedit.edit("src/a.py", "beta = 2\n", "beta = 99\n")
     assert root.staged_content(root.canon("src/a.py")) == "alpha = 1\nbeta = 20\n"
@@ -108,7 +115,7 @@ def test_ambiguous_context_raises(root):
     changed = content.replace("line4\n", "LINE4\n", 1) + "appended\n"
     with VFS():
         pyedit.write("src/dup.py", content + "appended\n")
-    with pytest.raises(Collision, match="ambiguous"):
+    with pytest.raises(Collision, match="created by two edits"):
         with VFS():
             pyedit.write("src/dup.py", changed)
 
@@ -151,12 +158,13 @@ def test_binary_conflict(root):
             pyedit.write("blob.bin", b"\x00second")
 
 
-@pytest.mark.skipif(
-    bool(os.environ.get("PYEDIT_GIT_MERGE")),
-    reason="git pairs the delete with the add and carries the edit over; "
-    "test_gitmerge.py pins that verdict instead",
-)
 def test_rename_as_delete_plus_create(root):
+    """Rename detection is off, so this is a delete against an edit.
+
+    With it on, git would pair the delete with the add by content
+    similarity and move the edit to the new name -- a guess, not a
+    reading of the ancestor.
+    """
     with VFS():
         pyedit.rename("src/a.py", "src/renamed.py")
     with pytest.raises(Collision, match="deleted by an earlier edit"):
@@ -212,9 +220,12 @@ def test_scope_root_follows_the_parent_not_the_cwd(tmp_path, monkeypatch):
 
 def test_same_file_scopes_do_not_drift(root, project):
     """The skill's promise, pinned: three edits to one file, each
-    authored against the pristine disk text, merged by context."""
+    authored against the pristine disk text, merged by git.
+
+    Each edit is its own region with unchanged lines around it. Edits
+    to neighbouring lines collide instead, and belong in one scope."""
     (project / "app.py").write_text(
-        "import json\nVERSION = 1\n\n\ndef parse(cfg):\n    return cfg\n"
+        "import json\n\nVERSION = 1\n\n\ndef parse(cfg):\n    return cfg\n"
     )
     with VFS():
         pyedit.edit("app.py", "def parse(cfg):", "def parse(cfg, strict):")
@@ -223,7 +234,8 @@ def test_same_file_scopes_do_not_drift(root, project):
     with VFS():
         pyedit.edit("app.py", "VERSION = 1", "VERSION = 2")
     assert root.staged_content(root.canon("app.py")) == (
-        "import json\nimport os\nVERSION = 2\n\n\ndef parse(cfg, strict):\n    return cfg\n"
+        "import json\nimport os\n\nVERSION = 2\n\n\n"
+        "def parse(cfg, strict):\n    return cfg\n"
     )
 
 

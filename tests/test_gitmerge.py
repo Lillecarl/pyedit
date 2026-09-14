@@ -12,7 +12,6 @@ from pyedit.session import EditSession, Symlink
 
 @pytest.fixture
 def root(project, monkeypatch):
-    monkeypatch.setenv("PYEDIT_GIT_MERGE", "1")
     session = EditSession()
     monkeypatch.setattr(pyedit, "session", session, raising=False)
     return session
@@ -57,17 +56,29 @@ def test_same_line_edited_twice_raises(root, project):
             pyedit.edit("src/a.py", "beta = 2\n", "beta = 99\n")
 
 
-def test_neighbouring_lines_still_merge(root, project):
-    """git conflicts on changed regions with no unchanged line between.
+def test_neighbouring_lines_collide(root, project):
+    """git merges two regions only with an unchanged line between them.
 
-    pyedit's whole use is several small edits to one file, so the
-    re-anchoring resolves this and the result is checked, not guessed.
+    One line of separation is the whole difference, so the message has
+    to say what to do instead.
     """
+    with VFS():
+        pyedit.edit("src/a.py", "alpha = 1\n", "alpha = 10\n")
+    with pytest.raises(Collision, match="make both edits in one scope"):
+        with VFS():
+            pyedit.edit("src/a.py", "beta = 2\n", "beta = 20\n")
+    assert root.staged_content(root.canon("src/a.py")) == "alpha = 10\nbeta = 2\n"
+
+
+def test_one_unchanged_line_is_enough(root, project):
+    (project / "src" / "a.py").write_text("alpha = 1\nmiddle\nbeta = 2\n")
     with VFS():
         pyedit.edit("src/a.py", "alpha = 1\n", "alpha = 10\n")
     with VFS():
         pyedit.edit("src/a.py", "beta = 2\n", "beta = 20\n")
-    assert root.staged_content(root.canon("src/a.py")) == "alpha = 10\nbeta = 20\n"
+    assert root.staged_content(root.canon("src/a.py")) == (
+        "alpha = 10\nmiddle\nbeta = 20\n"
+    )
 
 
 def test_symlink_retarget_merges_beside_a_text_edit(root, project):
@@ -81,13 +92,3 @@ def test_symlink_retarget_merges_beside_a_text_edit(root, project):
     assert root.staged_content(root.canon("src/a.py")) == "alpha = 10\nbeta = 2\n"
 
 
-def test_an_edit_follows_a_rename(root, project):
-    """git pairs the delete with the add and carries the edit over."""
-    with VFS():
-        pyedit.rename("src/a.py", "src/renamed.py")
-    with VFS():
-        pyedit.edit("src/a.py", "alpha = 1\n", "alpha = 10\n")
-    assert root.staged_content(root.canon("src/a.py")) is None
-    assert (
-        root.staged_content(root.canon("src/renamed.py")) == "alpha = 10\nbeta = 2\n"
-    )

@@ -45,7 +45,8 @@ job belong to libgit2. Read it before changing anything structural.
 |---|---|
 | `src/pyedit/session.py` | `EditSession`: staged multi-file state machine (the engine) |
 | `src/pyedit/active.py` | the active-session stack behind `pyedit.*` routing |
-| `src/pyedit/merge.py` | `VFS` scopes: independent edits, context-anchored merge, `Collision` |
+| `src/pyedit/merge.py` | `VFS` scopes: the scope lifecycle and `Collision` |
+| `src/pyedit/gitmerge.py` | merge a scope into its parent (libgit2 three-way) |
 | `src/pyedit/vfs.py` | stdlib overlay patching so edit scripts see staged state |
 | `src/pyedit/cli.py` | arguments, dry-run/apply/undo, syntax gate, watchdog hookup |
 | `src/pyedit/diff.py`, `render.py` | git-style unified diffs (libgit2) |
