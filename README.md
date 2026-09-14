@@ -36,8 +36,10 @@ pyedit apply ID                # replay a stored dry-run or undo
 
 A Python edit script is the only way to describe an edit. To stage a
 patch somebody else wrote -- an OpenAI apply_patch (V4A) envelope or a
-unified diff -- call `pyedit.apply_v4a(text)` or
-`pyedit.apply_diff(text)` from inside a script.
+unified diff -- call `pyedit.apply_v4a(text)`,
+`pyedit.apply_diff_git(text)` (libgit2, exact line numbers, every kind
+git has a format for) or `pyedit.apply_diff_unidiff(text)` (the unidiff
+library, text hunks anchored by search) from inside a script.
 
 A dry-run wraps its diff in `# pyedit dry-run <id>` comments;
 `pyedit apply <id>` applies that stored patch later, and an applied run

@@ -12,8 +12,9 @@ the diff, so the id alone can apply it later (pyedit apply ID).
 patch pyedit wrote earlier.
 
 Foreign patch formats are script APIs, not input modes. A script calls
-pyedit.apply_v4a(text) or pyedit.apply_diff(text) and keeps every other
-pyedit call around it.
+pyedit.apply_v4a(text), pyedit.apply_diff_git(text) or
+pyedit.apply_diff_unidiff(text) and keeps every other pyedit call
+around it.
 """
 
 from __future__ import annotations
@@ -151,7 +152,8 @@ def read_input(args: argparse.Namespace) -> tuple[str, str, str]:
     'script' is python to run; 'stored' is pyedit's own canonical patch,
     replayed from an id. Nothing here sniffs a format: stdin is a
     script, and a patch a script wants to stage goes through
-    pyedit.apply_v4a or pyedit.apply_diff."""
+    pyedit.apply_v4a, pyedit.apply_diff_git or
+    pyedit.apply_diff_unidiff."""
     if args.stored is not None:
         if args.script:
             raise SystemExit("pyedit: apply ID takes no other input")

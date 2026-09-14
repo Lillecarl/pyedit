@@ -109,10 +109,23 @@ Anything that escapes the patched stdlib -- a subprocess, a raw fd --
 escapes the overlay, and that is documented rather than defended
 against.
 
-`patch.py` and `udiff.py` are reached from inside a script, through
-`pyedit.apply_v4a(text)` and `pyedit.apply_diff(text)`. They are
-foreign formats: something else wrote them, so they need a tolerant
-reader. They are not an input mode, and pyedit never writes them.
+Foreign formats are reached from inside a script, one entry point per
+implementation, so a caller picks the reader instead of pyedit
+guessing:
+
+| call | module | reads it |
+|---|---|---|
+| `pyedit.apply_v4a` | `patch.py` | the vendored OpenAI primitive |
+| `pyedit.apply_diff_git` | `gitpatch.py` | libgit2 |
+| `pyedit.apply_diff_unidiff` | `udiff.py` | the `unidiff` library |
+
+pyedit parses none of them itself. `udiff.py` finds file boundaries
+and applies hunks; every hunk and every line comes from the library.
+Its applier is the reason that path exists -- unidiff has none, and
+libgit2 checks one line position and never searches.
+
+A binary or symlink section raises on the unidiff path, naming
+`apply_diff_git`. Neither entry point quietly becomes the other.
 
 `watchdog.py` captures the real `os` and `open` at import time for
 exactly this reason: it must write a stack dump while the process is
@@ -157,22 +170,28 @@ It owns the formats git invented and pyedit has no version of:
 For its own patches pyedit owns nothing: libgit2 writes them and
 libgit2 applies them.
 
-A parser survives only for the formats something *else* wrote, reached
-from a script through `pyedit.apply_diff(text)`. libgit2 refuses those,
-because it rejects:
+`pyedit.apply_diff_unidiff` exists because libgit2 refuses most of
+what an agent writes. It rejects:
 
 - a diff with no `diff --git` line -- agents write these constantly
 - a create or delete with no `new file mode` / `deleted file mode`
 - a zero-hunk section, such as an empty-file create
-- pyedit's own `Symlink` and `Binary file` note lines
 
-And libgit2's applier has **no fuzz at all**: one line position,
-`memcmp`, no whitespace tolerance. `udiff._find_block` searches outward
-from the hint and falls back to whitespace-insensitive matching, which
-is what makes an agent's approximate line numbers land.
+And its applier has **no fuzz at all**: one line position, `memcmp`,
+no whitespace tolerance. `udiff._find_block` searches outward from the
+hint and falls back to whitespace-insensitive matching, which is what
+makes an approximate `@@` number land. unidiff has no applier, so that
+half stays pyedit's; the parsing does not.
 
-So `udiff.py` exists for foreign input only. Anything pyedit generated
-goes the `gitpatch.py` way instead.
+Two faults in unidiff 1.0.0 shape `udiff._sections`, and both vanish
+when a file section is parsed on its own:
+
+- two consecutive `--- /dev/null` creates with no `diff --git` header
+  raise "Target without source" on the second
+- a `diff --git` header whose paths disagree with the `---` line --
+  which every create does -- yields a second, empty `PatchedFile`
+
+So pyedit finds the file boundaries and unidiff does the parsing.
 
 `memgit.py`'s docstring carries three rules that will segfault or
 silently lie if you break them. Read it before adding a call there.

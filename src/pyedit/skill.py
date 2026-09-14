@@ -19,7 +19,8 @@ Report breaking bugs at https://github.com/lillecarl/pyedit
     pyedit apply ID             # replay a stored dry-run or undo
 
 Python is the only way to describe an edit. To stage a patch somebody
-else wrote, call `pyedit.apply_v4a(text)` or `pyedit.apply_diff(text)`
+else wrote, call `pyedit.apply_v4a(text)`, `pyedit.apply_diff_git(text)`
+or `pyedit.apply_diff_unidiff(text)`
 from inside a script; every other pyedit call stays available around it.
 
 `apply ID` is a subcommand, not a flag, because it is not an edit: it
@@ -102,9 +103,26 @@ Codex:
 
 ## Unified diffs
 
-`pyedit.apply_diff(text)` handles create (`--- /dev/null`), delete
-(`+++ /dev/null`), pure renames and `\\ No newline at end of file`
-markers. A `GIT
+One entry point per implementation. Pick by what you have:
+
+| you have | call | reads it |
+|---|---|---|
+| a patch git wrote, exact `@@` numbers | `pyedit.apply_diff_git(text)` | libgit2 |
+| a diff you wrote, approximate numbers | `pyedit.apply_diff_unidiff(text)` | the unidiff library |
+
+`apply_diff_git` takes every kind git has a format for: text, binary
+payloads, symlinks (120000) and modes. It checks ONE line position per
+hunk and never searches, so wrong `@@` numbers fail instead of moving.
+A pyedit dry-run or undo patch is exactly this shape.
+
+`apply_diff_unidiff` reads TEXT hunks only, and anchors each one by
+searching outward from its line number with a whitespace-insensitive
+second pass, so numbers that are close enough still land. Hand it a
+binary or symlink section and it raises, naming `apply_diff_git` --
+neither one quietly becomes the other.
+
+Both handle create (`--- /dev/null`), delete (`+++ /dev/null`), pure
+renames and `\\ No newline at end of file` markers. A `GIT
 binary patch` section applies too, through libgit2, which verifies
 the payload against the file it patches. The diffs pyedit prints keep
 summarising binary changes in one line, since the payload is base85
@@ -190,7 +208,12 @@ read-your-writes holds. Anything you can write in Python works.
                                      envelope; apply_patch(text) is
                                      the same thing under its
                                      ecosystem name
-    pyedit.apply_diff(text)          stage a unified diff
+    pyedit.apply_diff_git(text)      stage a git-canonical patch
+                                     (libgit2; exact line numbers,
+                                     binary and symlinks included)
+    pyedit.apply_diff_unidiff(text)  stage a unified diff read by the
+                                     unidiff library (text hunks,
+                                     anchored by search)
     pyedit.diff(context=3)           the staged changes as one diff
                                      text
     pyedit.apply(paths=None)         write the staged state to disk

@@ -568,16 +568,29 @@ class EditSession:
     # the same operation under its format name
     apply_v4a = apply_patch
 
-    def apply_diff(self, text: str) -> list["AppliedFile"]:
-        """Stage a unified diff (git-style) on this session.
+    def apply_diff_unidiff(self, text: str) -> list["AppliedFile"]:
+        """Stage a unified diff read by the unidiff library.
 
-        Fails closed. For per-file skips call
+        Text hunks only, anchored by search, so approximate `@@`
+        numbers still land. Binary payloads, symlinks and modes need
+        apply_diff_git. Fails closed; for per-file skips call
         pyedit.udiff.apply_diff(session, text, strict=False) directly.
         """
         from pyedit import udiff
 
         applied, _failures = udiff.apply_diff(self, text)
         return applied
+
+    def apply_diff_git(self, text: str) -> list[str]:
+        """Stage a git-canonical patch, applied by libgit2.
+
+        Every kind git has: text, binary payloads, symlinks, modes.
+        It checks one line position per hunk and does not search, so
+        the `@@` numbers must be exact. Returns the paths it touched.
+        """
+        from pyedit import gitpatch
+
+        return gitpatch.apply_patch(self, text)
 
     def rename_symbol(
         self,

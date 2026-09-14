@@ -6,6 +6,7 @@
   pathspec,
   rope,
   pygit2,
+  unidiff,
   pygls,
   lsprotocol,
   pyright,
@@ -70,6 +71,7 @@ let
       pathspec
       rope
       pygit2
+      unidiff
       pygls
       lsprotocol
       tree-sitter

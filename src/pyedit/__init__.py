@@ -14,7 +14,8 @@ __version__ = _installed_version("pyedit")
 
 __all__ = [
     "LspSession",
-    "apply_diff",
+    "apply_diff_git",
+    "apply_diff_unidiff",
     "apply_v4a",
     "Collision",
     "Symlink",

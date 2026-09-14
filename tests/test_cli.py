@@ -537,7 +537,9 @@ def test_diff_api_stages_an_update(project, capsys):
         "-alpha = 1\n"
         "+alpha = 42\n"
     )
-    script = _script(project, 'pyedit.apply_diff(open("plan.diff").read())\n')
+    script = _script(
+        project, 'pyedit.apply_diff_unidiff(open("plan.diff").read())\n'
+    )
     assert run(project, script=script) == 0
     out = capsys.readouterr().out
     assert "+alpha = 42" in out
@@ -548,7 +550,9 @@ def test_diff_api_apply_writes(project, capsys):
     (project / "plan.diff").write_text(
         "--- /dev/null\n+++ b/src/fresh.txt\n@@ -0,0 +1 @@\n+new\n"
     )
-    script = _script(project, 'pyedit.apply_diff(open("plan.diff").read())\n')
+    script = _script(
+        project, 'pyedit.apply_diff_unidiff(open("plan.diff").read())\n'
+    )
     assert run(project, "--apply", script=script) == 0
     assert (project / "src" / "fresh.txt").read_text() == "new\n"
 
