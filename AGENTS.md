@@ -10,7 +10,12 @@ humans. Keep it that way:
   reading this file and the module map below, without asking.
 - **The skill is the contract.** `src/pyedit/skill.py` is the
   agent-facing usage document. When behavior changes, the skill
-  changes in the same commit.
+  changes in the same commit. **Only AI agents read it** -- it is
+  loaded into a context window, so keep it compact: each rule once,
+  no motivation, tables over sentences, an example only where it
+  settles an ambiguity. Human prose goes in `README.md`. Read that
+  module's docstring before editing it; its escapes are load-bearing
+  and `tests/test_skill.py` guards them.
 - **Tests are the spec.** Find the test that demonstrates a feature
   before changing it. A fix without a pinning test is not done.
 - **Errors are loud and precise.** Every failure says what was

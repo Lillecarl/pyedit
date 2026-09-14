@@ -612,7 +612,7 @@ def test_skill_prints_markdown(capsys):
     assert cli.main(["skill"]) == 0
     out = capsys.readouterr().out
     assert out.startswith("# pyedit")
-    assert "Nothing touches disk" in out
+    assert "reaches disk without" in out
     assert "--apply" in out
     assert "## Source" in out
     assert "github.com/lillecarl/pyedit" in out
