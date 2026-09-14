@@ -4,7 +4,12 @@ Input is a Python edit script, from -s/--script or from stdin. It runs
 against an in-memory overlay: the result prints as a unified diff and
 nothing is written to disk unless --apply is given. A dry-run's diff is
 also saved under a short id in a temp store, printed as a comment around
-the diff, so the id alone can apply it later (--apply ID).
+the diff, so the id alone can apply it later (pyedit apply ID).
+
+--apply and `apply ID` are different things and do not share a surface.
+--apply is a modifier on this run: write instead of dry-running.
+`apply ID` is a verb of its own: no script runs, and libgit2 replays a
+patch pyedit wrote earlier.
 
 Foreign patch formats are script APIs, not input modes. A script calls
 pyedit.apply_v4a(text) or pyedit.apply_diff(text) and keeps every other
@@ -52,15 +57,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "-a",
         "--apply",
-        nargs="?",
-        const=True,
-        default=False,
-        metavar="ID",
-        help=(
-            "write staged changes to disk (default: dry-run); with a "
-            "dry-run id, apply that stored diff instead"
-        ),
+        action="store_true",
+        help="write staged changes to disk (default: dry-run)",
     )
+    parser.set_defaults(stored=None)
     parser.add_argument(
         "--force",
         action="store_true",
@@ -143,14 +143,14 @@ def read_input(args: argparse.Namespace) -> tuple[str, str, str]:
     replayed from an id. Nothing here sniffs a format: stdin is a
     script, and a patch a script wants to stage goes through
     pyedit.apply_v4a or pyedit.apply_diff."""
-    if isinstance(args.apply, str):
+    if args.stored is not None:
         if args.script:
-            raise SystemExit("pyedit: --apply ID takes no other input")
-        stored = store.resolve(args.apply)
+            raise SystemExit("pyedit: apply ID takes no other input")
+        stored = store.resolve(args.stored)
         if stored is None:
             raise SystemExit(
-                f"pyedit: no stored dry-run {args.apply!r}; ids are printed "
-                "by earlier dry-runs"
+                f"pyedit: no stored dry-run {args.stored!r}; ids are printed "
+                "by earlier runs"
             )
         return stored.read_text(), "stored", stored.as_posix()
     if args.script and args.script != "-":
@@ -172,6 +172,22 @@ def allowed(
     if exclude and any(fnmatch.fnmatch(rel, pat) for pat in exclude):
         return False
     return True
+
+
+def apply_id(rest: list[str]) -> tuple[str, list[str]]:
+    """Peel the id off `pyedit apply ID [OPTIONS]`.
+
+    Not named stored_id: main() binds that name for the dry-run id it
+    prints, and a module-level function of the same name is shadowed
+    for the whole of main.
+    """
+    if not rest or rest[0].startswith("-"):
+        raise SystemExit(
+            "pyedit: apply needs a stored id: pyedit apply ID\n"
+            "        to write an edit script's changes, use "
+            "pyedit -s FILE --apply"
+        )
+    return rest[0], rest[1:]
 
 
 def run_skill(rest: list[str]) -> int:
@@ -197,9 +213,15 @@ def main(argv: list[str] | None = None) -> int:
     tokens = sys.argv[1:] if argv is None else list(argv)
     if tokens and tokens[0] == "skill":
         return run_skill(tokens[1:])
+    stored = None
+    if tokens and tokens[0] == "apply":
+        stored, tokens = apply_id(tokens[1:])
 
     parser = build_parser()
     args = parser.parse_args(tokens)
+    if stored is not None:
+        args.stored = stored
+        args.apply = True
 
     from pyedit import watchdog
 
@@ -281,7 +303,7 @@ def main(argv: list[str] | None = None) -> int:
     stored_id = store.save(stored_text) if staged and not args.apply else None
     if stored_id:
         marker = (
-            f"# pyedit dry-run {stored_id} (pyedit --apply {stored_id} to apply)\n"
+            f"# pyedit dry-run {stored_id} (pyedit apply {stored_id})\n"
         )
     else:
         marker = ""
@@ -290,7 +312,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.apply and (not problems or args.force):
         undo_id = _prepare_undo(staged, args.context)
         if undo_id:
-            marker = f"# pyedit undo {undo_id} (pyedit --apply {undo_id} to revert)\n"
+            marker = f"# pyedit undo {undo_id} (pyedit apply {undo_id} to revert)\n"
 
     if args.output == "-":
         sys.stdout.write(marker + diff_text + marker)
@@ -304,13 +326,13 @@ def main(argv: list[str] | None = None) -> int:
     elif stored_id:
         print(
             f"pyedit: dry-run saved as {stored_id} "
-            f"(pyedit --apply {stored_id} to apply)",
+            f"(pyedit apply {stored_id})",
             file=sys.stderr,
         )
     elif args.apply and undo_id:
         print(
             f"pyedit: changes applied; undo saved as {undo_id} "
-            f"(pyedit --apply {undo_id} to revert)",
+            f"(pyedit apply {undo_id} to revert)",
             file=sys.stderr,
         )
 

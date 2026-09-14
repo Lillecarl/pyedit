@@ -42,6 +42,11 @@ def run(project, *argv, script=None):
     return cli.main(argv)
 
 
+def replay(project, token, *argv):
+    """`pyedit apply ID`: no script runs, libgit2 replays a stored patch."""
+    return cli.main(["apply", str(token), *[str(a) for a in argv]])
+
+
 def test_dry_run_prints_diff_and_writes_nothing(project, script, capsys):
     before = (project / "src" / "a.py").read_text()
     assert run(project, script=script) == 0
@@ -58,7 +63,7 @@ def test_dry_run_prints_id_comments_and_stores_pure_diff(
     out, err = capsys.readouterr()
     lines = out.splitlines()
     match = re.fullmatch(
-        r"# pyedit dry-run ([0-9a-f]{8}) \(pyedit --apply \1 to apply\)", lines[0]
+        r"# pyedit dry-run ([0-9a-f]{8}) \(pyedit apply \1\)", lines[0]
     )
     assert match, lines[0]
     token = match.group(1)
@@ -77,7 +82,7 @@ def test_apply_from_stored_id(project, script, capsys):
     assert run(project, script=script) == 0
     out = capsys.readouterr().out
     token = re.search(r"# pyedit dry-run ([0-9a-f]{8})", out).group(1)
-    assert run(project, "--apply", token) == 0
+    assert replay(project, token) == 0
     assert (project / "src" / "a.py").read_text() == "ALPHA = 1\n"
     out = capsys.readouterr().out
     assert "+ALPHA = 1" in out
@@ -95,7 +100,7 @@ def test_apply_prints_undo_comment(project, script, capsys, dryrun_store):
     out, err = capsys.readouterr()
     lines = out.splitlines()
     token = undo_token(out)
-    assert lines[0] == lines[-1] == f"# pyedit undo {token} (pyedit --apply {token} to revert)"
+    assert lines[0] == lines[-1] == f"# pyedit undo {token} (pyedit apply {token} to revert)"
     undo_text = (dryrun_store / f"{token}.diff").read_text()
     assert "-ALPHA = 1" in undo_text
     assert "+alpha = 1" in undo_text
@@ -108,7 +113,7 @@ def test_undo_reverts_an_apply(project, script, capsys):
     out = capsys.readouterr().out
     token = undo_token(out)
     assert (project / "src" / "a.py").read_text() == "ALPHA = 1\n"
-    assert run(project, "--apply", token) == 0
+    assert replay(project, token) == 0
     assert (project / "src" / "a.py").read_text() == original
 
 
@@ -122,7 +127,7 @@ def test_stored_id_replay_of_create_heavy_diffs(project, capsys):
     token = re.search(
         r"dry-run ([0-9a-f]{8})", capsys.readouterr().out
     ).group(1)
-    assert run(project, "--apply", token) == 0
+    assert replay(project, token) == 0
     assert all((project / f"mod{i}.py").exists() for i in range(10))
 
 
@@ -134,7 +139,7 @@ def test_undo_recreates_a_deleted_file(project, capsys):
     assert run(project, "--apply", script=deleter) == 0
     assert not victim.exists()
     token = undo_token(capsys.readouterr().out)
-    assert run(project, "--apply", token) == 0
+    assert replay(project, token) == 0
     assert victim.read_text() == "beta = 2\n"
 
 
@@ -144,7 +149,7 @@ def test_undo_removes_a_created_file(project, capsys):
     assert run(project, "--apply", script=creator) == 0
     assert (project / "src" / "fresh.txt").read_text() == "made\n"
     token = undo_token(capsys.readouterr().out)
-    assert run(project, "--apply", token) == 0
+    assert replay(project, token) == 0
     assert not (project / "src" / "fresh.txt").exists()
 
 
@@ -155,7 +160,7 @@ def test_undo_reverses_a_rename(project, capsys):
     assert not (project / "src" / "a.py").exists()
     assert (project / "src" / "renamed.py").read_text() == "alpha = 1\n"
     token = undo_token(capsys.readouterr().out)
-    assert run(project, "--apply", token) == 0
+    assert replay(project, token) == 0
     assert (project / "src" / "a.py").read_text() == "alpha = 1\n"
     assert not (project / "src" / "renamed.py").exists()
 
@@ -172,7 +177,7 @@ def test_stored_dry_run_replays_a_binary_change(project, capsys):
     assert (project / "data.bin").read_bytes() == b"\x00\x01\x02"
 
     token = re.search(r"# pyedit dry-run ([0-9a-f]{8})", out).group(1)
-    assert run(project, "--apply", token) == 0
+    assert replay(project, token) == 0
     assert (project / "data.bin").read_bytes() == b"\xff\xfe"
 
 
@@ -185,7 +190,7 @@ def test_symlink_retarget_undoes(project, capsys):
     assert "Symlink link retargeted (src/a.py -> src/b.py)" in out
     assert (project / "link").readlink().name == "b.py"
 
-    assert run(project, "--apply", undo_token(out)) == 0
+    assert replay(project, undo_token(out)) == 0
     assert (project / "link").readlink().name == "a.py"
 
 
@@ -200,7 +205,7 @@ def test_binary_create_undoes(project, capsys):
     assert "GIT binary patch" not in out
     assert (project / "data.bin").read_bytes() == b"\x00\x01\x02"
 
-    assert run(project, "--apply", undo_token(out)) == 0
+    assert replay(project, undo_token(out)) == 0
     assert not (project / "data.bin").exists()
 
 
@@ -212,7 +217,7 @@ def test_binary_change_undoes(project, capsys):
     out, _err = capsys.readouterr()
     assert (project / "data.bin").read_bytes() == b"\xff\xfe"
 
-    assert run(project, "--apply", undo_token(out)) == 0
+    assert replay(project, undo_token(out)) == 0
     assert (project / "data.bin").read_bytes() == b"\x00\x01\x02"
 
 
@@ -290,7 +295,17 @@ def test_output_file_keeps_pure_diff(project, script, capsys):
 
 def test_apply_unknown_id_errors(project, capsys):
     with pytest.raises(SystemExit, match="no stored dry-run"):
-        run(project, "--apply", "ffffffff")
+        replay(project, "ffffffff")
+
+
+def test_apply_without_an_id_says_what_to_do(project, capsys):
+    with pytest.raises(SystemExit, match="apply needs a stored id"):
+        cli.main(["apply"])
+
+
+def test_apply_id_takes_no_script(project, script, capsys):
+    with pytest.raises(SystemExit, match="takes no other input"):
+        cli.main(["apply", "ffffffff", "--script", str(script)])
 
 
 def test_no_changes_stores_nothing(project, capsys, dryrun_store):

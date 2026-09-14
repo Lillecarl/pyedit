@@ -16,21 +16,22 @@ Report breaking bugs at https://github.com/lillecarl/pyedit
 
     pyedit [OPTIONS]            # edit script on stdin
     pyedit -s SCRIPT [OPTIONS]  # edit script from a file
-    pyedit --apply ID           # replay a stored dry-run or undo
+    pyedit apply ID             # replay a stored dry-run or undo
 
 Python is the only way to describe an edit. To stage a patch somebody
 else wrote, call `pyedit.apply_v4a(text)` or `pyedit.apply_diff(text)`
 from inside a script; every other pyedit call stays available around it.
 
-`--apply ID` is not an edit: it replays a patch pyedit already wrote
-and stored. No script runs, and nothing parses the patch in Python --
-git wrote it, so git applies it.
+`apply ID` is a subcommand, not a flag, because it is not an edit: it
+replays a patch pyedit already wrote and stored. No script runs, and
+nothing parses the patch in Python -- git wrote it, so git applies it.
+`--apply` is the separate thing it sounds like: this run writes instead
+of dry-running.
 
 Options:
 
 - `-s, --script FILE`: edit script (default: stdin; `-` is stdin)
-- `-a, --apply`: write staged changes to disk (default: dry-run); with a
-  dry-run id, `--apply ID` applies that stored diff
+- `-a, --apply`: write staged changes to disk (default: dry-run)
 - `--force`: with `--apply`, write even when staged files have syntax
   problems
 - `-o, --output FILE`: write the diff to FILE instead of stdout
@@ -55,13 +56,13 @@ piping the printed text.
 Every dry-run with changes stores its diff under a short id and prints
 it as a comment at the start and end of the diff:
 
-    # pyedit dry-run ab12cd34 (pyedit --apply ab12cd34 to apply)
+    # pyedit dry-run ab12cd34 (pyedit apply ab12cd34)
     ... diff ...
-    # pyedit dry-run ab12cd34 (pyedit --apply ab12cd34 to apply)
+    # pyedit dry-run ab12cd34 (pyedit apply ab12cd34)
 
 Apply a stored dry-run later without resending the script:
 
-    pyedit --apply ab12cd34
+    pyedit apply ab12cd34
 
 The id is the only way to replay a dry-run. The printed diff is a
 representation for you to read, not a patch to feed back in. Stored
@@ -71,9 +72,9 @@ across reboots.
 Every `--apply` run stores the reverse diff the same way and prints it
 as a comment, so a second-guessed apply can be reverted:
 
-    # pyedit undo ef01ab23 (pyedit --apply ef01ab23 to revert)
+    # pyedit undo ef01ab23 (pyedit apply ef01ab23 to revert)
 
-    pyedit --apply ef01ab23   # reverts what was applied
+    pyedit apply ef01ab23   # reverts what was applied
 
 The undo is a patch against the disk exactly as this run left it:
 apply it before anything else touches the files, and undo the latest
@@ -370,7 +371,7 @@ Create, move and prune with stdlib tools:
 
 1. Dry-run: `pyedit < plan.py` - read the diff; its first and last
    lines carry the dry-run id.
-2. Apply without rerunning: `pyedit --apply <id>`. Rerunning the
+2. Apply without rerunning: `pyedit apply <id>`. Rerunning the
    script with `--apply` also works; a script runs from scratch
    against disk, so keep it deterministic.
 3. Filter a wide diff with `--include`/`--exclude`; several

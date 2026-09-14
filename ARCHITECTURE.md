@@ -31,7 +31,7 @@ Break this and the tool loses its reason to exist.
       |
       +-- dispatch on input               one of:
       |     script  -> vfs.install(session), exec(), restore
-      |     stored  -> gitpatch.apply_patch  (--apply ID)
+      |     stored  -> gitpatch.apply_patch  (pyedit apply ID)
       |
       +-- session.prune_unchanged()       a read is not a change
       +-- include/exclude filter

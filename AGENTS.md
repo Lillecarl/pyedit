@@ -23,7 +23,7 @@ Use pyedit itself -- that is the whole point of this tool. The
 
     bin/pyedit -s script.py          dry-run: diff + syntax check
     bin/pyedit --apply               write
-    bin/pyedit -a <id>               apply a stored dry-run, or undo
+    bin/pyedit apply <id>            apply a stored dry-run, or undo
 
 An edit script is the only input. A patch somebody else wrote is
 staged from inside a script, with `pyedit.apply_v4a` or

@@ -15,13 +15,13 @@ as the injected global `pyedit`.
 ## Run
 
 ```
-pyedit [OPTIONS] < plan.py
+pyedit [OPTIONS] < plan.py     # run an edit script
+pyedit apply ID                # replay a stored dry-run or undo
 ```
 
 - `-s, --script FILE`: edit script (default: stdin)
-- `-a, --apply [ID]`: write staged changes to disk (default:
-  dry-run). With a stored dry-run id, applies that stored diff
-  instead; an applied change saves a reverse diff whose id reverts it
+- `-a, --apply`: write staged changes to disk (default: dry-run); an
+  applied change saves a reverse patch whose id reverts it
 - `--force`: apply even when the syntax check reports problems
 - `--timeout SECONDS`: abort a hung run (default 300, 0 disables);
   a timeout dumps every thread's stack to
@@ -38,7 +38,7 @@ unified diff -- call `pyedit.apply_v4a(text)` or
 `pyedit.apply_diff(text)` from inside a script.
 
 A dry-run wraps its diff in `# pyedit dry-run <id>` comments;
-`--apply <id>` applies that stored patch later, and an applied run
+`pyedit apply <id>` applies that stored patch later, and an applied run
 prints an undo id that reverts it. That patch is git's own, written
 and applied by libgit2, so the replay path parses nothing in Python.
 
