@@ -583,12 +583,12 @@ def test_file_budget_zero_disables(project, capsys):
 def test_patch_inline_from_script(project, capsys):
     script = project / "edit.py"
     script.write_text(
-        'pyedit.apply_patch("*** Begin Patch\\n"\n'
-        '                 "*** Update File: src/a.py\\n"\n'
-        '                 "@@ alpha\\n"\n'
-        '                 "-alpha = 1\\n"\n'
-        '                 "+alpha = 7\\n"\n'
-        '                 "*** End Patch\\n")\n'
+        'pyedit.apply_v4a("*** Begin Patch\\n"\n'
+        '               "*** Update File: src/a.py\\n"\n'
+        '               "@@ alpha\\n"\n'
+        '               "-alpha = 1\\n"\n'
+        '               "+alpha = 7\\n"\n'
+        '               "*** End Patch\\n")\n'
     )
     assert run(project, script=script) == 0
     assert "+alpha = 7" in capsys.readouterr().out

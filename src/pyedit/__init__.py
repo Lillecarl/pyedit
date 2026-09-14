@@ -53,9 +53,14 @@ def __getattr__(name: str):
     from pyedit.active import current
 
     session = current() or globals().get("session")
-    if session is not None and hasattr(session, name):
-        return getattr(session, name)
-    raise AttributeError(
-        f"module {__name__!r} has no attribute {name!r} "
-        "(no edit session is running)"
-    )
+    if session is None:
+        raise AttributeError(
+            f"module {__name__!r} has no attribute {name!r}: "
+            "no edit session is running"
+        )
+    if not hasattr(session, name):
+        raise AttributeError(
+            f"module {__name__!r} has no attribute {name!r}; "
+            f"run 'pyedit skill' for the session API"
+        )
+    return getattr(session, name)

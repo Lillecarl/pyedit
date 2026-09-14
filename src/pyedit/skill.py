@@ -205,9 +205,7 @@ read-your-writes holds. Anything you can write in Python works.
                                      not bind: the raw material for
                                      synthesizing an import block
     pyedit.apply_v4a(text)           stage an OpenAI apply_patch (V4A)
-                                     envelope; apply_patch(text) is
-                                     the same thing under its
-                                     ecosystem name
+                                     envelope
     pyedit.apply_diff_git(text)      stage a git-canonical patch
                                      (libgit2; exact line numbers,
                                      binary and symlinks included)

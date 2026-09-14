@@ -42,6 +42,23 @@ def test_parse_patch_move_to():
     assert operations[0].type == "update_file"
 
 
+def test_v4a_is_the_only_session_name(project):
+    """apply_patch was an alias for apply_v4a. One name per format,
+    like the two diff entry points."""
+    session = EditSession()
+    assert hasattr(session, "apply_v4a")
+    assert not hasattr(session, "apply_patch")
+
+
+def test_a_missing_name_does_not_blame_the_session(project, monkeypatch):
+    """The old name must not report 'no edit session is running'."""
+    import pyedit as module
+
+    monkeypatch.setattr(module, "session", EditSession(), raising=False)
+    with pytest.raises(AttributeError, match="pyedit skill"):
+        module.apply_patch
+
+
 def test_apply_patch_stages_all_operations(project):
     session = EditSession()
     applied, _failures = apply_patch(session, ENVELOPE)

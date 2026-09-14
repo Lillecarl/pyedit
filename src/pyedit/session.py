@@ -554,19 +554,18 @@ class EditSession:
             self._stage(path, None)
             self._stage(dst / path.relative_to(src), Symlink(target))
 
-    def apply_patch(self, text: str) -> list["PatchOperation"]:
+    def apply_v4a(self, text: str) -> list["PatchOperation"]:
         """Stage an OpenAI apply_patch (V4A) envelope on this session.
 
-        Fails closed. For per-operation skips call
-        pyedit.patch.apply_patch(session, text, strict=False) directly.
+        Named for the format, like the two diff entry points, so the
+        call says which reader it reaches. Fails closed; for
+        per-operation skips call pyedit.patch.apply_patch(session,
+        text, strict=False) directly.
         """
         from pyedit import patch
 
         operations, _failures = patch.apply_patch(self, text)
         return operations
-
-    # the same operation under its format name
-    apply_v4a = apply_patch
 
     def apply_diff_unidiff(self, text: str) -> list["AppliedFile"]:
         """Stage a unified diff read by the unidiff library.
