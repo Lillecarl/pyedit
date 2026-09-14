@@ -206,21 +206,24 @@ class MemoryRepo:
             index.add(self._pygit2.IndexEntry(path, self.write(content), mode))
         return self._repo[index.write_tree(self._repo)]
 
-    def merge(self, ancestor, ours, theirs):
+    def merge(self, ancestor, ours, theirs, find_renames: bool = True):
         """Three-way merge of three trees; returns the index.
 
         A conflicted path carries every stage, so iterating the result
         yields it once per stage. Read `conflicts` first and skip those
         paths, or the last stage silently wins.
 
-        Rename detection is OFF. libgit2 turns it on by default, and it
-        pairs a delete with an add by content similarity, not by
-        history: a side that deletes one path and adds another with
-        similar content reads as a rename, and the other side's edit
-        moves to the new path. That resolves a conflict by guessing,
-        so pyedit raises instead. `flags=0` is the whole of it.
+        `find_renames` pairs a delete with an add by content
+        similarity, not by history, so an edit to the deleted path
+        moves to the added one. libgit2 turns it on by default and so
+        does this. It is the one place the merge answers by
+        similarity rather than by reading the ancestor, hence the
+        switch.
         """
-        return self._repo.merge_trees(ancestor, ours, theirs, flags=0)
+        import pygit2
+
+        flags = pygit2.enums.MergeFlag.FIND_RENAMES if find_renames else 0
+        return self._repo.merge_trees(ancestor, ours, theirs, flags=flags)
 
     def patch(self, before, after, context: int = 3) -> str:
         """The git patch that turns one file map into the other.

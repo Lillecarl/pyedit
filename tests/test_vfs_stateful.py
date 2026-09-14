@@ -400,7 +400,12 @@ class ScopeMachine(RuleBasedStateMachine):
         # seed first: install() patches pathlib globally, and a
         # seeded write landing in the overlay would desync the model
         self.known = set(FILES)
-        self.session = EditSession(root=self.root)
+        # rename detection pairs a delete with an add by content
+        # similarity, not by history: a rename, then a write, then a
+        # delete still reads as a rename. Modelling that means
+        # reimplementing it, so the machine drives the deterministic
+        # merge and test_merge.py pins the pairing instead.
+        self.session = EditSession(root=self.root, find_renames=False)
         self.restore = vfs_module.install(self.session)
         # scope rules operate through the router: a scope only
         # receives what pyedit.* routes, never direct method calls

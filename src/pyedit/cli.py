@@ -101,6 +101,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="do not exclude .gitignore paths from glob discovery",
     )
     parser.add_argument(
+        "--no-rename-detection",
+        action="store_true",
+        help=(
+            "merging scopes: do not pair a delete with an add of similar "
+            "content, so renaming a file in one scope and editing it under "
+            "the old name in another collides instead of following"
+        ),
+    )
+    parser.add_argument(
         "--timeout",
         type=float,
         default=300.0,
@@ -232,6 +241,7 @@ def main(argv: list[str] | None = None) -> int:
         max_bytes=args.max_materialized_bytes or None,
         max_files=args.max_materialized_files or None,
         respect_gitignore=not args.no_gitignore,
+        find_renames=not args.no_rename_detection,
     )
     pyedit.session = session
 

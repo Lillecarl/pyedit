@@ -15,9 +15,9 @@ neighbouring lines are a conflict, and they belong in one scope. Being
 cleverer than git is not a goal here -- a better engine would be a
 better library, not a second algorithm beside this one.
 
-Rename detection is off (`MemoryRepo.merge`), because it is the one
-place git resolves a conflict by guessing rather than by reading the
-ancestor.
+Rename detection follows git and is on. It is the one place the merge
+answers by content similarity rather than by reading the ancestor, so
+`--no-rename-detection` turns it off and the rename collides instead.
 
 Two traps, each one a silently wrong answer:
 
@@ -76,6 +76,7 @@ def merge(parent, child) -> None:
         repo.tree(base),
         repo.tree(_side(base, keys, ours)),
         repo.tree(_side(base, keys, theirs)),
+        find_renames=parent._find_renames,
     )
 
     # every conflict is reported before anything is staged

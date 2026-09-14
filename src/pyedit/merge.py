@@ -64,6 +64,7 @@ class VFS:
             max_bytes=self._parent._max_bytes,
             max_files=self._parent._max_files,
             respect_gitignore=self._parent._respect_gitignore,
+            find_renames=self._parent._find_renames,
         )
         push(self._session)
         return self._session

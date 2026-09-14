@@ -88,6 +88,13 @@ A conflict is a `Collision`, never a guess, and nothing is staged
 before every conflict is known. A scope whose body raises merges
 nothing.
 
+Rename detection is the exception, and the only part of the merge that
+answers by similarity instead of by reading the ancestor: it pairs a
+delete with an add, so an edit of the old name follows to the new one.
+git has it on, so pyedit does. `--no-rename-detection` turns it off,
+and `tests/test_vfs_stateful.py` drives the merge that way -- pairing
+by content cannot be modelled without reimplementing it.
+
 `active.py` is the stack that makes this work: `pyedit.*` routes to the
 top of it, the root session normally, a scope inside its `with` body.
 Nothing else touches that stack.

@@ -183,10 +183,12 @@ class EditSession:
         max_files: int | None = None,
         respect_gitignore: bool = True,
         root: Path | None = None,
+        find_renames: bool = True,
     ) -> None:
         self._max_bytes = max_bytes
         self._max_files = max_files
         self._respect_gitignore = respect_gitignore
+        self._find_renames = find_renames
         # agents pass what they have: coerce strings, never guess
         self._root = (Path(root) if root else Path.cwd()).resolve()
         self._ignore_filter: IgnoreFilter | None = None

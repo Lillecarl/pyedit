@@ -27,6 +27,8 @@ pyedit apply ID                # replay a stored dry-run or undo
   a timeout dumps every thread's stack to
   `$XDG_STATE_HOME/pyedit/dumps/`
 - `--no-gitignore`: let discovery see .gitignored paths
+- `--no-rename-detection`: when merging VFS scopes, do not pair a
+  delete with an add of similar content
 - `-o, --output FILE`: write the diff to FILE instead of stdout
 - `-i, --include GLOB` / `-x, --exclude GLOB`: filter what is shown
   and applied (repeatable)

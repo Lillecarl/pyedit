@@ -39,6 +39,8 @@ Options:
   paths (repeatable)
 - `-U, --context N`: diff context lines (default 3)
 - `--no-gitignore`: do not exclude .gitignore paths from glob discovery
+- `--no-rename-detection`: merging scopes, do not pair a delete with an
+  add of similar content
 - `--timeout SECONDS`: kill the run after SECONDS and dump all thread
   stacks to the pyedit state directory (default 300; 0 disables)
 
@@ -336,8 +338,11 @@ different content, or a binary file diverges. The message says which.
 A scope whose body raises is discarded whole -- nothing of it merges,
 and earlier merges in the parent stand.
 
-Renaming a file in one scope and editing it under the old name in
-another is a collision, not a silent move. Do both in one scope.
+A rename is followed: rename a file in one scope, edit it under the
+old name in another, and the edit lands on the new name. git pairs the
+delete with the add by content similarity, so it is a guess, not a
+reading of the ancestor -- `--no-rename-detection` turns it off and
+the two collide instead.
 
 ## Examples
 

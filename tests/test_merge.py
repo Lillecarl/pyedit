@@ -158,18 +158,37 @@ def test_binary_conflict(root):
             pyedit.write("blob.bin", b"\x00second")
 
 
-def test_rename_as_delete_plus_create(root):
-    """Rename detection is off, so this is a delete against an edit.
+def test_an_edit_follows_a_rename(root):
+    """git pairs the delete with the add, so the edit is not lost."""
+    with VFS():
+        pyedit.rename("src/a.py", "src/renamed.py")
+    with VFS():
+        pyedit.edit("src/a.py", "alpha = 1\n", "alpha = 10\n")
+    assert root.staged_content(root.canon("src/a.py")) is None
+    assert root.staged_content(root.canon("src/renamed.py")) == (
+        "alpha = 10\nbeta = 2\n"
+    )
 
-    With it on, git would pair the delete with the add by content
-    similarity and move the edit to the new name -- a guess, not a
-    reading of the ancestor.
-    """
+
+def test_rename_as_delete_plus_create_without_detection(project, monkeypatch):
+    """--no-rename-detection: the pairing is a similarity guess, and
+    turning it off makes the rename collide with the edit instead."""
+    session = EditSession(find_renames=False)
+    monkeypatch.setattr(pyedit, "session", session, raising=False)
     with VFS():
         pyedit.rename("src/a.py", "src/renamed.py")
     with pytest.raises(Collision, match="deleted by an earlier edit"):
         with VFS():
             pyedit.edit("src/a.py", "alpha = 1\n", "alpha = 10\n")
+
+
+def test_rename_detection_reaches_a_nested_scope(project, monkeypatch):
+    session = EditSession(find_renames=False)
+    monkeypatch.setattr(pyedit, "session", session, raising=False)
+    with VFS() as outer:
+        assert outer._find_renames is False
+        with VFS() as inner:
+            assert inner._find_renames is False
 
 
 def test_apply_writes_merged_state(root, project):
