@@ -1,5 +1,6 @@
 {
   lib,
+  pkgs,
   hatchling,
   unidiff,
   pathspec,
@@ -18,6 +19,25 @@
   buildPythonPackage,
 }:
 let
+  # tree-sitter grammar dylibs carry no install id, so every parser's
+  # id is the bare basename "parser"; dyld dedupes by id and the first
+  # grammar loaded wins, breaking every other binding on macOS.
+  # Rewriting the binding's load command to its own parser's absolute
+  # path sidesteps the id collision
+  binding = name:
+    (tree-sitter-grammars.${name}).overrideAttrs (old: {
+      nativeBuildInputs = (old.nativeBuildInputs or [ ])
+        ++ lib.optionals pkgs.stdenv.hostPlatform.isDarwin [ pkgs.darwin.sigtool ];
+      postFixup =
+        (old.postFixup or "")
+        + lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
+          for so in $out/${pkgs.python3Packages.python.sitePackages}/${lib.replaceStrings [ "-" ] [ "_" ] name}/_binding*.so; do
+            install_name_tool -change parser "${pkgs.tree-sitter-grammars.${name}}/parser" "$so"
+            codesign --force --sign - "$so"
+          done
+        '';
+    });
+
   attrs = {
     pname = "pyedit";
     # one source: src/pyedit/_version.py, read by hatchling too
@@ -55,7 +75,7 @@ let
       lsprotocol
       tree-sitter
     ]
-    ++ map (name: tree-sitter-grammars.${name}) [
+    ++ map (name: binding name) [
       # python bindings for every grammar live in the generated
       # tree-sitter-grammars scope; a grammar missing there is bindable
       # with the same generator: callPackage
