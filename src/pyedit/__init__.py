@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from importlib.metadata import version as _installed_version
 from pathlib import Path
 
+from pyedit.fdin import read_fd
 from pyedit.lsp_client import LspSession
 from pyedit.merge import Collision, VFS
 from pyedit.session import Symlink
@@ -18,6 +19,7 @@ __all__ = [
     "apply_diff_unidiff",
     "apply_v4a",
     "Collision",
+    "read_fd",
     "Symlink",
     "VFS",
     "__version__",

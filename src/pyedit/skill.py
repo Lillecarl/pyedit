@@ -138,6 +138,8 @@ directory).
                                      .gitignore-excluded
     pyedit.read(path) -> str|bytes   staged content if touched, else
                                      disk
+    pyedit.read_fd(n)                content piped in on FD n, to EOF
+                                     as str (heredocs, below)
     pyedit.write(path, content)      stage str or bytes; new paths ok
     pyedit.edit(path, old, new,      replace old with new; ValueError
                 count=-1,            when old is absent. count=-1 is
@@ -229,18 +231,25 @@ shows one, and each wrong guess fails as a plain `pattern not found`.
 
 Or sidestep decoding entirely: keep big or escape-heavy payloads out
 of the script and attach them as extra heredocs. A quoted heredoc
-passes bytes through untouched; the script reads them verbatim:
+passes bytes through untouched; `pyedit.read_fd(n)` reads FD n to EOF
+as str -- no `/dev/fd` path, works on pipes:
 
-    pyedit -s - 3<<'EOF3' <<'PY'
-    printf '\033[31m done'
-    EOF3
-    old = open("/dev/fd/3").read()
-    pyedit.edit("a.py", old, old.replace("done", "OK"))
+    pyedit -s - 3<<'OLD' 4<<'NEW' <<'PY'
+    def greet():
+        '''Say hi.'''
+        print("Hi")
+    OLD
+    def greet(name="world"):
+        '''Say hi.'''
+        print(f"Hi, {name}")
+    NEW
+    pyedit.edit("greet.py", pyedit.read_fd(3), pyedit.read_fd(4))
     PY
 
-With two heredocs, the first redirection gets the first body.
-One bash command carries the program and the content -- and the
-pattern arrives byte-exact, with no escaping level to lose.
+Bodies pair with redirections in order: first body to FD 3 (OLD),
+second to FD 4 (NEW), last to stdin (the script). One command carries
+the program and every payload, byte-exact -- Python holding multiline
+strings never becomes a Python literal.
 
 """
 

@@ -62,6 +62,7 @@ def test_the_named_apis_are_all_documented():
         "diff_difflib",
         "pyedit apply ID",
         "--no-rename-detection",
+        "read_fd",
     ):
         assert name in text, name
 
