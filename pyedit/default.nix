@@ -3,6 +3,7 @@
   pkgs,
   cffi,
   hatchling,
+  platformdirs,
   pathspec,
   rope,
   pygit2,
@@ -69,6 +70,7 @@ let
     dependencies = [
       cffi
       pathspec
+      platformdirs
       rope
       pygit2
       unidiff

@@ -7,16 +7,7 @@ import pytest
 
 import pyedit
 from pyedit import cli
-from pyedit import store
 from syntax_corpus import LANGUAGES
-
-
-@pytest.fixture(autouse=True)
-def dryrun_store(tmp_path, monkeypatch):
-    """Keep dry-run artifacts inside each test's tmp."""
-    root = tmp_path / "store"
-    monkeypatch.setattr(store, "store_dir", lambda: (root.mkdir(exist_ok=True), root)[1])
-    return root
 
 
 @pytest.fixture

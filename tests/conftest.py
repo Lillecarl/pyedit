@@ -2,6 +2,8 @@ import io
 
 import pytest
 
+from pyedit import store
+
 _real_open = io.open
 
 
@@ -25,3 +27,20 @@ def project(tmp_path, monkeypatch):
     (tmp_path / "docs").mkdir()
     (tmp_path / "docs" / "note.txt").write_text("hello\n")
     return tmp_path
+
+
+@pytest.fixture(autouse=True)
+def dryrun_store(tmp_path, monkeypatch):
+    """Keep dry-run artifacts inside each test's tmp."""
+    root = tmp_path / "store"
+    monkeypatch.setattr(store, "store_dir", lambda: (root.mkdir(exist_ok=True), root)[1])
+    return root
+
+
+@pytest.fixture(autouse=True)
+def config_home(tmp_path, monkeypatch):
+    """Isolate pyedit.toml discovery inside each test's tmp, so a
+    developer's own config-home file never leaks into a run."""
+    home = tmp_path / "config-home"
+    monkeypatch.setattr("pyedit.config.user_config_dir", lambda *a, **k: str(home))
+    return home
