@@ -1,6 +1,10 @@
 """Run watchdog: on timeout, dump every thread's stack into pyedit's
 XDG state directory and kill the process.
 
+One watchdog is armed per process: arming a new one disarms the
+previous, so repeated runs never accumulate fuses -- a stale one
+would otherwise kill a long-lived process long after its run ended.
+
 Dumps land in `$XDG_STATE_HOME/pyedit/dumps` (default
 `~/.local/state/pyedit/dumps`) -- the state class per the XDG spec:
 logs and history, not cache and not config. The file name carries a
@@ -53,18 +57,29 @@ def dump_dir() -> Path:
     return state_dir() / "dumps"
 
 
-def start(seconds: float) -> threading.Thread | None:
-    """Arm the watchdog for this run; None when disabled."""
+_armed: threading.Event | None = None
+
+
+def start(seconds: float) -> threading.Event | None:
+    """Arm the watchdog for this run; None when disabled. Arming a new
+    watchdog disarms the previous one. Callers may cancel early with
+    the returned event."""
+    global _armed
     if seconds <= 0:
         return None
+    if _armed is not None:
+        _armed.set()
+    armed = threading.Event()
+    _armed = armed
 
     def run():
-        time.sleep(seconds)
+        if armed.wait(seconds):
+            return
         _dump_and_exit(seconds)
 
     thread = threading.Thread(target=run, name="pyedit-watchdog", daemon=True)
     thread.start()
-    return thread
+    return armed
 
 
 def _dump_and_exit(seconds: float) -> None:

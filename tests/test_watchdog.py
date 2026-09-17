@@ -6,11 +6,13 @@ subprocess; the rest exercise the dump machinery directly.
 
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
 import pytest
 
+from pyedit import cli
 from pyedit import watchdog
 
 
@@ -40,6 +42,24 @@ def test_dump_writes_all_thread_stacks(state, monkeypatch):
     content = seen["dumps"][0].read_text()
     assert "Current thread" in content  # faulthandler's stack format
     assert "pyedit-watchdog" not in content or True
+
+
+def test_arming_a_new_watchdog_disarms_the_previous(state):
+    first = watchdog.start(30)
+    second = watchdog.start(30)
+    assert first is not None and first.is_set()
+    assert second is not None and not second.is_set()
+    alive = [t for t in threading.enumerate() if t.name == "pyedit-watchdog"]
+    assert len(alive) == 1
+
+
+def test_repeated_cli_runs_do_not_leak_watchdog_threads(project, capsys):
+    script = project / "edit.py"
+    script.write_text('pyedit.write("ok.txt", "done\\n")\n')
+    for _ in range(10):
+        assert cli.main(["--script", str(script)]) == 0
+    alive = [t for t in threading.enumerate() if t.name == "pyedit-watchdog"]
+    assert len(alive) <= 2  # the armed one, plus at most one still exiting
 
 
 def test_dump_prunes_old_files(state, monkeypatch):
