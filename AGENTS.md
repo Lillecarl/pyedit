@@ -60,6 +60,8 @@ job belong to libgit2. Read it before changing anything structural.
 | `src/pyedit/udiff.py` | unified diffs read by the `unidiff` library, applied with fuzz, via `pyedit.apply_diff_unidiff` |
 | `src/pyedit/gitpatch.py` | apply a git-canonical patch (libgit2), via `pyedit.apply_diff_git` |
 | `src/pyedit/store.py` | dry-run/undo id store |
+| `src/pyedit/config.py` | `pyedit.toml` discovery: config home, session root, `parent` pointers |
+| `src/pyedit/formatter.py` | `[format]` pass: staged text piped through a formatter, stdout re-staged |
 | `src/pyedit/fdin.py` | `read_fd`: heredoc payloads piped in on numbered FDs |
 | `src/pyedit/syntax/` | tree-sitter position queries, outlines, syntax checks |
 | `src/pyedit/rope.py` | Python refactors: rename_symbol, rename_module, references |

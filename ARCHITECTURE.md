@@ -35,6 +35,7 @@ Break this and the tool loses its reason to exist.
       |
       +-- session.prune_unchanged()       a read is not a change
       +-- include/exclude filter
+      +-- formatter pass                  pyedit.toml [format]; stdout re-staged
       +-- syntax check on staged text     warns; gates --apply
       |
       +-- diff.unified_diffs(staged)      printed: for an agent to read
@@ -130,6 +131,21 @@ A binary or symlink section raises on the unidiff path, naming
 `watchdog.py` captures the real `os` and `open` at import time for
 exactly this reason: it must write a stack dump while the process is
 patched and dying.
+
+### The formatter pass
+
+`pyedit.toml` `[format]` names a stdin-to-stdout formatter per file
+suffix (config-home file, a `parent` pointer, or the session root;
+later files override earlier per key). After the script finishes,
+each staged text file with a matching suffix is piped through and
+the stdout is re-staged. Landing through the session is the whole
+point: the printed diff, the stored patch and undo all carry the
+formatted text, so apply and undo needed no changes.
+
+The pass runs after the overlay is uninstalled -- a subprocess
+escapes it anyway -- reads its config from disk truth, and fails
+closed: a missing binary, a non-zero exit or an empty stdout fails
+the run.
 
 ## Two audiences for a diff
 

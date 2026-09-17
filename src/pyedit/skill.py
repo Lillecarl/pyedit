@@ -85,6 +85,31 @@ that run left it: undo the latest apply first, before anything else
 touches the files. Undoing an undo reapplies. Ids live in a temp
 directory the OS reaps; they do not survive a reboot.
 
+## Configuration
+
+`pyedit.toml`, lowest precedence first; a later file overrides
+earlier ones per key:
+
+| layer | location |
+|---|---|
+| config home | `~/.config/pyedit/pyedit.toml` (XDG_CONFIG_HOME; macOS `~/Library/Application Support/pyedit/pyedit.toml`) |
+| umbrella | the file a pyedit.toml names in `parent = "../pyedit.toml"`, relative to that file; pointers may chain |
+| session root | `pyedit.toml` next to the invocation directory |
+
+`[format]` maps a file suffix to a formatter command. After the
+script finishes, staged text with a matching suffix is piped through
+stdin and the stdout is re-staged as the final content -- the diff,
+the stored patch and undo all show it. `{path}` expands to the
+absolute path (for formatters that resolve their own config from a
+file name). A formatter that is missing, exits non-zero, or writes
+nothing fails the run; nothing is written.
+
+    [format]
+    nix = ["nixfmt", "-"]
+    py = ["ruff", "format", "--stdin-filename", "{path}", "-"]
+
+Script runs only; `pyedit apply ID` replays the stored patch as is.
+
 ## Staging a patch somebody else wrote
 
 | you have | call | reader |

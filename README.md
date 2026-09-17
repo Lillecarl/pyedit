@@ -69,6 +69,38 @@ pyedit --apply           # write
 Writes through `pathlib` and `shutil` work too -- the overlay catches
 them either way.
 
+## Configuration
+
+pyedit reads `pyedit.toml` when one is present. Three layers, lowest
+precedence first; a later file overrides earlier ones per key:
+
+1. the config home: `~/.config/pyedit/pyedit.toml` on Linux
+   (`XDG_CONFIG_HOME` respected), `~/Library/Application
+   Support/pyedit/pyedit.toml` on macOS
+2. the file a pyedit.toml names in `parent = "../pyedit.toml"`,
+   resolved relative to that file -- for umbrella collections where
+   several repos share one config; pointers may chain
+3. `pyedit.toml` at the invocation directory (the session root)
+
+One table is read today, `[format]`: a formatter pass over the staged
+text. After the edit script finishes, each staged text file whose
+suffix has a command is piped through the formatter's stdin; the
+stdout becomes the file's final staged content, so the printed diff,
+the stored patch and undo all show the formatted text. `{path}`
+expands to the absolute path, for formatters that resolve their own
+config from a file name (ruff's `--stdin-filename`, for example).
+
+```toml
+[format]
+nix = ["nixfmt", "-"]
+py = ["ruff", "format", "--stdin-filename", "{path}", "-"]
+```
+
+The pass fails closed: a formatter that is missing, exits non-zero or
+writes nothing to stdout fails the run and nothing is written. Only
+stdin-to-stdout formatters are supported for now; support for
+formatters that want a file on disk is tracked on GitHub.
+
 ## Development
 
 - Build and test: `nix build --file . pyedit` (runs pytest via

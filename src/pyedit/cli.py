@@ -26,6 +26,8 @@ import traceback
 from pathlib import Path
 
 import pyedit
+from pyedit import config
+from pyedit import formatter
 from pyedit import store
 from pyedit import gitpatch as _gitpatch
 from pyedit import vfs
@@ -281,11 +283,38 @@ def main(argv: list[str] | None = None) -> int:
             sys.dont_write_bytecode = previous_dont_write
 
     session.prune_unchanged()
-    staged = {
-        path: content
-        for path, content in session.staged().items()
-        if allowed(display_path(path), args.include, args.exclude)
-    }
+
+    def selected() -> dict[Path, str | bytes | None]:
+        return {
+            path: content
+            for path, content in session.staged().items()
+            if allowed(display_path(path), args.include, args.exclude)
+        }
+
+    staged = selected()
+
+    # config-driven formatter pass: stdout is re-staged as the final
+    # content, so the diff, the stored patch and undo all carry it.
+    # script runs only -- `pyedit apply ID` replays what was stored
+    if mode == "script":
+        try:
+            conf = config.load(session.root)
+            touched = (
+                formatter.format_staged(session, staged, conf.formatters)
+                if conf.formatters and staged
+                else []
+            )
+        except (config.ConfigError, formatter.FormatterError) as exc:
+            print(f"pyedit: {exc}", file=sys.stderr)
+            print("pyedit: nothing was written", file=sys.stderr)
+            return EXIT_SCRIPT_ERROR
+        if touched:
+            listing = ", ".join(
+                f"{display_path(p)} ({p.suffix.lstrip('.')})" for p in touched
+            )
+            print(f"pyedit: formatted: {listing}", file=sys.stderr)
+            session.prune_unchanged()
+            staged = selected()
 
     # staged text is parsed: syntax problems surface here, in the same
     # run that shows the diff they would produce

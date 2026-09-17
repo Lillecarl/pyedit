@@ -63,6 +63,8 @@ def test_the_named_apis_are_all_documented():
         "pyedit apply ID",
         "--no-rename-detection",
         "read_fd",
+        "pyedit.toml",
+        "[format]",
     ):
         assert name in text, name
 
