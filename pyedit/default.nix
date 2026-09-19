@@ -125,7 +125,17 @@ let
   };
 in
 (
-  buildPythonApplication attrs
+  buildPythonApplication (
+    attrs
+    // {
+      # the wrapped CLI renders its own skill, so SOURCE_SECTION names
+      # this store path. postInstall is too early: mk-python-derivation
+      # puts wrapPythonPrograms in postFixup, ahead of this string
+      postFixup = ''
+        $out/bin/pyedit skill $out/share/skills/pyedit/pyedit/SKILL.md
+      '';
+    }
+  )
   // {
     passthru = {
       library = buildPythonPackage attrs;

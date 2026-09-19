@@ -54,6 +54,19 @@ files read but left unchanged never appear in the diff.
 authoritative usage guide: script model, session API, scopes,
 recipes, workflow, and limitations.
 
+It carries YAML frontmatter, so it is a SKILL.md as agent harnesses
+read one. The nix package renders it at build time to
+
+    $out/share/skills/pyedit/pyedit/SKILL.md
+
+for a NixOS or home-manager configuration to link into an agent's
+skill directory:
+
+```nix
+home.file.".claude/skills/pyedit".source =
+  "${pyedit}/share/skills/pyedit/pyedit";
+```
+
 ## Example
 
 ```
