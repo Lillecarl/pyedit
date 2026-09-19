@@ -1,0 +1,52 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+# A second push supersedes the first. Nothing here deploys, so a cancelled
+# run leaves nothing half-done.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # macOS is why this file exists. Both breakages so far were darwin-only and
+  # both reached a downstream lock bump before anyone saw them: tree-sitter
+  # grammar loading, then libgit2 dlopen in memgit.py, which had been
+  # Linux-only since it landed. Linux is already covered by a local nix build
+  # on every edit; this job covers the platform nobody develops on.
+  build:
+    strategy:
+      # The darwin result is the one worth having, so a red Linux job must
+      # not cancel it.
+      fail-fast: false
+      matrix:
+        # Pinned, not `-latest`: an image that rolls under you turns a suite
+        # red for a reason nobody looks for. macos-15 is aarch64, the
+        # platform the reports come from.
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    # Not measured on a runner. Locally the suite is 14 seconds and the
+    # closure comes from cache.nixos.org; this covers a cold darwin store
+    # building pygit2 and seventeen tree-sitter grammars. Tighten it from the
+    # first green run.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          # default.nix is `import <nixpkgs> {}`, so NIX_PATH is what pins it.
+          nix_path: nixpkgs=channel:nixos-unstable
+
+      # The suite runs inside this build: pytestCheckHook under
+      # doInstallCheck, plus pyright and pythonImportsCheck.
+      - run: nix build --file . pyedit -L
+
+      # What home-manager links. postFixup renders it by running the built
+      # CLI, so this also proves the binary starts on the platform.
+      - name: The packaged skill is in the output
+        run: |
+          out=$(nix build --file . pyedit --no-link --print-out-paths)
+          test -s "$out/share/skills/pyedit/pyedit/SKILL.md"
