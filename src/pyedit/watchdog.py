@@ -58,17 +58,23 @@ def dump_dir() -> Path:
 
 
 _armed: threading.Event | None = None
+_running: threading.Thread | None = None
 
 
 def start(seconds: float) -> threading.Event | None:
     """Arm the watchdog for this run; None when disabled. Arming a new
     watchdog disarms the previous one. Callers may cancel early with
     the returned event."""
-    global _armed
+    global _armed, _running
     if seconds <= 0:
         return None
     if _armed is not None:
         _armed.set()
+    if _running is not None:
+        # setting the event only wakes the thread; join so the fuse is
+        # gone, not merely disarmed, by the time start returns
+        _running.join(timeout=5)
+        _running = None
     armed = threading.Event()
     _armed = armed
 
@@ -79,6 +85,7 @@ def start(seconds: float) -> threading.Event | None:
 
     thread = threading.Thread(target=run, name="pyedit-watchdog", daemon=True)
     thread.start()
+    _running = thread
     return armed
 
 

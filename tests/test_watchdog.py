@@ -59,7 +59,7 @@ def test_repeated_cli_runs_do_not_leak_watchdog_threads(project, capsys):
     for _ in range(10):
         assert cli.main(["--script", str(script)]) == 0
     alive = [t for t in threading.enumerate() if t.name == "pyedit-watchdog"]
-    assert len(alive) <= 2  # the armed one, plus at most one still exiting
+    assert len(alive) == 1
 
 
 def test_dump_prunes_old_files(state, monkeypatch):
