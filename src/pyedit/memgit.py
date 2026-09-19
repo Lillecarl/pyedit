@@ -128,22 +128,68 @@ def _library_name(pygit2) -> str:
     """The libgit2 already mapped into this process.
 
     dlopen of a library that is loaded returns that same instance, so
-    the absolute path out of the process map is exact. It must still
+    the absolute path out of the loaded images is exact. It must still
     match pygit2's own version: two libgit2 store paths can be mapped
     at once, and the wrong one means casting pointers across ABIs.
-    The soname is the fallback for platforms with no /proc.
+    Linux reads /proc/self/maps, macOS asks dyld; the bare library
+    name is the fallback where neither answers.
+    """
+    name, matches = _library_candidates(pygit2)
+    loaded = _dyld_paths() if sys.platform == "darwin" else _maps_paths()
+    for path in loaded:
+        if matches(path):
+            return path
+    return name
+
+
+def _library_candidates(pygit2, platform: str = sys.platform):
+    """The name to dlopen, and a test for a loaded path holding the
+    same libgit2.
+
+    An ELF soname carries the patch level after the extension
+    (libgit2.so.1.9.4), a Mach-O dylib before it (libgit2.1.9.4.dylib).
+    So "1.9, any patch" is a different pattern on each, and a .so name
+    matches nothing at all on macOS.
     """
     major, minor = pygit2.LIBGIT2_VER[:2]
-    soname = f"libgit2.so.{major}.{minor}"
+    if platform == "darwin":
+        name = f"libgit2.{major}.{minor}.dylib"
+        pattern = rf"libgit2\.{major}\.{minor}(\.\d+)*\.dylib"
+    else:
+        name = f"libgit2.so.{major}.{minor}"
+        pattern = rf"libgit2\.so\.{major}\.{minor}(\.\d+)*"
+    matches = re.compile(pattern).fullmatch
+    return name, lambda path: matches(path.rpartition("/")[2]) is not None
+
+
+def _maps_paths():
+    """Every mapped file, out of the Linux process map."""
     try:
         with open("/proc/self/maps") as maps:
             for line in maps:
-                match = re.search(rf"\S+/{re.escape(soname)}\S*$", line)
-                if match:
-                    return match.group(0)
+                fields = line.split(maxsplit=5)
+                if len(fields) == 6:
+                    yield fields[5].rstrip("\n")
     except OSError:
-        pass
-    return soname
+        return
+
+
+def _dyld_paths():
+    """Every loaded image, out of the macOS dynamic linker."""
+    import ctypes
+
+    try:
+        dyld = ctypes.CDLL(None)
+        dyld._dyld_image_count.restype = ctypes.c_uint32
+        dyld._dyld_get_image_name.restype = ctypes.c_char_p
+        dyld._dyld_get_image_name.argtypes = [ctypes.c_uint32]
+        count = dyld._dyld_image_count()
+    except (OSError, AttributeError):
+        return
+    for index in range(count):
+        image = dyld._dyld_get_image_name(index)
+        if image:
+            yield image.decode(errors="surrogateescape")
 
 
 class MemoryRepo:

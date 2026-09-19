@@ -1,5 +1,6 @@
 import pytest
 
+from pyedit import memgit
 from pyedit.memgit import Entry, MemGitError, MemoryRepo, apply_to_files
 
 
@@ -121,3 +122,44 @@ def test_path_outside_the_tree_raises():
 def test_unparseable_patch_raises():
     with pytest.raises(MemGitError, match="parse"):
         apply_to_files(BEFORE, "not a patch at all\n")
+
+
+class _FakePygit2:
+    LIBGIT2_VER = (1, 9, 4)
+
+
+@pytest.mark.parametrize(
+    "platform, name, mapped, wrong",
+    [
+        (
+            "linux",
+            "libgit2.so.1.9",
+            "/nix/store/aaa-libgit2-1.9.4-lib/lib/libgit2.so.1.9.4",
+            "/nix/store/bbb-libgit2-1.8.1-lib/lib/libgit2.so.1.8.1",
+        ),
+        (
+            "darwin",
+            "libgit2.1.9.dylib",
+            "/nix/store/aaa-libgit2-1.9.4-lib/lib/libgit2.1.9.4.dylib",
+            "/nix/store/bbb-libgit2-1.8.1-lib/lib/libgit2.1.8.1.dylib",
+        ),
+    ],
+)
+def test_the_library_name_follows_the_platform(platform, name, mapped, wrong):
+    """macOS has no /proc and puts the patch level before the
+    extension, so a Linux soname reaches nothing there."""
+    found, matches = memgit._library_candidates(_FakePygit2, platform)
+    assert found == name
+    assert matches(mapped)
+    assert not matches(wrong)
+    assert not matches("/nix/store/aaa-libgit2-1.9.4-lib/lib/libgit2.dylib")
+
+
+def test_the_loaded_libgit2_resolves_to_a_path():
+    """The exact-path lookup must work on whatever platform runs this.
+    Falling back to a bare name means dlopen searches, and can find a
+    libgit2 that is not the one pygit2 holds."""
+    import pygit2
+
+    found = memgit._library_name(pygit2)
+    assert found.startswith("/"), f"fell back to the bare name {found!r}"
