@@ -50,3 +50,18 @@ jobs:
         run: |
           out=$(nix build --file . pyedit --no-link --print-out-paths)
           test -s "$out/share/skills/pyedit/pyedit/SKILL.md"
+
+      # Every test above runs inside the build sandbox, and the bug this
+      # file exists for was a dlopen. A green pytestCheckPhase is still a
+      # green sandbox, and `pyedit skill` never touches libgit2. So drive
+      # the wrapped binary through the path that broke: apply a patch and
+      # read the file back.
+      - name: The installed binary loads libgit2
+        run: |
+          out=$(nix build --file . pyedit --no-link --print-out-paths)
+          work=$(mktemp -d)
+          cd "$work"
+          printf 'alpha\nbeta\ngamma\n' > f.txt
+          printf 'diff --git a/f.txt b/f.txt\n--- a/f.txt\n+++ b/f.txt\n@@ -1,3 +1,3 @@\n alpha\n-beta\n+BETA\n gamma\n' > p.diff
+          echo 'pyedit.apply_diff_git(open("p.diff").read())' | "$out/bin/pyedit" -s - --apply
+          grep -qx BETA f.txt
