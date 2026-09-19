@@ -27,11 +27,12 @@ jobs:
         # platform the reports come from.
         os: [ubuntu-24.04, macos-15]
     runs-on: ${{ matrix.os }}
-    # Not measured on a runner. Locally the suite is 14 seconds and the
-    # closure comes from cache.nixos.org; this covers a cold darwin store
-    # building pygit2 and seventeen tree-sitter grammars. Tighten it from the
-    # first green run.
-    timeout-minutes: 30
+    # Measured on the first green run, with the closure substituted: 55s on
+    # ubuntu-24.04, 1m43s on macos-15. The cap is for the other case, a
+    # channel that has moved ahead of the darwin cache, where pygit2 and
+    # seventeen tree-sitter grammars build from source. Anything near it is
+    # hung, not slow.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
 
