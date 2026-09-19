@@ -13,6 +13,11 @@ a reader is pure cost. Keep it compact:
 
 README.md is the human-facing document. Put prose there.
 
+The rendered document is a SKILL.md. FRONTMATTER carries the
+name and description an agent harness reads before it loads the
+body, and the nix package installs the whole thing under
+`share/skills/pyedit/pyedit/`.
+
 **Escapes in this file are load-bearing.** SKILL_HEAD and SKILL_TAIL
 are ordinary strings, so a backslash in an example needs doubling:
 `\\1` in the source to print `\1`. Getting this wrong is silent --
@@ -24,6 +29,14 @@ tests/test_skill.py compiles every python block the document prints.
 from __future__ import annotations
 
 from pathlib import Path
+
+FRONTMATTER = """\
+---
+name: pyedit
+description: Scripted multi-file edits with dry-run diffs. Use it for an edit the plain file tools handle badly - several files at once, one file in many places, a rename across a tree - and to stage a patch somebody else wrote (an OpenAI V4A envelope or a unified diff). Also gives tree-sitter outlines and syntax checks, and import-aware renames through rope or a language server.
+---
+
+"""
 
 SKILL_HEAD = """\
 # pyedit
@@ -407,7 +420,7 @@ at https://github.com/lillecarl/pyedit
 """
 
 
-SKILL = SKILL_HEAD + ESCAPES_SECTION + SKILL_TAIL
+SKILL = FRONTMATTER + SKILL_HEAD + ESCAPES_SECTION + SKILL_TAIL
 
 
 def render_skill() -> str:

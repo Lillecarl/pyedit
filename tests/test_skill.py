@@ -69,6 +69,19 @@ def test_the_named_apis_are_all_documented():
         assert name in text, name
 
 
+def test_the_frontmatter_makes_it_a_skill_file():
+    """Installed as SKILL.md; a harness reads the header before
+    it loads the body."""
+    text = render_skill()
+    assert text.startswith("---\n")
+    head, closed, body = text[4:].partition("---\n")
+    assert closed, "the frontmatter block is not closed"
+    fields = dict(line.split(": ", 1) for line in head.splitlines() if line)
+    assert fields["name"] == "pyedit", fields
+    assert len(fields["description"]) < 1024
+    assert body.lstrip("\n").startswith("# pyedit")
+
+
 def test_it_stays_compact():
     """A budget, not a target: it is loaded into a context window."""
     text = render_skill()

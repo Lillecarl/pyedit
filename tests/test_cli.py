@@ -602,7 +602,7 @@ def test_patch_failure_returns_1(project, capsys):
 def test_skill_prints_markdown(capsys):
     assert cli.main(["skill"]) == 0
     out = capsys.readouterr().out
-    assert out.startswith("# pyedit")
+    assert out.startswith("---\nname: pyedit\n")
     assert "reaches disk without" in out
     assert "--apply" in out
     assert "## Source" in out
@@ -615,6 +615,6 @@ def test_skill_writes_file(project, capsys):
     assert cli.main(["skill", str(target)]) == 0
     assert capsys.readouterr().out == ""
     content = target.read_text()
-    assert content.startswith("# pyedit")
+    assert content.startswith("---\nname: pyedit\n")
     assert "## Source" in content
     assert str(Path(pyedit.skill.__file__).resolve().parent) in content
