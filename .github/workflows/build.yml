@@ -16,6 +16,13 @@ jobs:
   # grammar loading, then libgit2 dlopen in memgit.py, which had been
   # Linux-only since it landed. Linux is already covered by a local nix build
   # on every edit; this job covers the platform nobody develops on.
+  #
+  # Where its authority ends: the runner substitutes its whole closure, so
+  # pygit2 has never been compiled on darwin here, and pygit2 is what loads
+  # libgit2. Measured on a real aarch64-darwin machine, the tree-sitter
+  # grammars do build from source there and pass; pygit2 came from
+  # cache.nixos.org on that machine too. A nixpkgs bump that forces a pygit2
+  # build hits an untested path on every machine in this group at once.
   build:
     strategy:
       # The darwin result is the one worth having, so a red Linux job must
