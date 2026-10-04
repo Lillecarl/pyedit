@@ -7,7 +7,11 @@ let
   # initialize result when it advertises notebook sync, so `ruff
   # server` never connects. Drop this override when the fix lands.
   pyglsFork = pkgs.python3Packages.pygls.overrideAttrs {
-    version = "2.1.1+lillecarl.1";
+    # Consumed as a library only: the fork's own suite (e2e servers
+    # included) runs in its upstream CI, while pyedit's suite verifies
+    # the integration end to end through the real `ruff server`.
+    doCheck = false;
+    doInstallCheck = false;
     src = pkgs.fetchFromGitHub {
       owner = "lillecarl";
       repo = "pygls";

@@ -442,10 +442,18 @@ def test_code_action_all_discards_the_failing_scope(lsp):
     assert session.staged() == {}
 
 
+def test_format_file_refuses_without_capability(lsp):
+    handle, session, _stub = lsp
+    session.write("a.txt", "alpha  beta\n")
+    with pytest.raises(ValueError, match="formatting"):
+        handle.format_file("a.txt")
+
+
 def _ruff_project(tmp_path):
     (tmp_path / "fix.py").write_text("import os\nimport sys\n\nprint(sys.argv)\n")
     (tmp_path / "order.py").write_text("import sys\nimport os\n\nprint(os.name, sys.argv)\n")
     (tmp_path / "clean.py").write_text("import sys\n\nprint(sys.argv)\n")
+    (tmp_path / "messy.py").write_text("x=1\n")
     return EditSession(respect_gitignore=False, root=tmp_path)
 
 
@@ -479,6 +487,15 @@ def test_ruff_tree_fixes_only_dirty_files(tmp_path):
     assert report.skipped == {}
     assert session.read("fix.py") == "import sys\n\nprint(sys.argv)\n"
     assert session.read("clean.py") == "import sys\n\nprint(sys.argv)\n"
+
+
+@requires_ruff
+def test_ruff_format_file(tmp_path):
+    session = _ruff_project(tmp_path)
+    with LspSession(session, ["ruff", "server"]) as handle:
+        assert handle.format_file("messy.py") == [tmp_path / "messy.py"]
+        assert handle.format_file("clean.py") == []
+    assert session.read("messy.py") == "x = 1\n"
 
 
 @requires_ruff

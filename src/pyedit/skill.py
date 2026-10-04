@@ -93,20 +93,15 @@ stay minimal; this document describes the calls.
 | `apply ID` | `apply_id` (writes) |
 | `-i`/`-x`/`-U`, cwd | same names, `workdir` |
 
-The id store is shared: a CLI dry-run replays as `apply_id` and
-back. Prefer the tool when it exists; the CLI otherwise.
+Ids are shared between the surfaces; prefer the tool when it exists.
 
 ## Dry-run ids and undo
 
 Every dry-run with changes stores its patch and prints the id as the
-first and last line of the diff:
-
-    # pyedit dry-run ab12cd34 (pyedit apply ab12cd34)
-
+first and last line of the diff (`# pyedit dry-run ab12cd34`).
 `pyedit apply ab12cd34` stages and writes it without rerunning the
-script. Every `--apply` stores the reverse the same way:
-
-    # pyedit undo ef01ab23 (pyedit apply ef01ab23 to revert)
+script. Every `--apply` stores the reverse the same way
+(`# pyedit undo ef01ab23`).
 
 Stored patches are git-canonical, so binary and symlink changes replay
 even though the printed diff summarises them. The undo targets disk as
@@ -128,9 +123,11 @@ earlier ones per key:
 `[format]` maps a suffix to a formatter: staged text with a
 matching suffix is piped through stdin, stdout re-staged -- the
 diff, the stored patch and undo all show it. `{path}` expands to the
-absolute path (for formatters that resolve their own config from a
-file name). A formatter that is missing, exits non-zero, or writes
-nothing fails the run; nothing is written.
+absolute path. `[lsp.NAME]` servers run code actions, then
+formatting with `format = true`, over matching staged files before
+`[format]`. `exclude` globs skip both passes -- root-relative paths, or
+absolute ones with `/` or `~`. A missing binary, a failed action or
+empty formatter output fails the run; nothing is written.
 
     [format]
     nix = ["nixfmt", "-"]
@@ -357,11 +354,11 @@ handles namespace packages, which rope cannot -- there a rename
 silently stays definition-local. `old_name`/`name` must match the
 token at a given position.
 
-`code_action(path, kind)` stages one file's edits;
-`code_action_all` scopes one file each over a glob and returns
-staged and skipped paths. Kinds pass through verbatim; an action
-the bridge cannot stage raises, naming itself. Servers see staged
-content.
+`code_action(path, kind)` stages one file's edits and
+`format_file(path)` its formatting; `code_action_all` scopes one
+file each over a glob and returns staged and skipped paths. Kinds
+pass through verbatim; an action the bridge cannot stage raises,
+naming itself. Servers see staged content.
 
 ## Syntax awareness
 

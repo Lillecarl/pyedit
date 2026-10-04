@@ -122,3 +122,98 @@ def test_config_file_uses_platformdirs(monkeypatch, tmp_path):
         "pyedit.config.user_config_dir", lambda *args, **kwargs: str(tmp_path)
     )
     assert config.config_file() == tmp_path / "pyedit.toml"
+
+
+RUFF_LSP = """\
+[lsp.ruff]
+command = ["ruff", "server"]
+suffixes = ["py"]
+actions = ["source.fixAll.ruff", "source.organizeImports.ruff"]
+format = true
+"""
+
+
+def test_lsp_table_parses(project):
+    write(project / "pyedit.toml", RUFF_LSP)
+    table = config.load(project).lsp["ruff"]
+    assert table.command == ["ruff", "server"]
+    assert table.suffixes == ["py"]
+    assert table.actions == ["source.fixAll.ruff", "source.organizeImports.ruff"]
+    assert table.format is True
+
+
+def test_lsp_format_only_needs_no_actions(project):
+    write(
+        project / "pyedit.toml",
+        '[lsp.go]\ncommand = ["gopls"]\nsuffixes = ["go"]\nformat = true\n',
+    )
+    table = config.load(project).lsp["go"]
+    assert table.actions == []
+    assert table.format is True
+
+
+def test_lsp_table_without_work_is_loud(project):
+    write(project / "pyedit.toml", '[lsp.ruff]\ncommand = ["ruff", "server"]\nsuffixes = ["py"]\n')
+    with pytest.raises(config.ConfigError, match=r"\[lsp\.ruff\]"):
+        config.load(project)
+
+
+def test_lsp_command_must_be_an_argv_list(project):
+    write(project / "pyedit.toml", '[lsp.ruff]\ncommand = "ruff"\nsuffixes = ["py"]\nformat = true\n')
+    with pytest.raises(config.ConfigError, match=r"\[lsp\.ruff\]\.command"):
+        config.load(project)
+
+
+def test_lsp_suffixes_must_not_be_empty(project):
+    write(project / "pyedit.toml", '[lsp.ruff]\ncommand = ["ruff", "server"]\nsuffixes = []\nformat = true\n')
+    with pytest.raises(config.ConfigError, match="suffixes"):
+        config.load(project)
+
+
+def test_lsp_format_must_be_a_bool(project):
+    write(project / "pyedit.toml", '[lsp.ruff]\ncommand = ["ruff", "server"]\nsuffixes = ["py"]\nformat = "yes"\n')
+    with pytest.raises(config.ConfigError, match=r"\[lsp\.ruff\]"):
+        config.load(project)
+
+
+def test_lsp_unknown_subkey_is_loud(project):
+    write(project / "pyedit.toml", '[lsp.ruff]\ncommand = ["ruff", "server"]\nsuffixes = ["py"]\nformat = true\ntimeout = 3\n')
+    with pytest.raises(config.ConfigError, match="timeout"):
+        config.load(project)
+
+
+def test_lsp_tables_merge_by_name(project, config_home):
+    write(config_home / "pyedit.toml", RUFF_LSP)
+    write(project / "pyedit.toml", '[lsp.go]\ncommand = ["gopls"]\nsuffixes = ["go"]\nformat = true\n')
+    assert set(config.load(project).lsp) == {"ruff", "go"}
+
+
+def test_exclude_parses_and_replaces(project, config_home):
+    write(config_home / "pyedit.toml", 'exclude = ["vendor/**"]\n')
+    write(project / "pyedit.toml", 'exclude = ["prompt-toolkit/**"]\n')
+    assert config.load(project).exclude == ["prompt-toolkit/**"]
+
+
+def test_exclude_must_be_glob_strings(project):
+    write(project / "pyedit.toml", 'exclude = "vendor/**"\n')
+    with pytest.raises(config.ConfigError, match="exclude"):
+        config.load(project)
+    write(project / "pyedit.toml", 'exclude = [""]\n')
+    with pytest.raises(config.ConfigError, match="exclude"):
+        config.load(project)
+
+
+def test_excluded_matches_relative_absolute_and_home(monkeypatch, tmp_path):
+    from pathlib import Path
+
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    conf = config.Config(
+        exclude=["prompt-toolkit/**", "/srv/vendor/*", "~/Code/vendor/*"]
+    )
+    root = home / "pyterm"
+    assert conf.excluded(root, "prompt-toolkit/pt.py")
+    assert conf.excluded(root, "prompt-toolkit/nested/pt.py")
+    assert not conf.excluded(root, "pymux/a.py")
+    assert conf.excluded(Path("/srv"), "vendor/a.py")
+    assert conf.excluded(home / "Code" / "vendor", "x/y.py")

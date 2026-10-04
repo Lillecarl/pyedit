@@ -45,6 +45,7 @@ class Result:
     undo_id: str | None = None
     problems: list[str] = field(default_factory=list)
     formatted: list[str] = field(default_factory=list)
+    actions: list[str] = field(default_factory=list)
     applied: bool = False
     refused: bool = False
 
@@ -137,14 +138,27 @@ def finish(session: EditSession, opts: Options) -> Result:
 
     staged = selected()
 
-    # config-driven formatter pass: stdout is re-staged as the final
-    # content, so the diff, the stored patch and undo all carry it.
-    # script runs only -- stored replays apply what was stored
+    # config-driven passes, script runs only -- stored replays apply
+    # what was stored. Each pass re-stages through the session, so the
+    # diff, the stored patch and undo all carry the final content.
     formatted: list[str] = []
+    actions: list[str] = []
     if not opts.skip_format:
+        from pyedit import lsppass as _lsppass
+
         conf = config.load(session.root)
+        # language servers first: actions rewrite code, formatters
+        # normalize text last
+        actions = (
+            _lsppass.apply(session, staged, conf)
+            if conf.lsp and staged
+            else []
+        )
+        if actions:
+            session.prune_unchanged()
+            staged = selected()
         touched = (
-            formatter.format_staged(session, staged, conf.formatters)
+            formatter.format_staged(session, staged, conf.formatters, conf)
             if conf.formatters and staged
             else []
         )
@@ -201,6 +215,7 @@ def finish(session: EditSession, opts: Options) -> Result:
         undo_id=undo_id,
         problems=problems,
         formatted=formatted,
+        actions=actions,
         applied=applied,
         refused=refused,
     )

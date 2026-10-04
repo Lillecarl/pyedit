@@ -33,13 +33,19 @@ def format_staged(
     session: EditSession,
     staged: dict[Path, str | bytes | None],
     formatters: dict[str, list[str]],
+    config=None,
 ) -> list[Path]:
     """Format staged text in place; return the paths whose content
-    changed. Bytes, symlinks and deletions are never formatted."""
+    changed. Bytes, symlinks, deletions and `exclude`d paths are
+    never formatted."""
     changed: list[Path] = []
     for path in sorted(staged):
         content = staged[path]
         if not isinstance(content, str) or isinstance(content, Symlink):
+            continue
+        if config is not None and config.excluded(
+            session.root, session.relpath(path)
+        ):
             continue
         argv = formatters.get(path.suffix.lstrip("."))
         if not argv:

@@ -114,6 +114,42 @@ writes nothing to stdout fails the run and nothing is written. Only
 stdin-to-stdout formatters are supported for now; support for
 formatters that want a file on disk is tracked on GitHub.
 
+One `[lsp.NAME]` table per language server: after the edit script
+finishes and before `[format]`, the server starts once and applies
+its code actions in listed order (then formatting when enabled) to
+every staged text file with a matching suffix. Results are re-staged
+through the session, so the diff, the stored patch and undo all
+carry them -- and the syntax check sees the final text. Files that
+were only read are never touched: the pass sees staged files, not
+the tree.
+
+```toml
+[lsp.ruff]
+command = ["ruff", "server"]
+suffixes = ["py"]
+actions = ["source.fixAll.ruff", "source.organizeImports.ruff"]
+format = true
+```
+
+`actions` are full LSP code action kinds, passed through verbatim;
+`format = true` needs a server with formatting capability. Either
+key may carry the table alone, but a table with neither does
+nothing and fails loudly. A server that will not start, or an action
+that fails, fails the run and nothing is written -- the same
+fail-closed contract as `[format]`.
+
+`exclude` is a list of globs where neither pass runs. Plain patterns
+match the session-root-relative path (`prompt-toolkit/**` spares a
+vendored tree inside the session); patterns starting with `/` or
+`~` match the absolute path instead (`~/Code/vendor/*` spares whole
+checkouts from a config-home file). Later layers replace the list,
+like every other key. Excluded files are only skipped by the passes:
+they remain editable, diffable and applicable.
+
+```toml
+exclude = ["prompt-toolkit/**"]
+```
+
 ## Development
 
 - Build and test: `nix build --file . pyedit` (runs pytest via

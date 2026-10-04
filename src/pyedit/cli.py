@@ -29,6 +29,7 @@ from pyedit import config
 from pyedit import formatter
 from pyedit import runner
 from pyedit import store
+from pyedit.lsppass import LspPassError
 from pyedit.skill import render_skill
 
 EXIT_OK = 0
@@ -275,11 +276,13 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         result = runner.finish(session, opts)
-    except (config.ConfigError, formatter.FormatterError) as exc:
+    except (config.ConfigError, formatter.FormatterError, LspPassError) as exc:
         print(f"pyedit: {exc}", file=sys.stderr)
         print("pyedit: nothing was written", file=sys.stderr)
         return EXIT_SCRIPT_ERROR
 
+    if result.actions:
+        print(f"pyedit: actions: {', '.join(result.actions)}", file=sys.stderr)
     if result.formatted:
         print(f"pyedit: formatted: {', '.join(result.formatted)}", file=sys.stderr)
 

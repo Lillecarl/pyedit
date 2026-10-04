@@ -158,6 +158,7 @@ def run_edit(
         "undo_id": result.undo_id,
         "problems": result.problems,
         "formatted": result.formatted,
+        "actions": result.actions,
         "applied": result.applied,
     }
 

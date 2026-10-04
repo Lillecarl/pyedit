@@ -238,6 +238,7 @@ class LspSession:
         self._encoding = "utf-16"
         self._pushed: dict[Path, str] = {}
         self._versions: dict[Path, int] = {}
+        self._formatting = False
         self._ready: threading.Event | None = None
         self._connect_error: BaseException | None = None
         self._to_server: _FeedWriter | None = None
@@ -358,6 +359,11 @@ class LspSession:
             raise ValueError(f'on_error is "raise" or "skip", not {on_error!r}')
         return self._call(self._code_action_all(pattern, kinds, on_error))
 
+    def format_file(self, path: str | Path) -> list[Path]:
+        """Format one file through the server (textDocument/formatting);
+        returns [path] when content changed, else []."""
+        return self._call(self._format_file(path))
+
     def _call(self, coro):
         return asyncio.run_coroutine_threadsafe(coro, self._loop).result(self._timeout)
 
@@ -417,6 +423,8 @@ class LspSession:
         )
         if result.capabilities.position_encoding is not None:
             self._encoding = result.capabilities.position_encoding
+        if result.capabilities.document_formatting_provider:
+            self._formatting = True
         client.protocol.notify("initialized", types.InitializedParams())
         if self._python_path is not None:
             # servers cannot resolve imports without an interpreter;
@@ -593,6 +601,28 @@ class LspSession:
         finally:
             if pushed:
                 pop()
+
+    async def _format_file(self, path: str | Path) -> list[Path]:
+        session = _bound(self._session)
+        path = session.canon(path)
+        content = session.read(path)
+        if not isinstance(content, str):
+            raise ValueError(f"{path} is binary; formatting works on text")
+        if not self._formatting:
+            raise ValueError("the language server does not provide formatting")
+        await self._sync_documents(session)
+        edits = await self._request(
+            "textDocument/formatting",
+            types.DocumentFormattingParams(
+                text_document=types.TextDocumentIdentifier(uri=_uri(path)),
+                options=types.FormattingOptions(tab_size=4, insert_spaces=True),
+            ),
+        )
+        if not edits:
+            return []
+        return self._stage_changed(
+            session, types.WorkspaceEdit(changes={_uri(path): edits})
+        )
 
     async def _resolve_action(self, action):
         """The WorkspaceEdit behind one code action.
