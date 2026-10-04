@@ -1,0 +1,23 @@
+# Dogfood: every staged .py file gets ruff fixes and format, then
+# pyrefly quickfixes. Vendored code is third-party: both passes
+# stand down there.
+#
+# Range caveat, measured: the bridge requests whole-file ranges.
+# Ruff and zuban answer file-wide, but pyrefly's error-driven
+# fixes (auto-import, ignore comments) need the error to contain
+# the request range -- a cursor, in practice -- so file-wide only
+# its range-blind fixes fire (unused-import removal). Its fixAll
+# kind covers redundant casts only.
+exclude = ["src/pyedit/vendor/**"]
+
+[lsp.ruff]
+command = ["ruff", "server"]
+suffixes = [".py"]
+actions = ["source.fixAll.ruff", "source.organizeImports.ruff"]
+format = true
+
+[lsp.pyrefly]
+command = ["pyrefly", "lsp"]
+suffixes = [".py"]
+actions = ["quickfix"]
+format = false
