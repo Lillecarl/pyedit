@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+from dataclasses import dataclass, field
 from importlib import metadata
 from pathlib import Path
 from urllib.parse import urlparse
@@ -26,10 +27,27 @@ from lsprotocol import types
 from pygls.io_ import run_async
 from pygls.lsp.client import LanguageClient as _LanguageClient
 
+from pyedit.active import current, pop, push
+from pyedit.merge import VFS
 from pyedit.rope import Reference, _require_token
 from pyedit.session import EditSession
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class CodeActionResult:
+    """What code_action_all did: files whose staged content changed,
+    and per-file errors when on_error="skip" left them behind."""
+
+    staged: list[Path] = field(default_factory=list)
+    skipped: dict[str, str] = field(default_factory=dict)
+
+
+def _bound(session: EditSession) -> EditSession:
+    """The session LSP calls read and stage through: the active VFS
+    scope while one runs, else the session the bridge was bound to."""
+    return current() or session
 
 
 _LANGUAGE_IDS = {
@@ -72,6 +90,36 @@ def _uri(path: Path) -> str:
 
 def _path(uri: str) -> Path:
     return Path(url2pathname(urlparse(uri).path))
+
+
+def _kinds(kind: str | list[str]) -> list[str]:
+    """One kind or many, validated early: an empty kind selects
+    nothing on any server, which is always a caller bug."""
+    kinds = [kind] if isinstance(kind, str) else list(kind)
+    if not kinds or any(not k for k in kinds):
+        raise ValueError("kind needs at least one non-empty LSP kind")
+    return kinds
+
+
+def _edit_documents(edit: types.WorkspaceEdit) -> dict[Path, list]:
+    """Group a WorkspaceEdit's text edits by file; resource
+    operations raise, naming themselves: pyedit stages text only."""
+    documents: dict[Path, list] = {}
+    if edit.document_changes:
+        for change in edit.document_changes:
+            if not isinstance(change, types.TextDocumentEdit):
+                kind = getattr(change, "kind", "unknown")
+                raise ValueError(
+                    f"the language server requested a {kind!r} resource "
+                    "operation; pyedit stages text edits only"
+                )
+            documents.setdefault(_path(change.text_document.uri), []).extend(
+                change.edits
+            )
+    elif edit.changes:
+        for uri, edits in edit.changes.items():
+            documents.setdefault(_path(uri), []).extend(edits)
+    return documents
 
 
 def _column_to_units(line_text: str, column: int, encoding: str) -> int:
@@ -282,6 +330,34 @@ class LspSession:
             self._references(self._session.canon(path), line, column, name)
         )
 
+    def code_action(
+        self, path: str | Path, kind: str | list[str]
+    ) -> list[Path]:
+        """Stage one file's edits for LSP code action kinds.
+
+        `kind` is full kinds, verbatim (`source.fixAll.ruff`): they
+        pass into the request's `only` untouched, one request per
+        kind so each answer is computed on the previous one's
+        result. An action that is a command rather than edits
+        raises, naming itself. Returns staged paths.
+        """
+        return self._call(self._code_action(path, _kinds(kind)))
+
+    def code_action_all(
+        self, pattern: str, kind: str | list[str], *, on_error: str = "raise"
+    ) -> CodeActionResult:
+        """Run code actions of `kind` over every file `pattern` finds.
+
+        One VFS scope per file: a failing file merges nothing,
+        earlier files stand. on_error="raise" (default) fails the run
+        naming the file; "skip" carries on and reports per-file
+        errors in result.skipped. Returns files actually changed.
+        """
+        kinds = _kinds(kind)
+        if on_error not in ("raise", "skip"):
+            raise ValueError(f'on_error is "raise" or "skip", not {on_error!r}')
+        return self._call(self._code_action_all(pattern, kinds, on_error))
+
     def _call(self, coro):
         return asyncio.run_coroutine_threadsafe(coro, self._loop).result(self._timeout)
 
@@ -373,25 +449,29 @@ class LspSession:
             except BaseException:  # a dying stub must not wedge teardown
                 pass
 
-    async def _sync_documents(self) -> None:
+    async def _sync_documents(self, session: EditSession | None = None) -> None:
         """Push the session tree so the server computes over the overlay.
 
         Staged files carry their staged content; untouched files are
         opened with their disk content. Pushing the whole tree up front
         keeps the server from racing its own workspace scan on files we
-        are about to ask about.
+        are about to ask about. Defaults to the bound session; callers
+        inside a VFS scope pass the scope so the server sees it.
         """
-        staged = self._session.staged()
-        paths = set(self._session.glob("**/*"))
+        session = session if session is not None else self._session
+        staged = session.staged()
+        paths = set(session.glob("**/*"))
         paths.update(staged)
         for path in sorted(paths):
-            await self._sync_one(path, staged.get(path))
+            await self._sync_one(session, path, staged.get(path))
 
-    async def _sync_one(self, path: Path, staged_content) -> None:
+    async def _sync_one(
+        self, session: EditSession, path: Path, staged_content
+    ) -> None:
         content = staged_content
         if content is None:
             try:
-                content = self._session.read(path)
+                content = session.read(path)
             except OSError:
                 content = None
         protocol = self._client.protocol
@@ -454,6 +534,108 @@ class LspSession:
             raise ValueError(f"the language server cannot rename at {line}:{column}")
         return self._stage_workspace_edit(edit)
 
+    async def _code_action(
+        self, path: str | Path, kinds: list[str]
+    ) -> list[Path]:
+        session = _bound(self._session)
+        path = session.canon(path)
+        changed: list[Path] = []
+        for kind in kinds:
+            content = session.read(path)
+            if not isinstance(content, str):
+                raise ValueError(
+                    f"{path} is binary; code actions work on text"
+                )
+            lines = content.split("\n")
+            await self._sync_documents(session)
+            actions = await self._request(
+                "textDocument/codeAction",
+                types.CodeActionParams(
+                    text_document=types.TextDocumentIdentifier(uri=_uri(path)),
+                    range=types.Range(
+                        start=self._position(content, 1, 0),
+                        end=self._position(content, len(lines), len(lines[-1])),
+                    ),
+                    context=types.CodeActionContext(diagnostics=[], only=[kind]),
+                ),
+            )
+            for action in actions or []:
+                edit = await self._resolve_action(action)
+                for staged in self._stage_changed(session, edit):
+                    if staged not in changed:
+                        changed.append(staged)
+        return changed
+
+    async def _code_action_all(
+        self, pattern: str, kinds: list[str], on_error: str
+    ) -> CodeActionResult:
+        session = _bound(self._session)
+        # VFS scopes parent onto the active session; with no ambient
+        # scope the bound session stands in, so the call works for
+        # library callers that never set the module global
+        pushed = False
+        if current() is None:
+            push(session)
+            pushed = True
+        try:
+            result = CodeActionResult()
+            for path in session.glob(pattern):
+                try:
+                    with VFS():
+                        for staged in await self._code_action(path, kinds):
+                            if staged not in result.staged:
+                                result.staged.append(staged)
+                except Exception as err:
+                    if on_error != "skip":
+                        raise
+                    result.skipped[session.relpath(path)] = str(err)
+            return result
+        finally:
+            if pushed:
+                pop()
+
+    async def _resolve_action(self, action):
+        """The WorkspaceEdit behind one code action.
+
+        Deferred edits (edit None, data set) follow with
+        codeAction/resolve. Anything else without an edit -- a
+        command, or nothing at all -- raises naming the action: the
+        bridge stages edits, and a command would silently drop.
+        """
+        title = getattr(action, "title", None) or "<untitled>"
+        edit = getattr(action, "edit", None)
+        if edit is not None:
+            return edit
+        if getattr(action, "command", None) is not None or not isinstance(
+            action, types.CodeAction
+        ):
+            raise ValueError(
+                f"code action {title!r} is a command, not edits; "
+                "pyedit stages edits only"
+            )
+        if getattr(action, "data", None) is None:
+            raise ValueError(f"code action {title!r} returned no edit")
+        resolved = await self._request("codeAction/resolve", action)
+        if not isinstance(resolved, types.CodeAction) or resolved.edit is None:
+            raise ValueError(f"code action {title!r} did not resolve to edits")
+        return resolved.edit
+
+    def _stage_changed(self, session: EditSession, edit) -> list[Path]:
+        """Stage a WorkspaceEdit, returning only files whose content
+        actually changed; identical hunks are skipped, not staged."""
+        changed = []
+        for path, edits in _edit_documents(edit).items():
+            content = session.read(path)
+            if not isinstance(content, str):
+                raise ValueError(
+                    f"the language server edited {path} but it is not text here"
+                )
+            updated = _apply_edits(content, edits, self._encoding, path)
+            if updated != content:
+                session.write(path, updated)
+                changed.append(path)
+        return changed
+
     async def _references(self, path, line, column, name):
         content = self._require_text(path, line, column, name)
         await self._sync_documents()
@@ -496,23 +678,8 @@ class LspSession:
         )
 
     def _stage_workspace_edit(self, edit: types.WorkspaceEdit) -> list[Path]:
-        documents: dict[Path, list] = {}
-        if edit.document_changes:
-            for change in edit.document_changes:
-                if not isinstance(change, types.TextDocumentEdit):
-                    kind = getattr(change, "kind", "unknown")
-                    raise ValueError(
-                        f"the language server requested a {kind!r} resource "
-                        "operation; pyedit stages text edits only"
-                    )
-                documents.setdefault(_path(change.text_document.uri), []).extend(
-                    change.edits
-                )
-        elif edit.changes:
-            for uri, edits in edit.changes.items():
-                documents.setdefault(_path(uri), []).extend(edits)
         staged = []
-        for path, edits in documents.items():
+        for path, edits in _edit_documents(edit).items():
             content = self._session.read(path)
             if not isinstance(content, str):
                 raise ValueError(f"the language server edited {path} but it is not text here")

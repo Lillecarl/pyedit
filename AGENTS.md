@@ -67,7 +67,7 @@ job belong to libgit2. Read it before changing anything structural.
 | `src/pyedit/fdin.py` | `read_fd`: heredoc payloads on numbered FDs, or injected dicts over MCP |
 | `src/pyedit/syntax/` | tree-sitter position queries, outlines, syntax checks |
 | `src/pyedit/rope.py` | Python refactors: rename_symbol, rename_module, references |
-| `src/pyedit/lsp_client.py` | language server bridge (pygls), non-Python editing |
+| `src/pyedit/lsp_client.py` | language server bridge (pygls): renames, references, code actions |
 | `src/pyedit/gitignore.py` | .gitignore filtering for discovery |
 | `src/pyedit/watchdog.py` | timeout with thread-stack dump |
 | `src/pyedit/skill.py` | the agent skill document itself |

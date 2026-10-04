@@ -17,13 +17,21 @@ from pygls.io_ import run_async
 from pygls.lsp.server import LanguageServer
 
 import pyedit
-from pyedit.lsp_client import LspSession, _column_to_units, _units_to_column
+from pyedit.lsp_client import (
+    CodeActionResult,
+    LspSession,
+    _column_to_units,
+    _units_to_column,
+)
 from pyedit.session import EditSession
 
 _logger = logging.getLogger("pyedit-test-stub")
 
 _pyright = shutil.which("pyright-langserver")
 requires_pyright = pytest.mark.skipif(_pyright is None, reason="pyright is not on PATH")
+
+_ruff = shutil.which("ruff")
+requires_ruff = pytest.mark.skipif(_ruff is None, reason="ruff is not on PATH")
 
 
 def rng(line0, char0, line1, char1):
@@ -47,6 +55,7 @@ class Stub:
         self.documents: dict[str, str] = {}
         self.closed: list[str] = []
         self.settings = None
+        self.resolved: list = []
 
     async def run(self, to_server: asyncio.StreamReader, to_client) -> None:
         server = LanguageServer("stub", "0.1")
@@ -58,6 +67,24 @@ class Stub:
         def references(params):
             key = ("references", params.text_document.uri, params.position.line, params.position.character)
             return self.answers.get(key)
+
+        def code_action(params):
+            key = (
+                "codeAction",
+                params.text_document.uri,
+                tuple(params.context.only or ()),
+            )
+            answer = self.answers.get(key)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+        def resolve(params):
+            self.resolved.append(params.title)
+            answer = self.answers.get(("resolve", params.title))
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
 
         def did_open(params):
             self.documents[params.text_document.uri] = params.text_document.text
@@ -74,6 +101,8 @@ class Stub:
 
         server.feature(types.TEXT_DOCUMENT_RENAME)(rename)
         server.feature(types.TEXT_DOCUMENT_REFERENCES)(references)
+        server.feature(types.TEXT_DOCUMENT_CODE_ACTION)(code_action)
+        server.feature("codeAction/resolve")(resolve)
         server.feature(types.TEXT_DOCUMENT_DID_OPEN)(did_open)
         server.feature(types.TEXT_DOCUMENT_DID_CHANGE)(did_change)
         server.feature(types.TEXT_DOCUMENT_DID_CLOSE)(did_close)
@@ -290,6 +319,174 @@ def test_pyright_references_find_all_occurrences(tmp_path):
         ("alpha.py", 1, 4),
         ("beta.py", 3, 14),
     }
+
+
+def _action_edit(uri, text="ALPHA"):
+    return [
+        types.CodeAction(
+            title="Fix it",
+            kind="source.fix",
+            edit=types.WorkspaceEdit(
+                changes={uri: [types.TextEdit(range=rng(0, 0, 0, 5), new_text=text)]}
+            ),
+        )
+    ]
+
+
+def test_code_action_stages_edits(lsp):
+    handle, session, stub = lsp
+    uri_a = (session.root / "a.txt").as_uri()
+    session.write("a.txt", "alpha beta\n")
+    stub.answers[("codeAction", uri_a, ("source.fix",))] = _action_edit(uri_a)
+    staged = handle.code_action("a.txt", "source.fix")
+    assert staged == [session.root / "a.txt"]
+    assert session.read("a.txt") == "ALPHA beta\n"
+
+
+def test_code_action_kinds_pass_verbatim(lsp):
+    handle, session, stub = lsp
+    uri_a = (session.root / "a.txt").as_uri()
+    session.write("a.txt", "alpha beta\n")
+    stub.answers[("codeAction", uri_a, ("a", "b"))] = []
+    assert handle.code_action("a.txt", ["a", "b"]) == []
+    with pytest.raises(ValueError, match="kind"):
+        handle.code_action("a.txt", "")
+    with pytest.raises(ValueError, match="kind"):
+        handle.code_action("a.txt", [])
+    with pytest.raises(ValueError, match="on_error"):
+        handle.code_action_all("*.txt", "source.fix", on_error="loud")
+
+
+def test_code_action_resolves_deferred_edits(lsp):
+    handle, session, stub = lsp
+    uri_a = (session.root / "a.txt").as_uri()
+    session.write("a.txt", "alpha beta\n")
+    stub.answers[("codeAction", uri_a, ("source.fix",))] = [
+        types.CodeAction(title="Fix it", kind="source.fix", data={"uri": uri_a})
+    ]
+    stub.answers[("resolve", "Fix it")] = _action_edit(uri_a)[0]
+    assert handle.code_action("a.txt", "source.fix") == [session.root / "a.txt"]
+    assert stub.resolved == ["Fix it"]
+    assert session.read("a.txt") == "ALPHA beta\n"
+
+
+def test_code_action_command_raises(lsp):
+    handle, session, stub = lsp
+    uri_a = (session.root / "a.txt").as_uri()
+    session.write("a.txt", "alpha beta\n")
+    stub.answers[("codeAction", uri_a, ("source.fix",))] = [
+        types.Command(title="Do it", command="server.doIt")
+    ]
+    with pytest.raises(ValueError, match="command"):
+        handle.code_action("a.txt", "source.fix")
+    assert session.read("a.txt") == "alpha beta\n"
+
+
+def test_code_action_all_runs_scopes_and_reports(lsp):
+    handle, session, stub = lsp
+    uri_a = (session.root / "a.txt").as_uri()
+    uri_b = (session.root / "b.txt").as_uri()
+    session.write("a.txt", "alpha beta\n")
+    stub.answers[("codeAction", uri_a, ("source.fix",))] = _action_edit(uri_a)
+    report = handle.code_action_all("*.txt", "source.fix")
+    assert isinstance(report, CodeActionResult)
+    assert report.staged == [session.root / "a.txt"]
+    assert report.skipped == {}
+    assert session.read("a.txt") == "ALPHA beta\n"
+    assert session.read("b.txt") == "gamma delta\n"
+
+
+def test_code_action_all_skip_collects_errors(lsp):
+    handle, session, stub = lsp
+    uri_a = (session.root / "a.txt").as_uri()
+    uri_b = (session.root / "b.txt").as_uri()
+    session.write("a.txt", "alpha beta\n")
+    session.write("b.txt", "gamma delta\n")
+    stub.answers[("codeAction", uri_a, ("source.fix",))] = _action_edit(uri_a)
+    stub.answers[("codeAction", uri_b, ("source.fix",))] = RuntimeError("boom")
+    report = handle.code_action_all("*.txt", "source.fix", on_error="skip")
+    assert report.staged == [session.root / "a.txt"]
+    assert list(report.skipped) == ["b.txt"]
+    assert "boom" in report.skipped["b.txt"]
+    assert session.read("b.txt") == "gamma delta\n"
+
+
+def test_code_action_all_raise_keeps_earlier_files(lsp):
+    handle, session, stub = lsp
+    uri_a = (session.root / "a.txt").as_uri()
+    uri_b = (session.root / "b.txt").as_uri()
+    session.write("a.txt", "alpha beta\n")
+    session.write("b.txt", "gamma delta\n")
+    stub.answers[("codeAction", uri_a, ("source.fix",))] = _action_edit(uri_a)
+    stub.answers[("codeAction", uri_b, ("source.fix",))] = RuntimeError("boom")
+    with pytest.raises(ValueError, match="boom"):
+        handle.code_action_all("*.txt", "source.fix")
+    assert session.read("a.txt") == "ALPHA beta\n"
+    assert session.read("b.txt") == "gamma delta\n"
+
+
+def test_code_action_all_discards_the_failing_scope(lsp):
+    # no staged write here: the scope stages ALPHA, the second kind
+    # raises, and the discard must leave the session empty
+    handle, session, stub = lsp
+    uri_a = (session.root / "a.txt").as_uri()
+    stub.answers[("codeAction", uri_a, ("good",))] = _action_edit(uri_a)
+    stub.answers[("codeAction", uri_a, ("bad",))] = RuntimeError("boom")
+    with pytest.raises(ValueError, match="boom"):
+        handle.code_action_all("a.txt", ["good", "bad"])
+    # the scope's ALPHA must not leak; pruning drops the session's
+    # materialized reads (the bridge didOpen'd the tree on connect),
+    # so whatever remains past the prune is a real staged change
+    assert session.read("a.txt") == "alpha beta\n"
+    session.prune_unchanged()
+    assert session.staged() == {}
+
+
+def _ruff_project(tmp_path):
+    (tmp_path / "fix.py").write_text("import os\nimport sys\n\nprint(sys.argv)\n")
+    (tmp_path / "order.py").write_text("import sys\nimport os\n\nprint(os.name, sys.argv)\n")
+    (tmp_path / "clean.py").write_text("import sys\n\nprint(sys.argv)\n")
+    return EditSession(respect_gitignore=False, root=tmp_path)
+
+
+@requires_ruff
+def test_ruff_fix_all_removes_unused_import(tmp_path):
+    session = _ruff_project(tmp_path)
+    with LspSession(session, ["ruff", "server"]) as handle:
+        staged = handle.code_action("fix.py", "source.fixAll.ruff")
+    assert staged == [tmp_path / "fix.py"]
+    assert session.read("fix.py") == "import sys\n\nprint(sys.argv)\n"
+    assert (tmp_path / "fix.py").read_text() == "import os\nimport sys\n\nprint(sys.argv)\n"
+
+
+@requires_ruff
+def test_ruff_organize_imports(tmp_path):
+    session = _ruff_project(tmp_path)
+    with LspSession(session, ["ruff", "server"]) as handle:
+        staged = handle.code_action("order.py", "source.organizeImports.ruff")
+    assert staged == [tmp_path / "order.py"]
+    assert session.read("order.py") == "import os\nimport sys\n\nprint(os.name, sys.argv)\n"
+
+
+@requires_ruff
+def test_ruff_tree_fixes_only_dirty_files(tmp_path):
+    session = _ruff_project(tmp_path)
+    with LspSession(session, ["ruff", "server"]) as handle:
+        report = handle.code_action_all(
+            "*.py", ["source.fixAll.ruff", "source.organizeImports.ruff"]
+        )
+    assert {p.name for p in report.staged} == {"fix.py", "order.py"}
+    assert report.skipped == {}
+    assert session.read("fix.py") == "import sys\n\nprint(sys.argv)\n"
+    assert session.read("clean.py") == "import sys\n\nprint(sys.argv)\n"
+
+
+@requires_ruff
+def test_ruff_syntax_error_is_empty_not_an_error(tmp_path):
+    (tmp_path / "broken.py").write_text("def f(:\n")
+    session = EditSession(respect_gitignore=False, root=tmp_path)
+    with LspSession(session, ["ruff", "server"]) as handle:
+        assert handle.code_action("broken.py", "source.fixAll.ruff") == []
 
 
 @requires_pyright

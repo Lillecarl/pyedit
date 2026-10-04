@@ -12,6 +12,7 @@
   pygls,
   lsprotocol,
   pyright,
+  ruff,
   tree-sitter,
   tree-sitter-grammars,
   cacert,
@@ -112,6 +113,7 @@ let
     nativeCheckInputs = [
       pytestCheckHook
       pyright
+      ruff
       hypothesis
       git
     ];

@@ -56,9 +56,8 @@ A Python edit script is the only way to describe an edit. Patches
 somebody else wrote are staged from inside a script (`apply_v4a`,
 `apply_diff_git`, `apply_diff_unidiff` below).
 
-`apply ID` is a subcommand, not a flag: no script runs, libgit2
-replays a patch pyedit stored. `--apply` is the unrelated modifier --
-this run writes instead of dry-running.
+`apply ID` is a subcommand (no script runs); `--apply` is the
+unrelated modifier (this run writes).
 
 | option | |
 |---|---|
@@ -123,13 +122,12 @@ earlier ones per key:
 | layer | location |
 |---|---|
 | config home | `~/.config/pyedit/pyedit.toml` (XDG_CONFIG_HOME; macOS `~/Library/Application Support/pyedit/pyedit.toml`) |
-| umbrella | the file a pyedit.toml names in `parent = "../pyedit.toml"`, relative to that file; pointers may chain |
+| umbrella | the file `parent = "../pyedit.toml"` names; pointers may chain |
 | session root | `pyedit.toml` next to the invocation directory |
 
-`[format]` maps a file suffix to a formatter command. After the
-script finishes, staged text with a matching suffix is piped through
-stdin and the stdout is re-staged as the final content -- the diff,
-the stored patch and undo all show it. `{path}` expands to the
+`[format]` maps a suffix to a formatter: staged text with a
+matching suffix is piped through stdin, stdout re-staged -- the
+diff, the stored patch and undo all show it. `{path}` expands to the
 absolute path (for formatters that resolve their own config from a
 file name). A formatter that is missing, exits non-zero, or writes
 nothing fails the run; nothing is written.
@@ -343,7 +341,7 @@ the add by content similarity, so it is a guess --
 
 `rename_symbol`, `rename_module` and `references` are rope-backed and
 Python-only. Other languages go through a language server, never
-downloaded: the command comes from PATH or is absolute.
+downloaded (PATH or absolute).
 
     # the SERVER binary, not the CLI wrapper:
     # pyright's is pyright-langserver --stdio
@@ -351,13 +349,19 @@ downloaded: the command comes from PATH or is absolute.
                     python_path=sys.executable) as lsp:
         lsp.rename_symbol(path, old_name=old, new_name=new)
         lsp.references(path, name=name)
+        report = lsp.code_action_all("src/**/*.py", "source.fixAll.ruff",
+                                     on_error="skip")
 
 Same resolution rules, but the server does the symbol search and
-handles namespace packages (no `__init__.py`), which rope cannot -- a
-rope rename there silently stays definition-local. The server sees
-staged content via didOpen/didChange; returned edits are staged like
-any other. `old_name`/`name` must match the token at a given position.
-Heavy servers may need a moment after startup.
+handles namespace packages, which rope cannot -- there a rename
+silently stays definition-local. `old_name`/`name` must match the
+token at a given position.
+
+`code_action(path, kind)` stages one file's edits;
+`code_action_all` scopes one file each over a glob and returns
+staged and skipped paths. Kinds pass through verbatim; an action
+the bridge cannot stage raises, naming itself. Servers see staged
+content.
 
 ## Syntax awareness
 
