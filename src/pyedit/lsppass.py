@@ -51,7 +51,9 @@ def apply(
                 for path in paths:
                     before = session.read(path)
                     for kind in table.actions:
-                        lsp.code_action(path, kind)
+                        lsp.code_action(
+                            path, kind, only_titles=table.only_titles
+                        )
                     if table.format:
                         lsp.format_file(path)
                     if session.read(path) != before:

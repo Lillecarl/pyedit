@@ -53,6 +53,11 @@ class Stub:
 
     def __init__(self) -> None:
         self.answers: dict = {}
+        # ranged answers win over answers: (method, uri, only, range)
+        # lets a test script different replies per request range
+        self.ranged: dict = {}
+        # every codeAction request the stub saw, in order
+        self.code_actions_seen: list = []
         self.documents: dict[str, str] = {}
         self.closed: list[str] = []
         self.settings = None
@@ -73,12 +78,18 @@ class Stub:
             return self.answers.get(key)
 
         def code_action(params):
-            key = (
-                "codeAction",
-                params.text_document.uri,
-                tuple(params.context.only or ()),
+            uri = params.text_document.uri
+            only = tuple(params.context.only or ())
+            extent = (
+                params.range.start.line,
+                params.range.start.character,
+                params.range.end.line,
+                params.range.end.character,
             )
-            answer = self.answers.get(key)
+            self.code_actions_seen.append((uri, only, extent))
+            answer = self.ranged.get(("codeAction", uri, only, extent))
+            if answer is None:
+                answer = self.answers.get(("codeAction", uri, only))
             if isinstance(answer, Exception):
                 raise answer
             return answer
@@ -652,6 +663,165 @@ def test_server_requests_get_headless_answers(stub_project):
     assert [w.uri for w in answers[types.WORKSPACE_WORKSPACE_FOLDERS]] == [
         stub_project.root.as_uri()
     ]
+
+
+def _push_unknown_name(stub):
+    """Push one unknown-name diagnostic per didOpen; the pyrefly shape:
+    file-wide requests see nothing, the diagnostic's own range fixes it."""
+    diag = types.Diagnostic(
+        range=rng(0, 6, 0, 10),
+        message="unknown",
+        severity=types.DiagnosticSeverity.Error,
+    )
+
+    def on_open(server, uri):
+        server.protocol.notify(
+            types.TEXT_DOCUMENT_PUBLISH_DIAGNOSTICS,
+            types.PublishDiagnosticsParams(uri=uri, diagnostics=[diag]),
+        )
+
+    stub.on_open = on_open
+
+
+def test_quickfix_expands_to_diagnostic_ranges(stub_project):
+    stub = Stub()
+    body = 'print(json.dumps({"a": 1}))\n'
+    (stub_project.root / "a.py").write_text(body)
+    stub_project.write("a.py", body)
+    _push_unknown_name(stub)
+    uri = (stub_project.root / "a.py").as_uri()
+    stub.answers[("codeAction", uri, ("quickfix",))] = []
+    stub.ranged[("codeAction", uri, ("quickfix",), (0, 6, 0, 10))] = [
+        types.CodeAction(
+            title="Insert import",
+            kind="quickfix",
+            edit=types.WorkspaceEdit(
+                changes={
+                    uri: [
+                        types.TextEdit(
+                            range=rng(0, 0, 0, 0), new_text="import json\n\n"
+                        )
+                    ]
+                }
+            ),
+        )
+    ]
+    with LspSession(stub_project, [], in_memory=stub.run) as handle:
+        staged = handle.code_action("a.py", "quickfix")
+    assert staged == [stub_project.root / "a.py"]
+    assert stub_project.read("a.py") == "import json\n\n" + body
+
+
+def test_quickfix_dedupes_identical_edits(stub_project):
+    # the same fix comes back file-wide and per-range; staging it
+    # twice must be a silent no-op, not a doubled insertion
+    stub = Stub()
+    body = "x = 1\n"
+    (stub_project.root / "a.py").write_text(body)
+    stub_project.write("a.py", body)
+    _push_unknown_name(stub)
+    uri = (stub_project.root / "a.py").as_uri()
+    fix = [
+        types.CodeAction(
+            title="Fix",
+            kind="quickfix",
+            edit=types.WorkspaceEdit(
+                changes={
+                    uri: [
+                        types.TextEdit(
+                            range=rng(0, 0, 0, 0), new_text="# fixed\n"
+                        )
+                    ]
+                }
+            ),
+        )
+    ]
+    stub.answers[("codeAction", uri, ("quickfix",))] = fix
+    stub.ranged[("codeAction", uri, ("quickfix",), (0, 6, 0, 10))] = fix
+    with LspSession(stub_project, [], in_memory=stub.run) as handle:
+        handle.code_action("a.py", "quickfix")
+    assert stub_project.read("a.py") == "# fixed\n" + body
+
+
+def test_disabled_actions_are_skipped(stub_project):
+    # a disabled action is unusable by construction; skipping comes
+    # before resolve, so no round trip goes out for it
+    stub = Stub()
+    (stub_project.root / "a.py").write_text("x = 1\n")
+    stub_project.write("a.py", "x = 1\n")
+    uri = (stub_project.root / "a.py").as_uri()
+    stub.answers[("codeAction", uri, ("quickfix",))] = [
+        types.CodeAction(
+            title="Nope",
+            kind="quickfix",
+            disabled=types.CodeActionDisabled(reason="not here"),
+            edit=types.WorkspaceEdit(
+                changes={
+                    uri: [types.TextEdit(range=rng(0, 0, 0, 0), new_text="BAD\n")]
+                }
+            ),
+        )
+    ]
+    with LspSession(stub_project, [], in_memory=stub.run) as handle:
+        assert handle.code_action("a.py", "quickfix") == []
+    assert stub_project.read("a.py") == "x = 1\n"
+    assert stub.resolved == []
+
+
+def test_only_titles_selects_among_alternatives(stub_project):
+    # the pyrefly unknown-name shape: several alternatives for one
+    # diagnostic, only the selected prefix stages
+    stub = Stub()
+    body = "x = 1\n"
+    (stub_project.root / "a.py").write_text(body)
+    stub_project.write("a.py", body)
+    uri = (stub_project.root / "a.py").as_uri()
+    stub.answers[("codeAction", uri, ("quickfix",))] = [
+        types.CodeAction(
+            title="Insert import: `json`",
+            kind="quickfix",
+            edit=types.WorkspaceEdit(
+                changes={
+                    uri: [
+                        types.TextEdit(
+                            range=rng(0, 0, 0, 0), new_text="import json\n"
+                        )
+                    ]
+                }
+            ),
+        ),
+        types.CodeAction(
+            title="Generate variable `x`",
+            kind="quickfix",
+            edit=types.WorkspaceEdit(
+                changes={
+                    uri: [
+                        types.TextEdit(
+                            range=rng(1, 0, 1, 0), new_text="x = None\n"
+                        )
+                    ]
+                }
+            ),
+        ),
+    ]
+    with LspSession(stub_project, [], in_memory=stub.run) as handle:
+        staged = handle.code_action("a.py", "quickfix", only_titles=("Insert import",))
+    assert staged == [stub_project.root / "a.py"]
+    assert stub_project.read("a.py") == "import json\n" + body
+
+
+def test_source_kinds_skip_diagnostic_expansion(stub_project):
+    # source.* actions are file-wide by convention; diagnostics are
+    # tracked but no per-range requests go out for them
+    stub = Stub()
+    (stub_project.root / "a.py").write_text("x = 1\n")
+    stub_project.write("a.py", "x = 1\n")
+    _push_unknown_name(stub)
+    uri = (stub_project.root / "a.py").as_uri()
+    stub.answers[("codeAction", uri, ("source.fixAll",))] = []
+    with LspSession(stub_project, [], in_memory=stub.run) as handle:
+        assert handle.code_action("a.py", "source.fixAll") == []
+    assert [seen[1] for seen in stub.code_actions_seen] == [("source.fixAll",)]
 
 
 def _ruff_project(tmp_path):

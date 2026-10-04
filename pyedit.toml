@@ -20,4 +20,5 @@ format = true
 command = ["pyrefly", "lsp"]
 suffixes = [".py"]
 actions = ["quickfix"]
+only_titles = ["Insert import", "Remove unused import"]
 format = false

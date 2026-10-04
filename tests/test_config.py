@@ -33,7 +33,9 @@ def test_root_overrides_config_home(project, config_home):
 
 def test_parent_provides_defaults_root_overrides(project):
     write(project.parent / "umbrella.toml", '[format]\nnix = ["a"]\npy = ["b"]\n')
-    write(project / "pyedit.toml", 'parent = "../umbrella.toml"\n[format]\npy = ["c"]\n')
+    write(
+        project / "pyedit.toml", 'parent = "../umbrella.toml"\n[format]\npy = ["c"]\n'
+    )
     assert config.load(project).formatters == {"nix": ["a"], "py": ["c"]}
 
 
@@ -153,38 +155,79 @@ def test_lsp_format_only_needs_no_actions(project):
 
 
 def test_lsp_table_without_work_is_loud(project):
-    write(project / "pyedit.toml", '[lsp.ruff]\ncommand = ["ruff", "server"]\nsuffixes = ["py"]\n')
+    write(
+        project / "pyedit.toml",
+        '[lsp.ruff]\ncommand = ["ruff", "server"]\nsuffixes = ["py"]\n',
+    )
     with pytest.raises(config.ConfigError, match=r"\[lsp\.ruff\]"):
         config.load(project)
 
 
 def test_lsp_command_must_be_an_argv_list(project):
-    write(project / "pyedit.toml", '[lsp.ruff]\ncommand = "ruff"\nsuffixes = ["py"]\nformat = true\n')
+    write(
+        project / "pyedit.toml",
+        '[lsp.ruff]\ncommand = "ruff"\nsuffixes = ["py"]\nformat = true\n',
+    )
     with pytest.raises(config.ConfigError, match=r"\[lsp\.ruff\]\.command"):
         config.load(project)
 
 
 def test_lsp_suffixes_must_not_be_empty(project):
-    write(project / "pyedit.toml", '[lsp.ruff]\ncommand = ["ruff", "server"]\nsuffixes = []\nformat = true\n')
+    write(
+        project / "pyedit.toml",
+        '[lsp.ruff]\ncommand = ["ruff", "server"]\nsuffixes = []\nformat = true\n',
+    )
     with pytest.raises(config.ConfigError, match="suffixes"):
         config.load(project)
 
 
 def test_lsp_format_must_be_a_bool(project):
-    write(project / "pyedit.toml", '[lsp.ruff]\ncommand = ["ruff", "server"]\nsuffixes = ["py"]\nformat = "yes"\n')
+    write(
+        project / "pyedit.toml",
+        '[lsp.ruff]\ncommand = ["ruff", "server"]\nsuffixes = ["py"]\nformat = "yes"\n',
+    )
     with pytest.raises(config.ConfigError, match=r"\[lsp\.ruff\]"):
         config.load(project)
 
 
+def test_lsp_only_titles_parses(project):
+    write(
+        project / "pyedit.toml",
+        '[lsp.pyrefly]\ncommand = ["pyrefly", "lsp"]\nsuffixes = ["py"]\nactions = ["quickfix"]\nonly_titles = ["Insert import", "Remove unused import"]\n',
+    )
+    table = config.load(project).lsp["pyrefly"]
+    assert table.only_titles == ["Insert import", "Remove unused import"]
+
+
+def test_lsp_only_titles_defaults_to_empty(project):
+    write(project / "pyedit.toml", RUFF_LSP)
+    assert config.load(project).lsp["ruff"].only_titles == []
+
+
+def test_lsp_only_titles_must_be_prefix_strings(project):
+    write(
+        project / "pyedit.toml",
+        '[lsp.ruff]\ncommand = ["ruff", "server"]\nsuffixes = ["py"]\nactions = ["quickfix"]\nonly_titles = ["ok", ""]\n',
+    )
+    with pytest.raises(config.ConfigError, match="only_titles"):
+        config.load(project)
+
+
 def test_lsp_unknown_subkey_is_loud(project):
-    write(project / "pyedit.toml", '[lsp.ruff]\ncommand = ["ruff", "server"]\nsuffixes = ["py"]\nformat = true\ntimeout = 3\n')
+    write(
+        project / "pyedit.toml",
+        '[lsp.ruff]\ncommand = ["ruff", "server"]\nsuffixes = ["py"]\nformat = true\ntimeout = 3\n',
+    )
     with pytest.raises(config.ConfigError, match="timeout"):
         config.load(project)
 
 
 def test_lsp_tables_merge_by_name(project, config_home):
     write(config_home / "pyedit.toml", RUFF_LSP)
-    write(project / "pyedit.toml", '[lsp.go]\ncommand = ["gopls"]\nsuffixes = ["go"]\nformat = true\n')
+    write(
+        project / "pyedit.toml",
+        '[lsp.go]\ncommand = ["gopls"]\nsuffixes = ["go"]\nformat = true\n',
+    )
     assert set(config.load(project).lsp) == {"ruff", "go"}
 
 

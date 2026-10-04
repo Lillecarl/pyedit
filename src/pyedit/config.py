@@ -41,11 +41,13 @@ class ConfigError(Exception):
 @dataclass(frozen=True)
 class LspTable:
     """One [lsp.*] server: the command, the suffixes it acts on, the
-    code action kinds in order, and whether it formats last."""
+    code action kinds in order, title prefixes selecting among
+    alternatives, and whether it formats last."""
 
     command: list[str] = field(default_factory=list)
     suffixes: list[str] = field(default_factory=list)
     actions: list[str] = field(default_factory=list)
+    only_titles: list[str] = field(default_factory=list)
     format: bool = False
 
 
@@ -162,11 +164,11 @@ def _lsp_table(path: Path, name: str, table) -> LspTable:
     where = f"{path}: [lsp.{name}]"
     if not isinstance(table, dict):
         raise ConfigError(f"{where} must be a table")
-    unknown = set(table) - {"command", "suffixes", "actions", "format"}
+    unknown = set(table) - {"command", "suffixes", "actions", "only_titles", "format"}
     if unknown:
         raise ConfigError(
             f"{where}: unknown key(s) {', '.join(sorted(unknown))}; "
-            "expected 'command', 'suffixes', 'actions' and 'format'"
+            "expected 'command', 'suffixes', 'actions', 'only_titles' and 'format'"
         )
     suffixes = table.get("suffixes", [])
     if (
@@ -180,6 +182,11 @@ def _lsp_table(path: Path, name: str, table) -> LspTable:
         isinstance(a, str) and a for a in actions
     ):
         raise ConfigError(f"{where} needs 'actions' as a list of LSP kinds")
+    only_titles = table.get("only_titles", [])
+    if not isinstance(only_titles, list) or not all(
+        isinstance(t, str) and t for t in only_titles
+    ):
+        raise ConfigError(f"{where} needs 'only_titles' as a list of title prefixes")
     formatting = table.get("format", False)
     if not isinstance(formatting, bool):
         raise ConfigError(f"{where} needs 'format' as true or false")
@@ -189,6 +196,7 @@ def _lsp_table(path: Path, name: str, table) -> LspTable:
         command=_argv(path, f"[lsp.{name}].command", table.get("command")),
         suffixes=[s.lstrip(".") for s in suffixes],
         actions=list(actions),
+        only_titles=list(only_titles),
         format=formatting,
     )
 

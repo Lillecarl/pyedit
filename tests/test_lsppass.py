@@ -15,7 +15,6 @@ from pyedit import cli, lsppass
 from pyedit.config import Config, LspTable
 from pyedit.session import EditSession
 
-
 _ruff = shutil.which("ruff")
 requires_ruff = pytest.mark.skipif(_ruff is None, reason="ruff is not on PATH")
 
@@ -34,9 +33,7 @@ def tree(tmp_path, monkeypatch):
     (tmp_path / "prompt-toolkit" / "vendored.py").write_text(
         "import os\nimport sys\nx=1\nprint(sys.argv,x)\n"
     )
-    (tmp_path / "fix.py").write_text(
-        "import os\nimport sys\nx=1\nprint(sys.argv,x)\n"
-    )
+    (tmp_path / "fix.py").write_text("import os\nimport sys\nx=1\nprint(sys.argv,x)\n")
     (tmp_path / "clean.py").write_text("import sys\n\nprint(sys.argv)\n")
     (tmp_path / "note.txt").write_text("hello\n")
     return EditSession(respect_gitignore=False, root=tmp_path)
@@ -127,13 +124,43 @@ def test_cli_run_applies_lsp_pass(tmp_path, monkeypatch, capsys):
 @requires_ruff
 def test_format_only_table(tree):
     conf = Config(
-        lsp={
-            "ruff": LspTable(
-                command=["ruff", "server"], suffixes=["py"], format=True
-            )
-        }
+        lsp={"ruff": LspTable(command=["ruff", "server"], suffixes=["py"], format=True)}
     )
     (tree.root / "messy.py").write_text("x=1\n")
     tree.write("messy.py", tree.read("messy.py"))
     assert lsppass.apply(tree, tree.staged(), conf) == ["messy.py (ruff)"]
     assert tree.read("messy.py") == "x = 1\n"
+
+
+def test_pass_forwards_only_titles(tree, monkeypatch):
+    seen = []
+
+    class FakeLsp:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def code_action(self, path, kind, only_titles=()):
+            seen.append((kind, tuple(only_titles)))
+
+        def format_file(self, path):
+            return []
+
+    monkeypatch.setattr("pyedit.lsp_client.LspSession", FakeLsp)
+    conf = Config(
+        lsp={
+            "sel": LspTable(
+                command=["true"],
+                suffixes=["py"],
+                actions=["quickfix"],
+                only_titles=["Insert import"],
+            )
+        }
+    )
+    assert lsppass.apply(tree, stage_all(tree), conf) == []
+    assert seen == [("quickfix", ("Insert import",))] * 3

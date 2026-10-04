@@ -123,11 +123,12 @@ earlier ones per key:
 `[format]` maps a suffix to a formatter: staged text with a
 matching suffix is piped through stdin, stdout re-staged -- the
 diff, the stored patch and undo all show it. `{path}` expands to the
-absolute path. `[lsp.NAME]` servers run code actions, then
-formatting with `format = true`, over matching staged files before
-`[format]`. `exclude` globs skip both passes -- root-relative paths, or
-absolute ones with `/` or `~`. A missing binary, a failed action or
-empty formatter output fails the run; nothing is written.
+absolute path. `[lsp.NAME]` servers run code actions then `format = true`
+formatting, over matching staged files before `[format]`;
+`only_titles` keeps actions by title prefix.
+`exclude` globs skip both passes; `/`/`~`-prefixed match absolute
+paths. Missing tools, failed actions and empty output fail
+closed.
 
     [format]
     nix = ["nixfmt", "-"]

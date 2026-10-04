@@ -20,7 +20,7 @@ import threading
 from dataclasses import dataclass, field
 from importlib import metadata
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
@@ -108,6 +108,20 @@ def _kinds(kind: str | list[str]) -> list[str]:
     if not kinds or any(not k for k in kinds):
         raise ValueError("kind needs at least one non-empty LSP kind")
     return kinds
+
+
+def _edit_fingerprint(uri: str, edit) -> tuple:
+    """Identity of one TextEdit: same range and text means the same
+    fix, even when two requests (file-wide and per-diagnostic, or a
+    lagging server analysis) report it twice."""
+    return (
+        uri,
+        edit.range.start.line,
+        edit.range.start.character,
+        edit.range.end.line,
+        edit.range.end.character,
+        edit.new_text,
+    )
 
 
 def _edit_documents(edit: types.WorkspaceEdit) -> dict[Path, list]:
@@ -344,7 +358,11 @@ class LspSession:
         )
 
     def code_action(
-        self, path: str | Path, kind: str | list[str]
+        self,
+        path: str | Path,
+        kind: str | list[str],
+        *,
+        only_titles: Sequence[str] = (),
     ) -> list[Path]:
         """Stage one file's edits for LSP code action kinds.
 
@@ -352,12 +370,22 @@ class LspSession:
         pass into the request's `only` untouched, one request per
         kind so each answer is computed on the previous one's
         result. An action that is a command rather than edits
-        raises, naming itself. Returns staged paths.
+        raises, naming itself. `only_titles` keeps only actions
+        whose title starts with one of its prefixes, choosing among
+        alternatives a batch run cannot judge between. Returns
+        staged paths.
         """
-        return self._call(self._code_action(path, _kinds(kind)))
+        return self._call(
+            self._code_action(path, _kinds(kind), tuple(only_titles))
+        )
 
     def code_action_all(
-        self, pattern: str, kind: str | list[str], *, on_error: str = "raise"
+        self,
+        pattern: str,
+        kind: str | list[str],
+        *,
+        on_error: str = "raise",
+        only_titles: Sequence[str] = (),
     ) -> CodeActionResult:
         """Run code actions of `kind` over every file `pattern` finds.
 
@@ -369,7 +397,9 @@ class LspSession:
         kinds = _kinds(kind)
         if on_error not in ("raise", "skip"):
             raise ValueError(f'on_error is "raise" or "skip", not {on_error!r}')
-        return self._call(self._code_action_all(pattern, kinds, on_error))
+        return self._call(
+            self._code_action_all(pattern, kinds, on_error, tuple(only_titles))
+        )
 
     def format_file(self, path: str | Path) -> list[Path]:
         """Format one file through the server (textDocument/formatting);
@@ -667,11 +697,12 @@ class LspSession:
         return self._stage_workspace_edit(edit)
 
     async def _code_action(
-        self, path: str | Path, kinds: list[str]
+        self, path: str | Path, kinds: list[str], only_titles: tuple = ()
     ) -> list[Path]:
         session = _bound(self._session)
         path = session.canon(path)
         changed: list[Path] = []
+        applied: set[tuple] = set()
         for kind in kinds:
             content = session.read(path)
             if not isinstance(content, str):
@@ -691,15 +722,112 @@ class LspSession:
                     context=types.CodeActionContext(diagnostics=[], only=[kind]),
                 ),
             )
-            for action in actions or []:
-                edit = await self._resolve_action(action)
-                for staged in self._stage_changed(session, edit):
+            for staged in await self._stage_actions(
+                session, actions, applied, only_titles
+            ):
+                if staged not in changed:
+                    changed.append(staged)
+            if kind == "quickfix":
+                for staged in await self._quickfix_at_diagnostics(
+                    session, path, applied, only_titles
+                ):
                     if staged not in changed:
                         changed.append(staged)
         return changed
 
+    async def _stage_actions(
+        self,
+        session: EditSession,
+        actions,
+        applied: set[tuple],
+        only_titles: tuple = (),
+    ) -> list[Path]:
+        """Resolve and stage code actions, skipping edits already
+        staged: file-wide and per-diagnostic rounds (and lagging
+        server analyses) report the same fix twice, and re-applying
+        an insertion at a still-valid position would double it.
+        Disabled actions stay out, and `only_titles` keeps only
+        actions whose title starts with one of its prefixes."""
+        changed: list[Path] = []
+        for action in actions or []:
+            if getattr(action, "disabled", None):
+                continue
+            title = getattr(action, "title", "") or ""
+            if only_titles and not title.startswith(only_titles):
+                continue
+            edit = await self._resolve_action(action)
+            for path, edits in _edit_documents(edit).items():
+                # _edit_documents keys by path; the changes map keys by
+                # document URI, which round-trips exactly what didOpen
+                # sent, so _uri rebuilds the key verbatim
+                uri = _uri(path)
+                fresh = [
+                    e
+                    for e in edits
+                    if _edit_fingerprint(uri, e) not in applied
+                ]
+                if not fresh:
+                    continue
+                for staged in self._stage_changed(
+                    session, types.WorkspaceEdit(changes={uri: fresh})
+                ):
+                    if staged not in changed:
+                        changed.append(staged)
+                applied.update(_edit_fingerprint(uri, e) for e in fresh)
+        return changed
+
+    async def _quickfix_at_diagnostics(
+        self,
+        session: EditSession,
+        path: Path,
+        applied: set[tuple],
+        only_titles: tuple = (),
+    ) -> list[Path]:
+        """Ask quickfix at each tracked diagnostic's own range.
+
+        Whole-file ranges suit file-wide actions, but error-driven
+        fixes need the error to contain the request: pyrefly answers
+        nothing file-wide and fixes everything at a cursor. Tracked
+        push diagnostics supply those ranges. Each round re-syncs
+        first, so answers compute on the previous round's result.
+        Servers that never push simply yield no rounds.
+        """
+        changed: list[Path] = []
+        diags = sorted(
+            self._diagnostics.get(_uri(path), ()),
+            key=lambda d: (
+                d.range.start.line,
+                d.range.start.character,
+                d.range.end.line,
+                d.range.end.character,
+            ),
+            reverse=True,
+        )
+        for diag in diags:
+            await self._sync_documents(session)
+            actions = await self._request(
+                "textDocument/codeAction",
+                types.CodeActionParams(
+                    text_document=types.TextDocumentIdentifier(uri=_uri(path)),
+                    range=diag.range,
+                    context=types.CodeActionContext(
+                        diagnostics=[diag], only=["quickfix"]
+                    ),
+                ),
+            )
+            for staged in await self._stage_actions(
+                session, actions, applied, only_titles
+            ):
+                if staged not in changed:
+                    changed.append(staged)
+        return changed
+
     async def _code_action_all(
-        self, pattern: str, kinds: list[str], on_error: str
+        self,
+        pattern: str,
+        kinds: list[str],
+        on_error: str,
+        only_titles: tuple = (),
     ) -> CodeActionResult:
         session = _bound(self._session)
         # VFS scopes parent onto the active session; with no ambient
@@ -714,7 +842,9 @@ class LspSession:
             for path in session.glob(pattern):
                 try:
                     with VFS():
-                        for staged in await self._code_action(path, kinds):
+                        for staged in await self._code_action(
+                            path, kinds, only_titles
+                        ):
                             if staged not in result.staged:
                                 result.staged.append(staged)
                 except Exception as err:
