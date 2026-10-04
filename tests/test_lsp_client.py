@@ -10,6 +10,7 @@ import asyncio
 import logging
 import shutil
 import threading
+import time
 
 import pytest
 from lsprotocol import types
@@ -56,6 +57,9 @@ class Stub:
         self.closed: list[str] = []
         self.settings = None
         self.resolved: list = []
+        # hook(server, uri) the stub calls on didOpen, so a test can
+        # push server-to-client notifications mid-run
+        self.on_open = None
 
     async def run(self, to_server: asyncio.StreamReader, to_client) -> None:
         server = LanguageServer("stub", "0.1")
@@ -88,6 +92,8 @@ class Stub:
 
         def did_open(params):
             self.documents[params.text_document.uri] = params.text_document.text
+            if self.on_open is not None:
+                self.on_open(server, params.text_document.uri)
 
         def did_change(params):
             self.documents[params.text_document.uri] = params.content_changes[-1].text
@@ -447,6 +453,42 @@ def test_format_file_refuses_without_capability(lsp):
     session.write("a.txt", "alpha  beta\n")
     with pytest.raises(ValueError, match="formatting"):
         handle.format_file("a.txt")
+
+
+def test_publish_diagnostics_are_tracked_without_warnings(stub_project, caplog):
+    # issue #23: every push logged "Ignoring notification", hundreds
+    # of lines per run into stderr and agent context captures
+    stub = Stub()
+    diag = types.Diagnostic(
+        range=rng(0, 0, 0, 5),
+        message="undefined",
+        severity=types.DiagnosticSeverity.Error,
+    )
+
+    def on_open(server, uri):
+        server.protocol.notify(
+            types.TEXT_DOCUMENT_PUBLISH_DIAGNOSTICS,
+            types.PublishDiagnosticsParams(uri=uri, diagnostics=[diag]),
+        )
+
+    stub.on_open = on_open
+    (stub_project.root / "a.py").write_text("x = 1\n")
+    stub_project.write("a.py", "x = 1\n")
+    with (
+        caplog.at_level(logging.WARNING, logger="pygls.protocol.json_rpc"),
+        LspSession(stub_project, [], in_memory=stub.run) as handle,
+    ):
+        uri = (stub_project.root / "a.py").as_uri()
+        stub.answers[("references", uri, 0, 0)] = []
+        handle.references("a.py", 1, 0, "x")
+        for _ in range(200):
+            if handle.diagnostics_for("a.py"):
+                break
+            time.sleep(0.02)
+        else:
+            pytest.fail("the stub's diagnostics never arrived")
+    assert [d.message for d in handle.diagnostics_for("a.py")] == ["undefined"]
+    assert "Ignoring notification" not in caplog.text
 
 
 def _ruff_project(tmp_path):

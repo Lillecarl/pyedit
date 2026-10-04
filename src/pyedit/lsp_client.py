@@ -238,6 +238,9 @@ class LspSession:
         self._encoding = "utf-16"
         self._pushed: dict[Path, str] = {}
         self._versions: dict[Path, int] = {}
+        # latest push diagnostics per document URI; written by the
+        # notification handler on the loop thread, read from any thread
+        self._diagnostics: dict[str, list[types.Diagnostic]] = {}
         self._formatting = False
         self._ready: threading.Event | None = None
         self._connect_error: BaseException | None = None
@@ -364,6 +367,12 @@ class LspSession:
         returns [path] when content changed, else []."""
         return self._call(self._format_file(path))
 
+    def diagnostics_for(self, path: str | Path) -> list[types.Diagnostic]:
+        """Latest push diagnostics the server sent for `path`
+        (possibly []): servers publish on open and change, the
+        handler tracks the newest set per document."""
+        return list(self._diagnostics.get(_uri(self._session.canon(path)), []))
+
     def _call(self, coro):
         return asyncio.run_coroutine_threadsafe(coro, self._loop).result(self._timeout)
 
@@ -381,6 +390,16 @@ class LspSession:
     async def _connect(self) -> None:
         client = _LanguageClient("pyedit", metadata.version("pyedit"))
         self._client = client
+
+        @client.feature(types.TEXT_DOCUMENT_PUBLISH_DIAGNOSTICS)
+        def _track_diagnostics(
+            params: types.PublishDiagnosticsParams,
+        ) -> None:
+            # an unhandled push logs "Ignoring notification" once per
+            # publish (issue #23); tracking it is the specified client
+            # behavior and keeps stderr to real failures
+            self._diagnostics[params.uri] = list(params.diagnostics)
+
         if self._in_memory is not None:
             to_server = asyncio.StreamReader()
             to_client = asyncio.StreamReader()
