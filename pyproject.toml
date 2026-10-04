@@ -17,6 +17,7 @@ dependencies = [
   "rope>=1.11",
   "pygit2>=1.14",
   "unidiff>=0.7",
+  "mcp>=1.28",
   "pygls>=2.0",
   "lsprotocol>=2025.0",
   "tree-sitter>=0.25",

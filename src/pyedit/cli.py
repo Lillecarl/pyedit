@@ -20,7 +20,6 @@ around it.
 from __future__ import annotations
 
 import argparse
-import fnmatch
 import sys
 import traceback
 from pathlib import Path
@@ -28,14 +27,9 @@ from pathlib import Path
 import pyedit
 from pyedit import config
 from pyedit import formatter
+from pyedit import runner
 from pyedit import store
-from pyedit import gitpatch as _gitpatch
-from pyedit import vfs
-from pyedit.diff import replayable_patch, unified_diffs, original
-from pyedit.session import Symlink
-from pyedit.session import EditSession, display_path
 from pyedit.skill import render_skill
-from pyedit.syntax import render
 
 EXIT_OK = 0
 EXIT_SCRIPT_ERROR = 1
@@ -177,16 +171,6 @@ def read_input(args: argparse.Namespace) -> tuple[str, str, str]:
     return sys.stdin.read(), "script", "<stdin>"
 
 
-def allowed(
-    rel: str, include: list[str] | None, exclude: list[str] | None
-) -> bool:
-    if include and not any(fnmatch.fnmatch(rel, pat) for pat in include):
-        return False
-    if exclude and any(fnmatch.fnmatch(rel, pat) for pat in exclude):
-        return False
-    return True
-
-
 def apply_id(rest: list[str]) -> tuple[str, list[str]]:
     """Peel the id off `pyedit apply ID [OPTIONS]`.
 
@@ -222,10 +206,23 @@ def run_skill(rest: list[str]) -> int:
     return EXIT_OK
 
 
+def run_mcp(rest: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="pyedit mcp",
+        description="Serve pyedit as an MCP server over stdio.",
+    )
+    parser.parse_args(rest)
+    from pyedit import mcp_server
+
+    return mcp_server.serve_stdio()
+
+
 def main(argv: list[str] | None = None) -> int:
     tokens = sys.argv[1:] if argv is None else list(argv)
     if tokens and tokens[0] == "skill":
         return run_skill(tokens[1:])
+    if tokens and tokens[0] == "mcp":
+        return run_mcp(tokens[1:])
     stored = None
     if tokens and tokens[0] == "apply":
         stored, tokens = apply_id(tokens[1:])
@@ -241,18 +238,24 @@ def main(argv: list[str] | None = None) -> int:
     watchdog.start(args.timeout)
 
     text, mode, filename = read_input(args)
-    session = EditSession(
+    opts = runner.Options(
+        include=args.include,
+        exclude=args.exclude,
+        context=args.context,
+        apply=args.apply,
+        force=args.force,
+        skip_format=(mode != "script"),
         max_bytes=args.max_materialized_bytes or None,
         max_files=args.max_materialized_files or None,
         respect_gitignore=not args.no_gitignore,
         find_renames=not args.no_rename_detection,
     )
-    pyedit.session = session
+    session = runner.new_session(opts)
 
     if mode == "stored":
         # pyedit's own patch: git wrote it, so git applies it
         try:
-            _gitpatch.apply_patch(session, text)
+            runner.replay_stored(session, text)
         except Exception:
             traceback.print_exc()
             print(
@@ -260,128 +263,73 @@ def main(argv: list[str] | None = None) -> int:
             )
             return EXIT_SCRIPT_ERROR
     else:
-        previous_dont_write = sys.dont_write_bytecode
-        sys.dont_write_bytecode = True
         try:
-            try:
-                restore = vfs.install(session)
-                try:
-                    exec(
-                        compile(text, filename, "exec"),
-                        {"pyedit": pyedit, "__name__": "__main__"},
-                    )
-                finally:
-                    restore()
-            except Exception:
-                traceback.print_exc()
-                print(
-                    "pyedit: edit script failed; nothing was written",
-                    file=sys.stderr,
-                )
-                return EXIT_SCRIPT_ERROR
-        finally:
-            sys.dont_write_bytecode = previous_dont_write
-
-    session.prune_unchanged()
-
-    def selected() -> dict[Path, str | bytes | None]:
-        return {
-            path: content
-            for path, content in session.staged().items()
-            if allowed(display_path(path), args.include, args.exclude)
-        }
-
-    staged = selected()
-
-    # config-driven formatter pass: stdout is re-staged as the final
-    # content, so the diff, the stored patch and undo all carry it.
-    # script runs only -- `pyedit apply ID` replays what was stored
-    if mode == "script":
-        try:
-            conf = config.load(session.root)
-            touched = (
-                formatter.format_staged(session, staged, conf.formatters)
-                if conf.formatters and staged
-                else []
-            )
-        except (config.ConfigError, formatter.FormatterError) as exc:
-            print(f"pyedit: {exc}", file=sys.stderr)
-            print("pyedit: nothing was written", file=sys.stderr)
-            return EXIT_SCRIPT_ERROR
-        if touched:
-            listing = ", ".join(
-                f"{display_path(p)} ({p.suffix.lstrip('.')})" for p in touched
-            )
-            print(f"pyedit: formatted: {listing}", file=sys.stderr)
-            session.prune_unchanged()
-            staged = selected()
-
-    # staged text is parsed: syntax problems surface here, in the same
-    # run that shows the diff they would produce
-    problems: list[tuple[Path, object]] = []
-    for path in sorted(staged):
-        value = staged[path]
-        if not isinstance(value, str) or isinstance(value, Symlink):
-            continue
-        for problem in session.check(path):
-            problems.append((path, problem))
+            runner.execute_script(session, text, filename)
+        except Exception:
+            traceback.print_exc()
             print(
-                f"pyedit: syntax: {display_path(path)}:"
-                f"{problem.line}:{problem.column}: {problem.message}",
+                "pyedit: edit script failed; nothing was written",
                 file=sys.stderr,
             )
-            print(render(problem, staged[path]), file=sys.stderr)
+            return EXIT_SCRIPT_ERROR
 
-    diff_text = "".join(
-        diff for _, diff in unified_diffs(staged, context=args.context)
-    )
+    try:
+        result = runner.finish(session, opts)
+    except (config.ConfigError, formatter.FormatterError) as exc:
+        print(f"pyedit: {exc}", file=sys.stderr)
+        print("pyedit: nothing was written", file=sys.stderr)
+        return EXIT_SCRIPT_ERROR
 
-    # dry-runs store the patch so the printed id alone can apply it
-    # later; applies store the reverse so the id alone can revert. What
-    # is printed is for reading; what is stored is git-canonical and
+    if result.formatted:
+        print(f"pyedit: formatted: {', '.join(result.formatted)}", file=sys.stderr)
+
+    for problem in result.problems:
+        print(f"pyedit: syntax: {problem}", file=sys.stderr)
+
+    # dry-runs print the id so it alone can apply them later;
+    # applies print the reverse id so it alone can revert. What is
+    # printed is for reading; what is stored is git-canonical and
     # replays through libgit2.
-    stored_text = replayable_patch(staged, context=args.context)
-    stored_id = store.save(stored_text) if staged and not args.apply else None
-    if stored_id:
+    if result.dry_run_id:
         marker = (
-            f"# pyedit dry-run {stored_id} (pyedit apply {stored_id})\n"
+            f"# pyedit dry-run {result.dry_run_id} "
+            f"(pyedit apply {result.dry_run_id})\n"
+        )
+    elif result.undo_id:
+        marker = (
+            f"# pyedit undo {result.undo_id} "
+            f"(pyedit apply {result.undo_id} to revert)\n"
         )
     else:
         marker = ""
 
-    undo_id = None
-    if args.apply and (not problems or args.force):
-        undo_id = _prepare_undo(staged, args.context)
-        if undo_id:
-            marker = f"# pyedit undo {undo_id} (pyedit apply {undo_id} to revert)\n"
-
     if args.output == "-":
-        sys.stdout.write(marker + diff_text + marker)
+        sys.stdout.write(marker + result.diff + marker)
     else:
         out = Path(args.output)
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(diff_text)
+        out.write_text(result.diff)
 
-    if not staged:
+    if not result.files:
         print("pyedit: no changes", file=sys.stderr)
-    elif stored_id:
+    elif result.dry_run_id:
         print(
-            f"pyedit: dry-run saved as {stored_id} "
-            f"(pyedit apply {stored_id})",
+            f"pyedit: dry-run saved as {result.dry_run_id} "
+            f"(pyedit apply {result.dry_run_id})",
             file=sys.stderr,
         )
-    elif args.apply and undo_id:
+    elif args.apply and result.undo_id:
         print(
-            f"pyedit: changes applied; undo saved as {undo_id} "
-            f"(pyedit apply {undo_id} to revert)",
+            f"pyedit: changes applied; undo saved as {result.undo_id} "
+            f"(pyedit apply {result.undo_id} to revert)",
             file=sys.stderr,
         )
 
     # a dry-run warns; an apply of known-broken syntax refuses to write
     # unless --force, in which case the problems are on record anyway
-    if args.apply and problems and args.force:
+    if args.apply and result.problems and args.force:
         print("pyedit: applying with syntax problems (--force)", file=sys.stderr)
-    if args.apply and problems and not args.force:
+    if result.refused:
         print(
             "pyedit: syntax check failed; nothing was written "
             "(fix the files, or write them without pyedit)",
@@ -389,26 +337,4 @@ def main(argv: list[str] | None = None) -> int:
         )
         return EXIT_SCRIPT_ERROR
 
-    if args.apply:
-        session.apply(staged)
-
     return EXIT_OK
-
-
-def _prepare_undo(
-    staged: dict[Path, str | bytes | None], context: int
-) -> str | None:
-    """Render the reverse of what is about to be applied, and store it.
-
-    The undo diff must be rendered before the staged state reaches the
-    disk: its old side is the post-apply state, its new side the
-    pre-apply disk truth. It is stored and never printed, so binary
-    changes carry a real payload here and undo like any other change.
-    """
-    pre = {path: original(path) for path in staged}
-    if not pre:
-        return None
-    undo_text = replayable_patch(pre, context=context, base=staged)
-    if not undo_text:
-        return None
-    return store.save(undo_text)

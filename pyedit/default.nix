@@ -8,6 +8,7 @@
   rope,
   pygit2,
   unidiff,
+  mcp,
   pygls,
   lsprotocol,
   pyright,
@@ -74,6 +75,7 @@ let
       rope
       pygit2
       unidiff
+      mcp
       pygls
       lsprotocol
       tree-sitter

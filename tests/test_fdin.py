@@ -5,7 +5,7 @@ import threading
 
 import pytest
 
-from pyedit.fdin import read_fd
+from pyedit.fdin import injected, read_fd
 
 
 def test_reads_a_pipe_to_eof():
@@ -29,6 +29,24 @@ def test_reads_past_the_first_chunk():
     threading.Thread(target=feed).start()
     assert read_fd(r) == payload
     os.close(r)
+
+
+def test_injected_payloads_serve_read_fd_without_fds():
+    with injected({"3": "old", 4: "new"}):
+        assert read_fd(3) == "old"
+        assert read_fd(4) == "new"
+        with injected({"4": "inner"}):
+            assert read_fd(4) == "inner"
+        assert read_fd(3) == "old"
+
+
+def test_injected_rejects_bad_keys_and_values():
+    with pytest.raises(ValueError):
+        with injected({"old": "y"}):
+            pass
+    with pytest.raises(TypeError):
+        with injected({"3": 4}):
+            pass
 
 
 def test_a_closed_fd_is_named_in_the_error():

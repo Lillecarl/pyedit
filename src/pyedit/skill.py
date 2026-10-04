@@ -80,6 +80,23 @@ Exit: 0 ok, 1 input failed (nothing written), 2 usage, 124 timeout
 headers (`a/`, `b/`, `/dev/null`); binary and symlink changes are
 one-line notes. Replay it by id, never by piping the text back.
 
+## MCP server
+
+`pyedit mcp` serves one stdio tool, `run`: the same runner, no
+shell, so `script` arrives byte-exact as JSON. Tool descriptions
+stay minimal; this document describes the calls.
+
+| CLI | MCP `run` |
+|---|---|
+| script on stdin, `-s FILE` | `script`, `script_file` |
+| `3<<'OLD'` heredocs | `fds` (`{"3": old}`, read with `read_fd(3)`) |
+| `--apply` | `apply: true` |
+| `apply ID` | `apply_id` (writes) |
+| `-i`/`-x`/`-U`, cwd | same names, `workdir` |
+
+The id store is shared: a CLI dry-run replays as `apply_id` and
+back. Prefer the tool when it exists; the CLI otherwise.
+
 ## Dry-run ids and undo
 
 Every dry-run with changes stores its patch and prints the id as the

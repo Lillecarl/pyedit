@@ -53,7 +53,9 @@ job belong to libgit2. Read it before changing anything structural.
 | `src/pyedit/merge.py` | `VFS` scopes: the scope lifecycle and `Collision` |
 | `src/pyedit/gitmerge.py` | merge a scope into its parent (libgit2 three-way) |
 | `src/pyedit/vfs.py` | stdlib overlay patching so edit scripts see staged state |
-| `src/pyedit/cli.py` | arguments, dry-run/apply/undo, syntax gate, watchdog hookup |
+| `src/pyedit/cli.py` | arguments, presenting runs, watchdog hookup |
+| `src/pyedit/runner.py` | one edit run without CLI surface (shared by CLI and MCP) |
+| `src/pyedit/mcp_server.py` | MCP stdio server: the single `run` tool |
 | `src/pyedit/diff.py`, `render.py` | git-style unified diffs; hunks from libgit2 (`pyedit.diff_git`) or difflib (`pyedit.diff_difflib`) |
 | `src/pyedit/memgit.py` | in-memory git objects and `git apply` (libgit2) |
 | `src/pyedit/patch.py` | OpenAI apply_patch (V4A) envelopes, via `pyedit.apply_v4a` |
@@ -62,7 +64,7 @@ job belong to libgit2. Read it before changing anything structural.
 | `src/pyedit/store.py` | dry-run/undo id store |
 | `src/pyedit/config.py` | `pyedit.toml` discovery: config home, session root, `parent` pointers |
 | `src/pyedit/formatter.py` | `[format]` pass: staged text piped through a formatter, stdout re-staged |
-| `src/pyedit/fdin.py` | `read_fd`: heredoc payloads piped in on numbered FDs |
+| `src/pyedit/fdin.py` | `read_fd`: heredoc payloads on numbered FDs, or injected dicts over MCP |
 | `src/pyedit/syntax/` | tree-sitter position queries, outlines, syntax checks |
 | `src/pyedit/rope.py` | Python refactors: rename_symbol, rename_module, references |
 | `src/pyedit/lsp_client.py` | language server bridge (pygls), non-Python editing |
