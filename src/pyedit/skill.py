@@ -356,7 +356,8 @@ token at a given position.
 
 `code_action(path, kind)` stages one file's edits and
 `format_file(path)` its formatting; `code_action_all` scopes one
-file each over a glob and returns staged and skipped paths. Kinds
+file each over a glob and returns staged and skipped paths;
+`diagnostics_for(path)` reads the latest push diagnostics. Kinds
 pass through verbatim; an action the bridge cannot stage raises,
 naming itself. Servers see staged content.
 

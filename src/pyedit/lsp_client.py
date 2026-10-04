@@ -20,6 +20,7 @@ import threading
 from dataclasses import dataclass, field
 from importlib import metadata
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
@@ -33,6 +34,14 @@ from pyedit.rope import Reference, _require_token
 from pyedit.session import EditSession
 
 logger = logging.getLogger(__name__)
+
+_MESSAGE_LEVELS = {
+    types.MessageType.Error: logging.ERROR,
+    types.MessageType.Warning: logging.WARNING,
+    types.MessageType.Info: logging.INFO,
+    types.MessageType.Log: logging.DEBUG,
+    types.MessageType.Debug: logging.DEBUG,
+}
 
 
 @dataclass
@@ -373,6 +382,111 @@ class LspSession:
         handler tracks the newest set per document."""
         return list(self._diagnostics.get(_uri(self._session.canon(path)), []))
 
+    def _register_server_handlers(self, client: _LanguageClient) -> None:
+        """Answer every server→client method.
+
+        An unhandled push logs "Ignoring notification" per message
+        (issue #23: 963 lines for a one-line ruff edit) and an
+        unhandled request fails the server's call, so the set stays
+        complete: pushes are tracked or logged, requests get the
+        headless answer (decline what needs a user, report what we
+        know). Runs once per connection, before any traffic.
+        """
+
+        def _on(method_name: str, func):
+            # pygls pins registration attributes on the handler, which
+            # bound methods do not accept: register a plain wrapper
+            # delegating to the method holding the logic
+            @client.feature(method_name)
+            def _handle(*args, **kwargs):
+                return func(*args, **kwargs)
+
+        _on(
+            types.TEXT_DOCUMENT_PUBLISH_DIAGNOSTICS, self._track_diagnostics
+        )
+        _on(types.WINDOW_SHOW_MESSAGE, self._log_server_message)
+        _on(types.WINDOW_LOG_MESSAGE, self._log_server_message)
+        _on(types.TELEMETRY_EVENT, self._drop_telemetry)
+        _on(types.PROGRESS, self._drop_progress)
+        _on(types.WINDOW_SHOW_MESSAGE_REQUEST, self._dismiss_message_request)
+        _on(types.WINDOW_SHOW_DOCUMENT, self._decline_show_document)
+        _on(
+            types.WINDOW_WORK_DONE_PROGRESS_CREATE,
+            self._accept_progress_create,
+        )
+        _on(types.CLIENT_REGISTER_CAPABILITY, self._accept_capability_change)
+        _on(
+            types.CLIENT_UNREGISTER_CAPABILITY, self._accept_capability_change
+        )
+        _on(types.WORKSPACE_APPLY_EDIT, self._decline_apply_edit)
+        _on(types.WORKSPACE_CONFIGURATION, self._answer_configuration)
+        _on(types.WORKSPACE_WORKSPACE_FOLDERS, self._answer_workspace_folders)
+
+    def _track_diagnostics(self, params: types.PublishDiagnosticsParams) -> None:
+        self._diagnostics[params.uri] = list(params.diagnostics)
+
+    def _log_server_message(
+        self, params: types.ShowMessageParams | types.LogMessageParams
+    ) -> None:
+        """Server messages go to logging at their own level: errors
+        and warnings stay visible on stderr, the rest does not."""
+        level = _MESSAGE_LEVELS.get(params.type, logging.DEBUG)
+        logger.log(level, "language server: %s", params.message)
+
+    def _drop_telemetry(self, params: Any) -> None:
+        """telemetry/event carries no client-side meaning; the batch
+        client opts out by acknowledging it."""
+
+    def _drop_progress(self, params: types.ProgressParams) -> None:
+        """$/progress renders nowhere on a headless client; acknowledge
+        and move on (create is accepted below so servers keep sending)."""
+
+    def _dismiss_message_request(
+        self, params: types.ShowMessageRequestParams
+    ) -> None:
+        """No user to pick an action: log the prompt, take none."""
+        self._log_server_message(params)
+
+    def _decline_show_document(
+        self, params: types.ShowDocumentParams
+    ) -> types.ShowDocumentResult:
+        """Nowhere to show the document on a headless client."""
+        return types.ShowDocumentResult(success=False)
+
+    def _accept_progress_create(
+        self, params: types.WorkDoneProgressCreateParams
+    ) -> None:
+        """Progress updates are acknowledged (and dropped); refusing
+        the token would fail servers that report by default."""
+
+    def _accept_capability_change(self, params: Any) -> None:
+        """Dynamic registration lands nowhere on a short-lived batch
+        client; accept it so the server carries on."""
+
+    def _decline_apply_edit(
+        self, params: types.ApplyWorkspaceEditParams
+    ) -> types.ApplyWorkspaceEditResult:
+        """Server-driven edits enter through staged operations and the
+        diff, never behind the session's back."""
+        logger.warning(
+            "language server requested workspace/applyEdit (%s); declined",
+            params.label,
+        )
+        return types.ApplyWorkspaceEditResult(applied=False)
+
+    def _answer_configuration(
+        self, params: types.ConfigurationParams
+    ) -> list[Any]:
+        """No per-scope configuration to report; servers use defaults
+        (the python path goes out over didChangeConfiguration)."""
+        return [None for _ in params.items]
+
+    def _answer_workspace_folders(self, *_args: Any) -> list[Any]:
+        """Report the session root, mirroring initialize."""
+        return [
+            types.WorkspaceFolder(uri=self._session.root.as_uri(), name="pyedit")
+        ]
+
     def _call(self, coro):
         return asyncio.run_coroutine_threadsafe(coro, self._loop).result(self._timeout)
 
@@ -390,16 +504,7 @@ class LspSession:
     async def _connect(self) -> None:
         client = _LanguageClient("pyedit", metadata.version("pyedit"))
         self._client = client
-
-        @client.feature(types.TEXT_DOCUMENT_PUBLISH_DIAGNOSTICS)
-        def _track_diagnostics(
-            params: types.PublishDiagnosticsParams,
-        ) -> None:
-            # an unhandled push logs "Ignoring notification" once per
-            # publish (issue #23); tracking it is the specified client
-            # behavior and keeps stderr to real failures
-            self._diagnostics[params.uri] = list(params.diagnostics)
-
+        self._register_server_handlers(client)
         if self._in_memory is not None:
             to_server = asyncio.StreamReader()
             to_client = asyncio.StreamReader()

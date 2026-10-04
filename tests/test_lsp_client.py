@@ -491,6 +491,169 @@ def test_publish_diagnostics_are_tracked_without_warnings(stub_project, caplog):
     assert "Ignoring notification" not in caplog.text
 
 
+def test_server_pushes_are_logged_not_warned(stub_project, caplog):
+    # every other server→client push took the same "Ignoring
+    # notification" path as diagnostics did (issue #23)
+    stub = Stub()
+
+    def on_open(server, uri):
+        notify = server.protocol.notify
+        notify(
+            types.WINDOW_SHOW_MESSAGE,
+            types.ShowMessageParams(
+                type=types.MessageType.Error, message="boom-error"
+            ),
+        )
+        notify(
+            types.WINDOW_SHOW_MESSAGE,
+            types.ShowMessageParams(
+                type=types.MessageType.Info, message="just-info"
+            ),
+        )
+        notify(
+            types.WINDOW_LOG_MESSAGE,
+            types.LogMessageParams(
+                type=types.MessageType.Warning, message="careful"
+            ),
+        )
+        notify(types.TELEMETRY_EVENT, {"anything": True})
+        notify(
+            types.PROGRESS,
+            types.ProgressParams(token="t", value={"kind": "begin"}),
+        )
+
+    stub.on_open = on_open
+    (stub_project.root / "a.py").write_text("x = 1\n")
+    stub_project.write("a.py", "x = 1\n")
+    # one level for the capture handler: nested at_level calls fight
+    # over it, and the last one wins
+    with (
+        caplog.at_level(logging.DEBUG),
+        LspSession(stub_project, [], in_memory=stub.run) as handle,
+    ):
+        uri = (stub_project.root / "a.py").as_uri()
+        stub.answers[("references", uri, 0, 0)] = []
+        handle.references("a.py", 1, 0, "x")
+    assert "Ignoring notification" not in caplog.text
+    # telemetry and progress are dropped without a sound: the only
+    # server messages the bridge logs are the three routed ones
+    # (run_async borrows the same logger for Content length debugs)
+    assert {
+        r.getMessage()
+        for r in caplog.records
+        if r.getMessage().startswith("language server:")
+    } == {
+        "language server: boom-error",
+        "language server: just-info",
+        "language server: careful",
+    }
+    by_message = {r.getMessage(): r.levelno for r in caplog.records}
+    assert by_message.get("language server: boom-error") == logging.ERROR
+    assert by_message.get("language server: careful") == logging.WARNING
+    assert by_message.get("language server: just-info") == logging.INFO
+
+
+def test_server_requests_get_headless_answers(stub_project):
+    # a server may ask at any time (pyright asks workspace/
+    # configuration); every answer is pinned against the stub so a
+    # missing handler fails loudly instead of warning per message
+    stub = Stub()
+    target = (stub_project.root / "a.py").as_uri()
+    answers: dict = {}
+
+    def on_open(server, uri):
+        if uri != target:
+            return
+        # on_open runs on the server's loop thread: schedule the
+        # questions as a task there (a helper thread has no loop to
+        # build the requests on)
+        async def ask_all():
+            calls = [
+                (
+                    types.WINDOW_SHOW_MESSAGE_REQUEST,
+                    types.ShowMessageRequestParams(
+                        type=types.MessageType.Error, message="pick?"
+                    ),
+                ),
+                (
+                    types.WINDOW_SHOW_DOCUMENT,
+                    types.ShowDocumentParams(uri=target),
+                ),
+                (
+                    types.WINDOW_WORK_DONE_PROGRESS_CREATE,
+                    types.WorkDoneProgressCreateParams(token="t"),
+                ),
+                (
+                    types.CLIENT_REGISTER_CAPABILITY,
+                    types.RegistrationParams(
+                        registrations=[
+                            types.Registration(
+                                id="r",
+                                method="textDocument/didChangeWatchedFiles",
+                            )
+                        ]
+                    ),
+                ),
+                (
+                    types.CLIENT_UNREGISTER_CAPABILITY,
+                    types.UnregistrationParams(
+                        unregisterations=[
+                            types.Unregistration(
+                                id="r",
+                                method="textDocument/didChangeWatchedFiles",
+                            )
+                        ]
+                    ),
+                ),
+                (
+                    types.WORKSPACE_APPLY_EDIT,
+                    types.ApplyWorkspaceEditParams(
+                        edit=types.WorkspaceEdit(changes={}), label="test"
+                    ),
+                ),
+                (
+                    types.WORKSPACE_CONFIGURATION,
+                    types.ConfigurationParams(
+                        items=[
+                            types.ConfigurationItem(section="python"),
+                            types.ConfigurationItem(section="other"),
+                        ]
+                    ),
+                ),
+                (types.WORKSPACE_WORKSPACE_FOLDERS, None),
+            ]
+            for method, params in calls:
+                answers[method] = await server.protocol.send_request_async(
+                    method, params
+                )
+
+        asyncio.ensure_future(ask_all())
+
+    stub.on_open = on_open
+    (stub_project.root / "a.py").write_text("x = 1\n")
+    stub_project.write("a.py", "x = 1\n")
+    with LspSession(stub_project, [], in_memory=stub.run) as handle:
+        stub.answers[("references", target, 0, 0)] = []
+        handle.references("a.py", 1, 0, "x")
+        for _ in range(500):
+            if len(answers) == 8:
+                break
+            time.sleep(0.02)
+        else:
+            pytest.fail("the stub's requests were never answered")
+    assert answers[types.WINDOW_SHOW_MESSAGE_REQUEST] is None
+    assert answers[types.WINDOW_SHOW_DOCUMENT].success is False
+    assert answers[types.WINDOW_WORK_DONE_PROGRESS_CREATE] is None
+    assert answers[types.CLIENT_REGISTER_CAPABILITY] is None
+    assert answers[types.CLIENT_UNREGISTER_CAPABILITY] is None
+    assert answers[types.WORKSPACE_APPLY_EDIT].applied is False
+    # JSON has no tuple: the stub structures the answer into one
+    assert list(answers[types.WORKSPACE_CONFIGURATION]) == [None, None]
+    assert [w.uri for w in answers[types.WORKSPACE_WORKSPACE_FOLDERS]] == [
+        stub_project.root.as_uri()
+    ]
+
+
 def _ruff_project(tmp_path):
     (tmp_path / "fix.py").write_text("import os\nimport sys\n\nprint(sys.argv)\n")
     (tmp_path / "order.py").write_text("import sys\nimport os\n\nprint(os.name, sys.argv)\n")
