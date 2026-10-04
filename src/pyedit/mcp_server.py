@@ -33,6 +33,7 @@ def run_edit(
     exclude: list[str] | None = None,
     context: int = runner.DEFAULT_CONTEXT,
     workdir: str | None = None,
+    revision: str | None = None,
     force: bool = False,
     timeout: float = 300.0,
 ) -> dict:
@@ -55,7 +56,10 @@ def run_edit(
             f"got: {', '.join(sources) or 'none'}",
         }
     if context < 0:
-        return {"ok": False, "error": f"context is {context}; it is lines, not less than 0"}
+        return {
+            "ok": False,
+            "error": f"context is {context}; it is lines, not less than 0",
+        }
     if fds is not None:
         for key, value in fds.items():
             try:
@@ -125,19 +129,32 @@ def run_edit(
                 force=force,
                 skip_format=(mode != "script"),
                 root=root,
+                revision=revision,
             )
-            session = runner.new_session(opts)
-            try:
+
+            def stage(session):
                 if mode == "stored":
                     runner.replay_stored(session, text)
                 else:
                     runner.execute_script(session, text, filename, fds)
-            except Exception:
-                return {"ok": False, "error": traceback.format_exc(limit=5)}
-            try:
-                result = runner.finish(session, opts)
-            except Exception as err:
-                return {"ok": False, "error": f"pyedit: {err}"}
+
+            if revision is not None:
+                from pyedit import jjrev
+
+                try:
+                    result = runner.run_revision(opts, revision, stage)
+                except jjrev.JjRevError as err:
+                    return {"ok": False, "error": f"pyedit: {err}"}
+            else:
+                session = runner.new_session(opts)
+                try:
+                    stage(session)
+                except Exception:
+                    return {"ok": False, "error": traceback.format_exc(limit=5)}
+                try:
+                    result = runner.finish(session, opts)
+                except Exception as err:
+                    return {"ok": False, "error": f"pyedit: {err}"}
         finally:
             if fuse is not None:
                 fuse.set()
@@ -160,6 +177,7 @@ def run_edit(
         "formatted": result.formatted,
         "actions": result.actions,
         "applied": result.applied,
+        "op": result.op,
     }
 
 
@@ -184,6 +202,7 @@ def create_server():
         exclude: list[str] | None = None,
         context: int = runner.DEFAULT_CONTEXT,
         workdir: str | None = None,
+        revision: str | None = None,
         force: bool = False,
         timeout: float = 300.0,
     ) -> dict:
@@ -198,6 +217,7 @@ def create_server():
             exclude=exclude,
             context=context,
             workdir=workdir,
+            revision=revision,
             force=force,
             timeout=timeout,
         )

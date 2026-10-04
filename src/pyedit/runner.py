@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import fnmatch
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from pyedit.session import EditSession, Symlink, display_path
@@ -35,6 +35,7 @@ class Options:
     max_files: int | None = DEFAULT_MAX_FILES
     respect_gitignore: bool = True
     find_renames: bool = True
+    revision: str | None = None
 
 
 @dataclass
@@ -48,11 +49,10 @@ class Result:
     actions: list[str] = field(default_factory=list)
     applied: bool = False
     refused: bool = False
+    op: str | None = None
 
 
-def allowed(
-    rel: str, include: list[str] | None, exclude: list[str] | None
-) -> bool:
+def allowed(rel: str, include: list[str] | None, exclude: list[str] | None) -> bool:
     if include and not any(fnmatch.fnmatch(rel, pat) for pat in include):
         return False
     if exclude and any(fnmatch.fnmatch(rel, pat) for pat in exclude):
@@ -70,9 +70,7 @@ def new_session(opts: Options) -> EditSession:
     )
 
 
-def execute_script(
-    session: EditSession, text: str, filename: str, fds=None
-) -> None:
+def execute_script(session: EditSession, text: str, filename: str, fds=None) -> None:
     """Run an edit script against the session's overlay.
 
     Exceptions propagate to the caller, which reports them; nothing
@@ -117,14 +115,18 @@ def replay_stored(session: EditSession, patch_text: str) -> None:
     _gitpatch.apply_patch(session, patch_text)
 
 
-def finish(session: EditSession, opts: Options) -> Result:
+def finish(
+    session: EditSession,
+    opts: Options,
+    *,
+    config_root: Path | None = None,
+    store_ids: bool = True,
+) -> Result:
     """Prune, filter, format, syntax-check, diff, store ids, maybe
     apply. A refused apply (broken syntax without --force) returns a
     Result with refused set; nothing was written."""
-    from pyedit import config
-    from pyedit import formatter
-    from pyedit import store
-    from pyedit.diff import replayable_patch, unified_diffs, original
+    from pyedit import config, formatter, store
+    from pyedit.diff import replayable_patch, unified_diffs
     from pyedit.syntax import render
 
     session.prune_unchanged()
@@ -146,14 +148,10 @@ def finish(session: EditSession, opts: Options) -> Result:
     if not opts.skip_format:
         from pyedit import lsppass as _lsppass
 
-        conf = config.load(session.root)
+        conf = config.load(config_root or session.root)
         # language servers first: actions rewrite code, formatters
         # normalize text last
-        actions = (
-            _lsppass.apply(session, staged, conf)
-            if conf.lsp and staged
-            else []
-        )
+        actions = _lsppass.apply(session, staged, conf) if conf.lsp and staged else []
         if actions:
             session.prune_unchanged()
             staged = selected()
@@ -163,9 +161,7 @@ def finish(session: EditSession, opts: Options) -> Result:
             else []
         )
         if touched:
-            formatted = [
-                f"{display_path(p)} ({p.suffix.lstrip('.')})" for p in touched
-            ]
+            formatted = [f"{display_path(p)} ({p.suffix.lstrip('.')})" for p in touched]
             session.prune_unchanged()
             staged = selected()
 
@@ -183,9 +179,7 @@ def finish(session: EditSession, opts: Options) -> Result:
                 f"{render(problem, staged[path])}"
             )
 
-    diff_text = "".join(
-        diff for _, diff in unified_diffs(staged, context=opts.context)
-    )
+    diff_text = "".join(diff for _, diff in unified_diffs(staged, context=opts.context))
 
     # dry-runs store the patch so an id alone can apply it later;
     # applies store the reverse so an id alone can revert. What is
@@ -193,7 +187,7 @@ def finish(session: EditSession, opts: Options) -> Result:
     # replays through libgit2.
     stored_text = replayable_patch(staged, context=opts.context)
     dry_run_id = (
-        store.save(stored_text) if staged and not opts.apply else None
+        store.save(stored_text) if staged and not opts.apply and store_ids else None
     )
 
     undo_id = None
@@ -221,9 +215,7 @@ def finish(session: EditSession, opts: Options) -> Result:
     )
 
 
-def _prepare_undo(
-    staged: dict[Path, str | bytes | None], context: int
-) -> str | None:
+def _prepare_undo(staged: dict[Path, str | bytes | None], context: int) -> str | None:
     """Render the reverse of what is about to be applied, and store it.
 
     The undo diff must be rendered before the staged state reaches the
@@ -232,7 +224,7 @@ def _prepare_undo(
     changes carry a real payload here and undo like any other change.
     """
     from pyedit import store
-    from pyedit.diff import replayable_patch, original
+    from pyedit.diff import original, replayable_patch
 
     pre = {path: original(path) for path in staged}
     if not pre:
@@ -241,3 +233,66 @@ def _prepare_undo(
     if not undo_text:
         return None
     return store.save(undo_text)
+
+
+def run_revision(opts: Options, revision: str, stage) -> Result:
+    """Run stage against REV's tree, amending it back on apply.
+
+    Reads come from the revision (exported to a scratch tree), so the
+    diff shows REV to new with no session changes. --apply rewrites
+    REV in place through jjrev (the oplog keeps every step
+    reversible); without it nothing is stored or written. `stage`
+    runs a script or replays a stored patch against the session.
+    """
+    from pyedit import jjrev
+
+    inv_root = (opts.root or Path.cwd()).resolve()
+    repo_root = jjrev.find_repo_root(inv_root)
+    target_hex, wc_hex = jjrev.resolve_ids(repo_root, revision)
+    if target_hex == wc_hex:
+        session = new_session(opts)
+        stage(session)
+        return finish(session, opts)
+    prefix = inv_root.relative_to(repo_root)
+    sub = "" if str(prefix) == "." else prefix.as_posix()
+
+    import os
+    import tempfile
+
+    previous_cwd = Path.cwd()
+    with tempfile.TemporaryDirectory(prefix="pyedit-r") as tmp:
+        tmproot = Path(tmp)
+        jjrev.export_tree(repo_root, revision, tmproot)
+        session = EditSession(
+            max_bytes=opts.max_bytes,
+            max_files=opts.max_files,
+            respect_gitignore=opts.respect_gitignore,
+            find_renames=opts.find_renames,
+            root=tmproot / sub if sub else tmproot,
+        )
+        # displays resolve against the cwd, and relative subprocess
+        # paths with it: follow the session root the way a normal run
+        # sits on the invocation root
+        os.chdir(session.root)
+        try:
+            stage(session)
+            inner = replace(opts, apply=False)
+            result = finish(session, inner, config_root=inv_root, store_ids=False)
+        finally:
+            os.chdir(previous_cwd)
+        if result.problems and not opts.force:
+            result.refused = True
+            return result
+        if not opts.apply:
+            return result
+        repo_changes = {}
+        for p, content in session.staged().items():
+            rel = p.relative_to(session.root) if p.is_absolute() else p
+            key = f"{sub}/{rel.as_posix()}" if sub else rel.as_posix()
+            repo_changes[key] = content
+        if not repo_changes:
+            return result
+        _new_id, op = jjrev.amend_commit(repo_root, revision, repo_changes)
+        result.applied = True
+        result.op = op
+        return result

@@ -62,6 +62,7 @@ job belong to libgit2. Read it before changing anything structural.
 | `src/pyedit/patch.py` | OpenAI apply_patch (V4A) envelopes, via `pyedit.apply_v4a` |
 | `src/pyedit/udiff.py` | unified diffs read by the `unidiff` library, applied with fuzz, via `pyedit.apply_diff_unidiff` |
 | `src/pyedit/gitpatch.py` | apply a git-canonical patch (libgit2), via `pyedit.apply_diff_git` |
+| `src/pyedit/jjrev.py` | `-r`: export a revision's tree, amend it back (pyjj, soft dep) |
 | `src/pyedit/store.py` | dry-run/undo id store |
 | `src/pyedit/config.py` | `pyedit.toml` discovery: config home, session root, `parent` pointers, `[lsp]` tables, `exclude` |
 | `src/pyedit/formatter.py` | `[format]` pass: staged text piped through a formatter, stdout re-staged |

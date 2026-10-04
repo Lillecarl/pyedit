@@ -10,6 +10,7 @@
   unidiff,
   mcp,
   pygls,
+  pyjj ? null,
   lsprotocol,
   pyright,
   ruff,
@@ -104,7 +105,8 @@ let
       "tree-sitter-java"
       "tree-sitter-lua"
       "tree-sitter-zig"
-    ];
+    ]
+    ++ lib.optionals (pyjj != null) [ pyjj ];
 
     # pygit2 performs TLS setup at import; without certificates to load
     # it fails - same workaround as nixpkgs uses for pygit2's own tests

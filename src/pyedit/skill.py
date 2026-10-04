@@ -70,10 +70,10 @@ unrelated modifier (this run writes).
 | `--no-gitignore` | let glob discovery see .gitignored paths |
 | `--no-rename-detection` | merging scopes, do not pair a delete with an add of similar content |
 | `--timeout SECONDS` | kill the run and dump thread stacks (default 300; 0 disables) |
+| `-r REV` | edit REV's tree, amending on `--apply` |
 
 Exit: 0 ok, 1 input failed (nothing written), 2 usage, 124 timeout
-(stacks in `$XDG_STATE_HOME/pyedit/dumps`, default
-`~/.local/state/pyedit/dumps`).
+(stacks under `$XDG_STATE_HOME`).
 
 **The printed diff is a representation, not a patch.** git-style
 headers (`a/`, `b/`, `/dev/null`); binary and symlink changes are
@@ -88,12 +88,13 @@ stay minimal; this document describes the calls.
 | CLI | MCP `run` |
 |---|---|
 | script on stdin, `-s FILE` | `script`, `script_file` |
-| `3<<'OLD'` heredocs | `fds` (`{"3": old}`, read with `read_fd(3)`) |
+| `3<<'OLD'` heredocs | `fds` (`{"3": old}`, via `read_fd(3)`) |
 | `--apply` | `apply: true` |
 | `apply ID` | `apply_id` (writes) |
 | `-i`/`-x`/`-U`, cwd | same names, `workdir` |
+| `-r REV` | `revision` |
 
-Ids are shared between the surfaces; prefer the tool when it exists.
+Ids work on both surfaces; prefer the tool.
 
 ## Dry-run ids and undo
 

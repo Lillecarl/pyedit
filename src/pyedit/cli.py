@@ -25,10 +25,7 @@ import traceback
 from pathlib import Path
 
 import pyedit
-from pyedit import config
-from pyedit import formatter
-from pyedit import runner
-from pyedit import store
+from pyedit import config, formatter, runner, store
 from pyedit.lsppass import LspPassError
 from pyedit.skill import render_skill
 
@@ -133,8 +130,17 @@ def build_parser() -> argparse.ArgumentParser:
         default=20000,
         metavar="N",
         help=(
-            "file count budget for the overlay (default: 20000; "
-            "0 disables the limit)"
+            "file count budget for the overlay (default: 20000; 0 disables the limit)"
+        ),
+    )
+    parser.add_argument(
+        "-r",
+        "--revision",
+        default=None,
+        metavar="REV",
+        help=(
+            "edit the tree at REV (a jj revision) instead of the "
+            "working copy; --apply amends it in place"
         ),
     )
     parser.add_argument(
@@ -166,8 +172,7 @@ def read_input(args: argparse.Namespace) -> tuple[str, str, str]:
         return path.read_text(), "script", path.as_posix()
     if sys.stdin.isatty():
         raise SystemExit(
-            "pyedit: no input: pipe an edit script on stdin, or pass "
-            "--script FILE"
+            "pyedit: no input: pipe an edit script on stdin, or pass --script FILE"
         )
     return sys.stdin.read(), "script", "<stdin>"
 
@@ -250,36 +255,49 @@ def main(argv: list[str] | None = None) -> int:
         max_files=args.max_materialized_files or None,
         respect_gitignore=not args.no_gitignore,
         find_renames=not args.no_rename_detection,
+        revision=args.revision,
     )
-    session = runner.new_session(opts)
 
-    if mode == "stored":
-        # pyedit's own patch: git wrote it, so git applies it
-        try:
+    def stage(session):
+        if mode == "stored":
+            # pyedit's own patch: git wrote it, so git applies it
             runner.replay_stored(session, text)
-        except Exception:
-            traceback.print_exc()
-            print(
-                "pyedit: stored patch failed; nothing was written", file=sys.stderr
-            )
+        else:
+            runner.execute_script(session, text, filename)
+
+    if opts.revision is not None:
+        from pyedit import jjrev
+
+        try:
+            result = runner.run_revision(opts, opts.revision, stage)
+        except jjrev.JjRevError as exc:
+            print(f"pyedit: {exc}", file=sys.stderr)
+            print("pyedit: nothing was written", file=sys.stderr)
             return EXIT_SCRIPT_ERROR
     else:
+        session = runner.new_session(opts)
         try:
-            runner.execute_script(session, text, filename)
+            stage(session)
         except Exception:
             traceback.print_exc()
-            print(
-                "pyedit: edit script failed; nothing was written",
-                file=sys.stderr,
-            )
+            if mode == "stored":
+                print(
+                    "pyedit: stored patch failed; nothing was written",
+                    file=sys.stderr,
+                )
+            else:
+                print(
+                    "pyedit: edit script failed; nothing was written",
+                    file=sys.stderr,
+                )
             return EXIT_SCRIPT_ERROR
 
-    try:
-        result = runner.finish(session, opts)
-    except (config.ConfigError, formatter.FormatterError, LspPassError) as exc:
-        print(f"pyedit: {exc}", file=sys.stderr)
-        print("pyedit: nothing was written", file=sys.stderr)
-        return EXIT_SCRIPT_ERROR
+        try:
+            result = runner.finish(session, opts)
+        except (config.ConfigError, formatter.FormatterError, LspPassError) as exc:
+            print(f"pyedit: {exc}", file=sys.stderr)
+            print("pyedit: nothing was written", file=sys.stderr)
+            return EXIT_SCRIPT_ERROR
 
     if result.actions:
         print(f"pyedit: actions: {', '.join(result.actions)}", file=sys.stderr)
@@ -295,8 +313,7 @@ def main(argv: list[str] | None = None) -> int:
     # replays through libgit2.
     if result.dry_run_id:
         marker = (
-            f"# pyedit dry-run {result.dry_run_id} "
-            f"(pyedit apply {result.dry_run_id})\n"
+            f"# pyedit dry-run {result.dry_run_id} (pyedit apply {result.dry_run_id})\n"
         )
     elif result.undo_id:
         marker = (
@@ -315,6 +332,17 @@ def main(argv: list[str] | None = None) -> int:
 
     if not result.files:
         print("pyedit: no changes", file=sys.stderr)
+    elif result.op is not None:
+        print(
+            f"pyedit: amended {opts.revision} (op {result.op}; restore "
+            f"with: pyjj op restore {result.op})",
+            file=sys.stderr,
+        )
+    elif opts.revision is not None:
+        print(
+            f"pyedit: dry-run against {opts.revision}; re-run with --apply to amend",
+            file=sys.stderr,
+        )
     elif result.dry_run_id:
         print(
             f"pyedit: dry-run saved as {result.dry_run_id} "

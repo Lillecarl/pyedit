@@ -33,6 +33,9 @@ pyedit apply ID                # replay a stored dry-run or undo
 - `-i, --include GLOB` / `-x, --exclude GLOB`: filter what is shown
   and applied (repeatable)
 - `-U, --context N`: diff context lines (default 3)
+- `-r, --revision REV`: edit the tree at a jj revision instead of the
+  working copy; `--apply` amends that commit in place (needs the
+  optional pyjj dependency)
 
 A Python edit script is the only way to describe an edit. To stage a
 patch somebody else wrote -- an OpenAI apply_patch (V4A) envelope or a
@@ -81,6 +84,18 @@ pyedit --apply           # write
 
 Writes through `pathlib` and `shutil` work too -- the overlay catches
 them either way.
+
+## Editing older commits
+
+`pyedit -r REV` reads base file content from a jj revision instead of
+the working copy. `--apply` amends that commit in place; descendants
+rebase, and the run prints a `pyjj op restore` id that reverts the
+whole step. The working copy must start clean on every touched path.
+
+Resolve conflict markers where they first appear: point `-r` at the
+commit that introduced them instead of patching the tip. This needs
+pyjj, an optional dependency the distributor includes or leaves out
+at build time; without it `-r` refuses loudly.
 
 ## Configuration
 
