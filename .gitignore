@@ -1,5 +1,6 @@
 result
 result-*
+.direnv
 
 .hypothesis/
 __pycache__/

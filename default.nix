@@ -25,11 +25,16 @@ rec {
     git = pkgs.git;
     pygls = pyglsFork;
   };
-  pyedit-nocheck = pyedit.overrideAttrs { doCheck = false; doInstallCheck = false; };
+  pyedit-nocheck = pyedit.overrideAttrs {
+    doCheck = false;
+    doInstallCheck = false;
+  };
 
   shell = pkgs.mkShell {
     packages = [
+      pkgs.ruff
       pkgs.pyright
+      pkgs.pyrefly
       (pkgs.python3.withPackages (p: [
         p.pytest
         p.hypothesis
