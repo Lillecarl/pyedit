@@ -147,6 +147,33 @@ def test_lua_function_name(session):
     assert [hit.text for hit in names] == ["alpha"]
 
 
+def test_json_pair_keys(session):
+    name, text = sample_text("json")
+    session.write(name, text)
+    keys = query(session, name, "(pair key: (string) @k)")
+    assert [hit.text for hit in keys] == ['"alpha"', '"beta"']
+
+
+def test_yaml_mapping_keys(session):
+    name, text = sample_text("yaml")
+    session.write(name, text)
+    keys = query(session, name, "(block_mapping_pair key: (flow_node) @k)")
+    assert [hit.text for hit in keys] == ["alpha", "beta", "gamma"]
+
+
+def test_toml_key_feeds_splice(session):
+    name, text = sample_text("toml")
+    session.write(name, text)
+    keys = query(session, name, "(pair (bare_key) @k)")
+    assert [hit.text for hit in keys] == ["alpha", "gamma"]
+    spans = [
+        (hit.start_line, hit.start_column, hit.end_line, hit.end_column, "omega")
+        for hit in keys[:1]
+    ]
+    assert session.splice(name, spans) == 1
+    assert "omega = 1" in session.read(name)
+
+
 def test_predicate_filters_hits(session):
     name, text = sample_text("nix")
     session.write(name, text)
