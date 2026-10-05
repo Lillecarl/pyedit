@@ -110,6 +110,7 @@ _PLAIN = [
     ("tree_sitter_java", (".java",), ()),
     ("tree_sitter_lua", (".lua",), ()),
     ("tree_sitter_zig", (".zig",), ()),
+    ("tree_sitter_svelte", (".svelte",), ()),
 ]
 
 

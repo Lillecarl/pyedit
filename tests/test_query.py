@@ -59,6 +59,19 @@ def test_predicate_filters_hits(session):
     assert [(hit.capture, hit.text) for hit in hits] == [("a", "alpha")]
 
 
+def test_svelte_tag_names_feed_splice(session):
+    name, text = sample_text("svelte")
+    session.write(name, text)
+    heads = query(session, name, '((tag_name) @t (#eq? @t "h1"))')
+    assert len(heads) == 2  # start and end tags
+    spans = [
+        (hit.start_line, hit.start_column, hit.end_line, hit.end_column, "h2")
+        for hit in heads
+    ]
+    assert session.splice(name, spans) == 2
+    assert "<h2>Hello {name}!</h2>" in session.read(name)
+
+
 def test_hits_arrive_ordered_by_position(session):
     name, text = sample_text("nix")
     session.write(name, text)

@@ -106,4 +106,11 @@ LANGUAGES = [
         "fn broken(:\n",
         {"alpha"},
     ),
+    (
+        "svelte",
+        ".svelte",
+        "<script>\n  let name = 'world';\n</script>\n\n<h1>Hello {name}!</h1>\n\n{#if name}\n  <p>hi</p>\n{/if}\n",
+        "<h1>\n",
+        set(),
+    ),
 ]

@@ -29,19 +29,43 @@ let
   # grammar loaded wins, breaking every other binding on macOS.
   # Rewriting the binding's load command to its own parser's absolute
   # path sidesteps the id collision
-  binding = name:
-    (tree-sitter-grammars.${name}).overrideAttrs (old: {
+  fixup = grammar: binding: dir:
+    binding.overrideAttrs (old: {
       nativeBuildInputs = (old.nativeBuildInputs or [ ])
         ++ lib.optionals pkgs.stdenv.hostPlatform.isDarwin [ pkgs.darwin.sigtool ];
       postFixup =
         (old.postFixup or "")
         + lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
-          for so in $out/${pkgs.python3Packages.python.sitePackages}/${lib.replaceStrings [ "-" ] [ "_" ] name}/_binding*.so; do
-            install_name_tool -change parser "${pkgs.tree-sitter-grammars.${name}}/parser" "$so"
+          for so in $out/${pkgs.python3Packages.python.sitePackages}/${dir}/_binding*.so; do
+            install_name_tool -change parser "${grammar}/parser" "$so"
             codesign --force --sign - "$so"
           done
         '';
     });
+
+  binding = name:
+    fixup pkgs.tree-sitter-grammars.${name} tree-sitter-grammars.${name} (
+      lib.replaceStrings [ "-" ] [ "_" ] name
+    );
+
+  # nixpkgs pins svelte to the superseded Himujjal grammar, so the
+  # maintained tree-sitter-grammars fork is bound with nixpkgs' own
+  # generator instead. The repo ships a pre-generated parser.c, so no
+  # generate step (and no tree-sitter-html at build time) is needed.
+  svelteGrammar = pkgs.tree-sitter.buildGrammar {
+    language = "svelte";
+    version = "1.0.2";
+    src = pkgs.fetchFromGitHub {
+      owner = "tree-sitter-grammars";
+      repo = "tree-sitter-svelte";
+      rev = "v1.0.2";
+      hash = "sha256-mkw3s0pZQ6ry+fiTk2fJeKVA7Nqyv2Z2R1AFZknzpFM=";
+    };
+  };
+  svelteBinding = pkgs.python3Packages.callPackage "${pkgs.path}/pkgs/development/python-modules/tree-sitter-grammars" {
+    name = "tree-sitter-svelte";
+    grammarDrv = svelteGrammar;
+  };
 
   attrs = {
     pname = "pyedit";
@@ -106,6 +130,7 @@ let
       "tree-sitter-lua"
       "tree-sitter-zig"
     ]
+    ++ [ (fixup svelteGrammar svelteBinding "tree_sitter_svelte") ]
     ++ lib.optionals (pyjj != null) [ pyjj ];
 
     # pygit2 performs TLS setup at import; without certificates to load

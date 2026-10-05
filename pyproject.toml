@@ -38,6 +38,7 @@ dependencies = [
   "tree-sitter-java",
   "tree-sitter-lua",
   "tree-sitter-zig",
+  "tree-sitter-svelte",
 ]
 
 [project.scripts]
