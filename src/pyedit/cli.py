@@ -223,12 +223,36 @@ def run_mcp(rest: list[str]) -> int:
     return mcp_server.serve_stdio()
 
 
+def run_patterns(rest: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="pyedit patterns",
+        description="Print pinned tree-sitter query patterns per language.",
+    )
+    parser.add_argument("language", nargs="?", help="only show this language")
+    args = parser.parse_args(rest)
+    from pyedit import _patterns
+
+    pins = _patterns.PATTERNS
+    if args.language is not None:
+        if args.language not in pins:
+            parser.error(f"unknown language {args.language!r}; have: {', '.join(pins)}")
+        languages = [args.language]
+    else:
+        languages = list(pins)
+    for language in languages:
+        for test, pattern in pins[language]:
+            sys.stdout.write(f"# {language} ({test})\n{pattern}\n")
+    return EXIT_OK
+
+
 def main(argv: list[str] | None = None) -> int:
     tokens = sys.argv[1:] if argv is None else list(argv)
     if tokens and tokens[0] == "skill":
         return run_skill(tokens[1:])
     if tokens and tokens[0] == "mcp":
         return run_mcp(tokens[1:])
+    if tokens and tokens[0] == "patterns":
+        return run_patterns(tokens[1:])
     stored = None
     if tokens and tokens[0] == "apply":
         stored, tokens = apply_id(tokens[1:])

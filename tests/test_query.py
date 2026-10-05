@@ -264,6 +264,24 @@ def test_bad_pattern_raises_naming_position(session):
         query(session, name, "(bindin) @b")
 
 
+def test_pins_cover_every_sampled_language():
+    from pyedit.patterns import extract
+    from pyedit.syntax.rules import RULES
+
+    pinned = set(extract(Path(__file__)))
+    sampled = {
+        path.parent.name for path in CORPUS.rglob("sample.*") if path.suffix in RULES
+    }
+    assert not sampled - pinned, sampled - pinned
+
+
+def test_generated_patterns_are_current():
+    from pyedit import patterns
+
+    drift = patterns.check(Path(__file__))
+    assert drift == "", f"run `python3 -m pyedit.patterns --write`:\n{drift}"
+
+
 def test_corpus_covers_every_shipped_language():
     from pyedit.syntax.rules import RULES
 

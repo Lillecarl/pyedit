@@ -51,6 +51,7 @@ Bugs: https://github.com/lillecarl/pyedit
     pyedit [OPTIONS]            # edit script on stdin
     pyedit -s SCRIPT [OPTIONS]  # edit script from a file
     pyedit apply ID             # replay a stored dry-run or undo
+    pyedit patterns [LANG]      # pinned tree-sitter query patterns
 
 A Python edit script is the only way to describe an edit. Patches
 somebody else wrote are staged from inside a script (`apply_v4a`,

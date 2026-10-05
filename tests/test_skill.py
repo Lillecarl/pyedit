@@ -85,4 +85,4 @@ def test_the_frontmatter_makes_it_a_skill_file():
 def test_it_stays_compact():
     """A budget, not a target: it is loaded into a context window."""
     text = render_skill()
-    assert len(text) < 18500, f"skill grew to {len(text)} bytes"
+    assert len(text) < 18600, f"skill grew to {len(text)} bytes"

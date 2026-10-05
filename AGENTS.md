@@ -72,6 +72,7 @@ job belong to libgit2. Read it before changing anything structural.
 | `src/pyedit/lsp_client.py` | language server bridge (pygls): renames, references, code actions |
 | `src/pyedit/gitignore.py` | .gitignore filtering for discovery |
 | `src/pyedit/watchdog.py` | timeout with thread-stack dump |
+| `src/pyedit/patterns.py`, `_patterns.py` | pinned query patterns: extract pins from tests, generated data for `pyedit patterns` |
 | `src/pyedit/skill.py` | the agent skill document itself |
 | `src/pyedit/vendor/` | vendored 4va primitive, not public API |
 
