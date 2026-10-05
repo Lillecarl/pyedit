@@ -81,6 +81,47 @@ def test_go_function_and_method_names(session):
     assert [hit.text for hit in methods] == ["delta"]
 
 
+def test_rust_function_and_struct_names(session):
+    name, text = sample_text("rust")
+    session.write(name, text)
+    funcs = query(session, name, "(function_item name: (identifier) @n)")
+    assert [hit.text for hit in funcs] == ["alpha", "gamma"]
+    structs = query(session, name, "(struct_item name: (type_identifier) @n)")
+    assert [hit.text for hit in structs] == ["Beta"]
+
+
+def test_c_function_name_feeds_splice(session):
+    name, text = sample_text("c")
+    session.write(name, text)
+    names = query(
+        session,
+        name,
+        "(function_definition declarator: "
+        "(function_declarator declarator: (identifier) @n))",
+    )
+    assert [hit.text for hit in names] == ["alpha"]
+    spans = [
+        (hit.start_line, hit.start_column, hit.end_line, hit.end_column, "omega")
+        for hit in names
+    ]
+    assert session.splice(name, spans) == 1
+    assert "int omega(int x)" in session.read(name)
+
+
+def test_cpp_function_and_class_names(session):
+    name, text = sample_text("cpp")
+    session.write(name, text)
+    funcs = query(
+        session,
+        name,
+        "(function_definition declarator: "
+        "(function_declarator declarator: (identifier) @n))",
+    )
+    assert [hit.text for hit in funcs] == ["alpha"]
+    classes = query(session, name, "(class_specifier name: (type_identifier) @n)")
+    assert [hit.text for hit in classes] == ["Beta"]
+
+
 def test_predicate_filters_hits(session):
     name, text = sample_text("nix")
     session.write(name, text)
