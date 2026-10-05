@@ -1,5 +1,8 @@
 {
   pkgs ? import <nixpkgs> { },
+  # Present means `pyedit -r` works; absent (the default) means the
+  # flag refuses loudly. There is no runtime switch by design.
+  pyjj ? null,
 }:
 let
   # pygls from the lillecarl fork until upstream takes the union-hook
@@ -24,6 +27,7 @@ rec {
   pyedit = pkgs.python3Packages.callPackage ./pyedit {
     git = pkgs.git;
     pygls = pyglsFork;
+    pyjj = pyjj;
   };
   pyedit-nocheck = pyedit.overrideAttrs {
     doCheck = false;
