@@ -30,9 +30,8 @@ from rope.base.project import Project
 from rope.contrib.findit import find_occurrences
 from rope.refactor.rename import Rename
 
-from pyedit.session import EditSession
-
 from pyedit import vfs
+from pyedit.session import EditSession
 
 
 @dataclass

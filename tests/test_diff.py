@@ -1,7 +1,7 @@
 from pyedit import cli
 from pyedit.diff import unified_diffs
-from pyedit.udiff import apply_diff
 from pyedit.session import EditSession
+from pyedit.udiff import apply_diff
 
 
 def staged(project, actions):

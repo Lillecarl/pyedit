@@ -7,7 +7,7 @@ differs.
 import pyedit
 from pyedit.diff import difflib_hunks
 from pyedit.render import DiffRenderer
-from pyedit.session import EditSession, Symlink
+from pyedit.session import EditSession
 
 
 def test_a_text_change_renders(project, monkeypatch):

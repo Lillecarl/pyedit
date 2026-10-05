@@ -4,10 +4,10 @@ import sys
 from pathlib import Path
 
 import pytest
+from syntax_corpus import LANGUAGES
 
 import pyedit
 from pyedit import cli
-from syntax_corpus import LANGUAGES
 
 
 @pytest.fixture
@@ -221,8 +221,8 @@ def test_broken_syntax_warns_on_dry_run(project, capsys):
     out, err = capsys.readouterr()
     assert "pyedit: syntax: src/broken.py:1:" in err
     # the source line with a caret, CPython style
-    assert re.search(r"^\s+1 \| def \(:$", err, re.M)
-    assert re.search(r"^\s+\| +\^$", err, re.M)
+    assert re.search(r"^\s+1 \| def \(:$", err, re.MULTILINE)
+    assert re.search(r"^\s+\| +\^$", err, re.MULTILINE)
     assert "+def (:" in out  # the diff still shows what was staged
 
 

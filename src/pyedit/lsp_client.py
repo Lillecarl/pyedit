@@ -17,10 +17,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from importlib import metadata
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
@@ -268,7 +269,7 @@ class LspSession:
         self._to_server: _FeedWriter | None = None
         self._to_client: _FeedWriter | None = None
 
-    def __enter__(self) -> "LspSession":
+    def __enter__(self) -> LspSession:
         self._ready = threading.Event()
         self._loop = asyncio.new_event_loop()
         self._thread = threading.Thread(

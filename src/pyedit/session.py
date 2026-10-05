@@ -21,6 +21,9 @@ from pyedit.gitignore import IgnoreFilter
 
 if TYPE_CHECKING:
     from pyedit import syntax
+    from pyedit.patch import PatchOperation
+    from pyedit.rope import Reference
+    from pyedit.udiff import AppliedFile
 
 _MISSING = object()
 
@@ -385,7 +388,6 @@ class EditSession:
     def free_names(self, path: str | Path) -> set[str]:
         """Names the module uses but does not bind: the raw material
         for synthesizing an import block."""
-        import ast
 
         from pyedit import syntax
 
@@ -548,7 +550,7 @@ class EditSession:
             self._stage(path, None)
             self._stage(dst / path.relative_to(src), Symlink(target))
 
-    def apply_v4a(self, text: str) -> list["PatchOperation"]:
+    def apply_v4a(self, text: str) -> list[PatchOperation]:
         """Stage an OpenAI apply_patch (V4A) envelope on this session.
 
         Named for the format, like the two diff entry points, so the
@@ -561,7 +563,7 @@ class EditSession:
         operations, _failures = patch.apply_patch(self, text)
         return operations
 
-    def apply_diff_unidiff(self, text: str) -> list["AppliedFile"]:
+    def apply_diff_unidiff(self, text: str) -> list[AppliedFile]:
         """Stage a unified diff read by the unidiff library.
 
         Text hunks only, anchored by search, so approximate `@@`
@@ -623,12 +625,11 @@ class EditSession:
         line: int | None,
         column: int | None,
         name: str,
-    ) -> list["Reference"]:
+    ) -> list[Reference]:
         """Every occurrence of the symbol at (line, column); `name` must
         match the identifier there. Lines are 1-based. Pass
         line=None, column=None to locate the definition by `name`."""
-        from pyedit import rope
-        from pyedit import syntax
+        from pyedit import rope, syntax
 
         if line is None or column is None:
             if line is not None or column is not None:
@@ -636,7 +637,7 @@ class EditSession:
             line, column = syntax.locate_definition(self, path, name)
         return rope.references(self, path, line, column, name)
 
-    def node_at(self, path: str | Path, line: int, column: int) -> "syntax.NodeInfo":
+    def node_at(self, path: str | Path, line: int, column: int) -> syntax.NodeInfo:
         """The smallest syntax node at (line, column), with its named
         parent, from the staged content. Needs a tree-sitter grammar
         for the file's suffix."""
@@ -644,20 +645,20 @@ class EditSession:
 
         return syntax.node_at(self, path, line, column)
 
-    def outline(self, path: str | Path) -> list["syntax.NodeInfo"]:
+    def outline(self, path: str | Path) -> list[syntax.NodeInfo]:
         """Every named definition in the file with its span."""
         from pyedit import syntax
 
         return syntax.outline(self, path)
 
-    def check(self, path: str | Path) -> list["syntax.SyntaxProblem"]:
+    def check(self, path: str | Path) -> list[syntax.SyntaxProblem]:
         """Syntax problems in a file: compile() for Python, tree-sitter
         for other languages with an installed grammar."""
         from pyedit import syntax
 
         return syntax.problems(self, path)
 
-    def query(self, path: str | Path, pattern: str) -> list["syntax.QueryHit"]:
+    def query(self, path: str | Path, pattern: str) -> list[syntax.QueryHit]:
         """S-expression query hits over staged content, splice-ready."""
         from pyedit import syntax
 

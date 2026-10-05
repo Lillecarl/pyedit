@@ -4,11 +4,11 @@ must surface problems. Corpus lives in syntax_corpus.py, the CLI-level
 gate for the same rows lives in test_cli.py."""
 
 import pytest
+from syntax_corpus import LANGUAGES
 
 from pyedit.session import EditSession
 from pyedit.syntax import node_at, outline, problems
 from pyedit.syntax.rules import RULES
-from syntax_corpus import LANGUAGES
 
 
 def test_table_covers_every_shipped_suffix():

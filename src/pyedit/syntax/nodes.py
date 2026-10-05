@@ -25,7 +25,7 @@ class NodeInfo:
     name_line: int | None = None
     name_column: int | None = None
     # the nearest enclosing node that names something, set by node_at
-    enclosing: "NodeInfo | None" = None
+    enclosing: NodeInfo | None = None
 
 
 @dataclass

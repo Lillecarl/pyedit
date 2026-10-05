@@ -156,9 +156,11 @@ def free_names(text: str) -> set[str]:
         elif isinstance(n, ast.ImportFrom):
             for a in n.names:
                 bound.add(a.asname or a.name)
-        elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            bound.add(n.name)
-        elif isinstance(n, ast.ExceptHandler) and n.name:
+        elif (
+            isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+            or isinstance(n, ast.ExceptHandler)
+            and n.name
+        ):
             bound.add(n.name)
         for child in ast.iter_child_nodes(n):
             visit(child)

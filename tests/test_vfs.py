@@ -83,9 +83,8 @@ def test_open_read_of_deleted_raises(patched, project):
 
 
 def test_open_read_only_write_rejected(patched, project):
-    with open("src/a.py") as f:
-        with pytest.raises(io.UnsupportedOperation):
-            f.write("x")
+    with open("src/a.py") as f, pytest.raises(io.UnsupportedOperation):
+        f.write("x")
 
 
 def test_open_wplus_truncates(patched, project):

@@ -41,12 +41,10 @@ def test_injected_payloads_serve_read_fd_without_fds():
 
 
 def test_injected_rejects_bad_keys_and_values():
-    with pytest.raises(ValueError):
-        with injected({"old": "y"}):
-            pass
-    with pytest.raises(TypeError):
-        with injected({"3": 4}):
-            pass
+    with pytest.raises(ValueError), injected({"old": "y"}):
+        pass
+    with pytest.raises(TypeError), injected({"3": 4}):
+        pass
 
 
 def test_a_closed_fd_is_named_in_the_error():

@@ -45,7 +45,6 @@ class VFS:
 
     def __enter__(self) -> EditSession:
         import pyedit
-
         from pyedit.active import current, push
 
         # the parent is the active scope, or the root session bound on

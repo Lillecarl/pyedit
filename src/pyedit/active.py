@@ -12,16 +12,16 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pyedit.session import EditSession
 
-_stack: list["EditSession"] = []
+_stack: list[EditSession] = []
 
 
-def push(session: "EditSession") -> None:
+def push(session: EditSession) -> None:
     _stack.append(session)
 
 
-def pop() -> "EditSession":
+def pop() -> EditSession:
     return _stack.pop()
 
 
-def current() -> "EditSession | None":
+def current() -> EditSession | None:
     return _stack[-1] if _stack else None

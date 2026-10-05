@@ -4,7 +4,6 @@ from pyedit.diff import file_patch as _binary_patch
 from pyedit.session import EditSession, Symlink
 from pyedit.udiff import UnifiedDiffError, apply_diff
 
-
 GIT_DIFF = """\
 diff --git a/src/a.py b/src/a.py
 --- a/src/a.py
@@ -199,7 +198,6 @@ def test_roundtrip_through_pyedit_output(project):
     session = EditSession()
     session.edit("src/a.py", "alpha", "ALPHA")
     from pyedit.diff import unified_diffs
-    from pyedit.session import display_path
 
     produced = "".join(diff for _, diff in unified_diffs(session.staged()))
     roundtrip = EditSession()

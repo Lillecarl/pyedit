@@ -14,13 +14,13 @@ import io
 import os
 import shutil
 import stat
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from pyedit.session import (
+    _MISSING,
     EditSession,
     Symlink,
-    _MISSING,
     _content_size,
     glob_re,
 )

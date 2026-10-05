@@ -1,7 +1,7 @@
 import pytest
 
 import pyedit
-from pyedit import Collision, VFS
+from pyedit import VFS, Collision
 from pyedit.session import EditSession
 
 
@@ -58,19 +58,17 @@ def test_second_scope_ignores_lines_moved_by_the_first(root, project):
 def test_conflicting_edits_of_the_same_line_raise(root):
     with VFS():
         pyedit.edit("src/a.py", "beta = 2\n", "beta = 20\n")
-    with pytest.raises(Collision, match="nothing unchanged between"):
-        with VFS():
-            pyedit.edit("src/a.py", "beta = 2\n", "beta = 99\n")
+    with pytest.raises(Collision, match="nothing unchanged between"), VFS():
+        pyedit.edit("src/a.py", "beta = 2\n", "beta = 99\n")
     assert root.staged_content(root.canon("src/a.py")) == "alpha = 1\nbeta = 20\n"
 
 
 def test_failed_scope_keeps_earlier_merges(root):
     with VFS():
         pyedit.write("src/b.py", "gamma = 3\n_epsilon = 5\n")
-    with pytest.raises(ValueError, match="pattern not found"):
-        with VFS():
-            pyedit.edit("src/a.py", "alpha = 1\n", "alpha = 10\n")
-            pyedit.edit("src/a.py", "beta = 999\n", "beta = 1000\n")
+    with pytest.raises(ValueError, match="pattern not found"), VFS():
+        pyedit.edit("src/a.py", "alpha = 1\n", "alpha = 10\n")
+        pyedit.edit("src/a.py", "beta = 999\n", "beta = 1000\n")
     assert root.staged_content(root.canon("src/b.py")) == "gamma = 3\n_epsilon = 5\n"
     assert root.canon("src/a.py") not in root.staged()
 
@@ -78,25 +76,22 @@ def test_failed_scope_keeps_earlier_merges(root):
 def test_delete_and_edit_conflict(root):
     with VFS():
         pyedit.delete("src/a.py")
-    with pytest.raises(Collision, match="deleted by an earlier edit"):
-        with VFS():
-            pyedit.edit("src/a.py", "alpha = 1\n", "alpha = 10\n")
+    with pytest.raises(Collision, match="deleted by an earlier edit"), VFS():
+        pyedit.edit("src/a.py", "alpha = 1\n", "alpha = 10\n")
 
 
 def test_edit_after_delete_conflict(root):
     with VFS():
         pyedit.edit("src/a.py", "alpha = 1\n", "alpha = 10\n")
-    with pytest.raises(Collision, match="changed by an earlier edit"):
-        with VFS():
-            pyedit.delete("src/a.py")
+    with pytest.raises(Collision, match="changed by an earlier edit"), VFS():
+        pyedit.delete("src/a.py")
 
 
 def test_double_create_with_different_content(root):
     with VFS():
         pyedit.write("new.py", "one = 1\n")
-    with pytest.raises(Collision, match="created by two edits"):
-        with VFS():
-            pyedit.write("new.py", "two = 2\n")
+    with pytest.raises(Collision, match="created by two edits"), VFS():
+        pyedit.write("new.py", "two = 2\n")
 
 
 def test_double_create_with_same_content_is_idempotent(root):
@@ -113,9 +108,8 @@ def test_ambiguous_context_raises(root):
     changed = content.replace("line4\n", "LINE4\n", 1) + "appended\n"
     with VFS():
         pyedit.write("src/dup.py", content + "appended\n")
-    with pytest.raises(Collision, match="created by two edits"):
-        with VFS():
-            pyedit.write("src/dup.py", changed)
+    with pytest.raises(Collision, match="created by two edits"), VFS():
+        pyedit.write("src/dup.py", changed)
 
 
 def test_unique_context_despite_repetition_applies(root, project):
@@ -133,10 +127,9 @@ def test_unique_context_despite_repetition_applies(root, project):
 
 
 def test_failed_scope_discards_itself(root):
-    with pytest.raises(RuntimeError):
-        with VFS():
-            pyedit.write("src/a.py", "alpha = 10\nbeta = 2\n")
-            raise RuntimeError("agent changed its mind")
+    with pytest.raises(RuntimeError), VFS():
+        pyedit.write("src/a.py", "alpha = 10\nbeta = 2\n")
+        raise RuntimeError("agent changed its mind")
     assert root.staged() == {}
 
 
@@ -151,9 +144,8 @@ def test_binary_conflict(root):
     (root.canon("blob.bin").parent / "blob.bin").write_bytes(b"\x00old")
     with VFS():
         pyedit.write("blob.bin", b"\x00first")
-    with pytest.raises(Collision, match="binary"):
-        with VFS():
-            pyedit.write("blob.bin", b"\x00second")
+    with pytest.raises(Collision, match="binary"), VFS():
+        pyedit.write("blob.bin", b"\x00second")
 
 
 def test_an_edit_follows_a_rename(root):
@@ -175,9 +167,8 @@ def test_rename_as_delete_plus_create_without_detection(project, monkeypatch):
     monkeypatch.setattr(pyedit, "session", session, raising=False)
     with VFS():
         pyedit.rename("src/a.py", "src/renamed.py")
-    with pytest.raises(Collision, match="deleted by an earlier edit"):
-        with VFS():
-            pyedit.edit("src/a.py", "alpha = 1\n", "alpha = 10\n")
+    with pytest.raises(Collision, match="deleted by an earlier edit"), VFS():
+        pyedit.edit("src/a.py", "alpha = 1\n", "alpha = 10\n")
 
 
 def test_rename_detection_reaches_a_nested_scope(project, monkeypatch):
@@ -261,9 +252,8 @@ def test_same_file_scopes_do_not_drift(root, project):
 def test_scopes_continue_after_a_collision(root):
     with VFS():
         pyedit.edit("src/a.py", "beta = 2\n", "beta = 20\n")
-    with pytest.raises(Collision):
-        with VFS():
-            pyedit.edit("src/a.py", "beta = 2\n", "beta = 99\n")
+    with pytest.raises(Collision), VFS():
+        pyedit.edit("src/a.py", "beta = 2\n", "beta = 99\n")
     with VFS():
         pyedit.edit("src/b.py", "gamma = 3\n", "gamma = 30\n")
     assert root.staged_content(root.canon("src/b.py")) == "gamma = 30\n"

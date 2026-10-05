@@ -3,7 +3,6 @@ import pytest
 from pyedit import memgit
 from pyedit.memgit import Entry, MemGitError, MemoryRepo, apply_to_files
 
-
 BEFORE = {"pkg/mod.py": "one\ntwo\nthree\nfour\nfive\n"}
 
 HUNK = """\

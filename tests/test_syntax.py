@@ -10,8 +10,8 @@ from pyedit.session import EditSession
 from pyedit.syntax import (
     SyntaxProblem,
     _parser_for,
-    outline,
     node_at,
+    outline,
     problems,
     render,
 )

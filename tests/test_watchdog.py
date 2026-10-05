@@ -7,13 +7,11 @@ subprocess; the rest exercise the dump machinery directly.
 import subprocess
 import sys
 import threading
-import time
 from pathlib import Path
 
 import pytest
 
-from pyedit import cli
-from pyedit import watchdog
+from pyedit import cli, watchdog
 
 
 @pytest.fixture
@@ -114,7 +112,7 @@ def test_real_run_under_watchdog_finishes_normally(tmp_path):
             sys.executable,
             "-c",
             "import sys; sys.path.insert(0, 'src'); from pyedit import cli; "
-            f"cli.main(['-s', '-', '--timeout', '30'])",
+            "cli.main(['-s', '-', '--timeout', '30'])",
         ],
         input="pyedit.write('ok.txt', 'done\\n')\n",
         capture_output=True,
