@@ -226,6 +226,15 @@ def test_zsh_function_name(session):
     assert [hit.text for hit in names] == ["alpha"]
 
 
+def test_markdown_headings_and_fence_language(session):
+    name, text = sample_text("markdown")
+    session.write(name, text)
+    heads = query(session, name, "(atx_heading) @h")
+    assert [hit.text for hit in heads] == ["# Alpha\n", "## Beta\n"]
+    langs = query(session, name, "(fenced_code_block (info_string (language) @l))")
+    assert [hit.text for hit in langs] == ["python"]
+
+
 def test_predicate_filters_hits(session):
     name, text = sample_text("nix")
     session.write(name, text)

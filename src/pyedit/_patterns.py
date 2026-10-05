@@ -122,6 +122,13 @@ PATTERNS = {
     "zsh": [
         ("test_zsh_function_name", "(function_definition name: (word) @n)"),
     ],
+    "markdown": [
+        ("test_markdown_headings_and_fence_language", "(atx_heading) @h"),
+        (
+            "test_markdown_headings_and_fence_language",
+            "(fenced_code_block (info_string (language) @l))",
+        ),
+    ],
     "svelte": [
         ("test_svelte_tag_names_feed_splice", '((tag_name) @t (#eq? @t "h1"))'),
     ],

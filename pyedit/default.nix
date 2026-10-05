@@ -123,6 +123,7 @@ let
       "tree-sitter-css"
       "tree-sitter-bash"
       "tree-sitter-fish"
+      "tree-sitter-markdown"
       "tree-sitter-json"
       "tree-sitter-yaml"
       "tree-sitter-toml"

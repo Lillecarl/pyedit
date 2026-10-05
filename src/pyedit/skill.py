@@ -387,7 +387,7 @@ Verify a target with `node_at` before a range-limited `edit`; use
     pyedit.splice("cfg.nix", [(h.start_line, h.start_column, h.end_line, h.end_column, "9") for h in hits])
 
 Languages: Python, JavaScript, TypeScript, TSX, Go, Rust, C, C++,
-Bash, Fish, Zsh, JSON, YAML, TOML, Nix, Ruby, Java, Lua, Zig, Svelte, CSS.
+Bash, Fish, Zsh, JSON, YAML, TOML, Nix, Ruby, Java, Lua, Zig, Svelte, CSS, Markdown.
 
 ## Examples
 

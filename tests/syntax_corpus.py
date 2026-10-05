@@ -134,4 +134,11 @@ LANGUAGES = [
         "if true; then\n",
         {"alpha"},
     ),
+    (
+        "markdown",
+        ".md",
+        "# Alpha\n\nSome text.\n\n## Beta\n\n```python\nx = 1\n```\n\n- gamma\n",
+        "# Alpha",
+        {"Alpha", "Beta"},
+    ),
 ]

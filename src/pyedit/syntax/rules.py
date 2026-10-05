@@ -118,10 +118,11 @@ _PLAIN = [
 def _rules_by_suffix() -> dict[str, LanguageRules]:
     from pyedit.syntax.c import C, Cpp
     from pyedit.syntax.css import Css
+    from pyedit.syntax.markdown import Markdown
     from pyedit.syntax.nix import Nix
     from pyedit.syntax.python import Python
 
-    special = (*_PLAIN, C, Cpp, Css, Python, Nix)
+    special = (*_PLAIN, C, Cpp, Css, Markdown, Python, Nix)
     table: dict[str, LanguageRules] = {}
     for entry in special:
         rules = entry() if isinstance(entry, type) else LanguageRules(*entry)
