@@ -203,7 +203,9 @@ class MemoryRepo:
         self._repo = pygit2.Repository()
         self._repo.set_odb(pygit2.Odb())
         out = ffi.new("git_odb **")
-        self._check(lib.git_repository_odb(out, self._as("git_repository *", self._repo)))
+        self._check(
+            lib.git_repository_odb(out, self._as("git_repository *", self._repo))
+        )
         self._odb = ffi.gc(out[0], lib.git_odb_free)
         backend = ffi.new("git_odb_backend **")
         self._check(lib.git_mempack_new(backend))
@@ -324,7 +326,9 @@ class MemoryRepo:
             return
         err = self._lib.git_error_last()
         message = (
-            self._ffi.string(err.message).decode() if err != self._ffi.NULL else "no detail"
+            self._ffi.string(err.message).decode()
+            if err != self._ffi.NULL
+            else "no detail"
         )
         where = f"{doing}: " if doing else ""
         raise MemGitError(f"libgit2 {where}{message} (code {code})")

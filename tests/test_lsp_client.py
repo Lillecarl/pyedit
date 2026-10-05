@@ -70,11 +70,21 @@ class Stub:
         server = LanguageServer("stub", "0.1")
 
         def rename(params):
-            key = ("rename", params.text_document.uri, params.position.line, params.position.character)
+            key = (
+                "rename",
+                params.text_document.uri,
+                params.position.line,
+                params.position.character,
+            )
             return self.answers.get(key)
 
         def references(params):
-            key = ("references", params.text_document.uri, params.position.line, params.position.character)
+            key = (
+                "references",
+                params.text_document.uri,
+                params.position.line,
+                params.position.character,
+            )
             return self.answers.get(key)
 
         def code_action(params):
@@ -123,7 +133,9 @@ class Stub:
         server.feature(types.TEXT_DOCUMENT_DID_OPEN)(did_open)
         server.feature(types.TEXT_DOCUMENT_DID_CHANGE)(did_change)
         server.feature(types.TEXT_DOCUMENT_DID_CLOSE)(did_close)
-        server.feature(types.WORKSPACE_DID_CHANGE_CONFIGURATION)(did_change_configuration)
+        server.feature(types.WORKSPACE_DID_CHANGE_CONFIGURATION)(
+            did_change_configuration
+        )
 
         server.protocol.set_writer(to_client)
         await run_async(
@@ -242,12 +254,16 @@ def test_document_changes_shape_is_staged(lsp):
     stub.answers[("rename", uri_a, 0, 0)] = types.WorkspaceEdit(
         document_changes=[
             types.TextDocumentEdit(
-                text_document=types.VersionedTextDocumentIdentifier(uri=uri_a, version=1),
+                text_document=types.VersionedTextDocumentIdentifier(
+                    uri=uri_a, version=1
+                ),
                 edits=[types.TextEdit(range=rng(0, 0, 0, 5), new_text="ALPHA")],
             )
         ]
     )
-    assert handle.rename_symbol("a.txt", 1, 0, "alpha", "ALPHA") == [session.root / "a.txt"]
+    assert handle.rename_symbol("a.txt", 1, 0, "alpha", "ALPHA") == [
+        session.root / "a.txt"
+    ]
     assert session.read("a.txt") == "ALPHA beta\n"
 
 
@@ -300,7 +316,7 @@ def test_lsp_binds_the_live_session(stub_project, monkeypatch):
         monkeypatch.setattr(
             pyedit,
             "LspSession",
-            lambda session, command, **kwargs: opened.append((session, command))
+            lambda session, command, **kwargs: opened.append((session, command)),
         )
         pyedit.lsp(["rust-analyzer"])
         assert opened == [(stub_project, ["rust-analyzer"])]
@@ -511,21 +527,15 @@ def test_server_pushes_are_logged_not_warned(stub_project, caplog):
         notify = server.protocol.notify
         notify(
             types.WINDOW_SHOW_MESSAGE,
-            types.ShowMessageParams(
-                type=types.MessageType.Error, message="boom-error"
-            ),
+            types.ShowMessageParams(type=types.MessageType.Error, message="boom-error"),
         )
         notify(
             types.WINDOW_SHOW_MESSAGE,
-            types.ShowMessageParams(
-                type=types.MessageType.Info, message="just-info"
-            ),
+            types.ShowMessageParams(type=types.MessageType.Info, message="just-info"),
         )
         notify(
             types.WINDOW_LOG_MESSAGE,
-            types.LogMessageParams(
-                type=types.MessageType.Warning, message="careful"
-            ),
+            types.LogMessageParams(type=types.MessageType.Warning, message="careful"),
         )
         notify(types.TELEMETRY_EVENT, {"anything": True})
         notify(
@@ -575,6 +585,7 @@ def test_server_requests_get_headless_answers(stub_project):
     def on_open(server, uri):
         if uri != target:
             return
+
         # on_open runs on the server's loop thread: schedule the
         # questions as a task there (a helper thread has no loop to
         # build the requests on)
@@ -727,11 +738,7 @@ def test_quickfix_dedupes_identical_edits(stub_project):
             kind="quickfix",
             edit=types.WorkspaceEdit(
                 changes={
-                    uri: [
-                        types.TextEdit(
-                            range=rng(0, 0, 0, 0), new_text="# fixed\n"
-                        )
-                    ]
+                    uri: [types.TextEdit(range=rng(0, 0, 0, 0), new_text="# fixed\n")]
                 }
             ),
         )
@@ -756,9 +763,7 @@ def test_disabled_actions_are_skipped(stub_project):
             kind="quickfix",
             disabled=types.CodeActionDisabled(reason="not here"),
             edit=types.WorkspaceEdit(
-                changes={
-                    uri: [types.TextEdit(range=rng(0, 0, 0, 0), new_text="BAD\n")]
-                }
+                changes={uri: [types.TextEdit(range=rng(0, 0, 0, 0), new_text="BAD\n")]}
             ),
         )
     ]
@@ -783,9 +788,7 @@ def test_only_titles_selects_among_alternatives(stub_project):
             edit=types.WorkspaceEdit(
                 changes={
                     uri: [
-                        types.TextEdit(
-                            range=rng(0, 0, 0, 0), new_text="import json\n"
-                        )
+                        types.TextEdit(range=rng(0, 0, 0, 0), new_text="import json\n")
                     ]
                 }
             ),
@@ -795,11 +798,7 @@ def test_only_titles_selects_among_alternatives(stub_project):
             kind="quickfix",
             edit=types.WorkspaceEdit(
                 changes={
-                    uri: [
-                        types.TextEdit(
-                            range=rng(1, 0, 1, 0), new_text="x = None\n"
-                        )
-                    ]
+                    uri: [types.TextEdit(range=rng(1, 0, 1, 0), new_text="x = None\n")]
                 }
             ),
         ),
@@ -826,7 +825,9 @@ def test_source_kinds_skip_diagnostic_expansion(stub_project):
 
 def _ruff_project(tmp_path):
     (tmp_path / "fix.py").write_text("import os\nimport sys\n\nprint(sys.argv)\n")
-    (tmp_path / "order.py").write_text("import sys\nimport os\n\nprint(os.name, sys.argv)\n")
+    (tmp_path / "order.py").write_text(
+        "import sys\nimport os\n\nprint(os.name, sys.argv)\n"
+    )
     (tmp_path / "clean.py").write_text("import sys\n\nprint(sys.argv)\n")
     (tmp_path / "messy.py").write_text("x=1\n")
     return EditSession(respect_gitignore=False, root=tmp_path)
@@ -839,7 +840,9 @@ def test_ruff_fix_all_removes_unused_import(tmp_path):
         staged = handle.code_action("fix.py", "source.fixAll.ruff")
     assert staged == [tmp_path / "fix.py"]
     assert session.read("fix.py") == "import sys\n\nprint(sys.argv)\n"
-    assert (tmp_path / "fix.py").read_text() == "import os\nimport sys\n\nprint(sys.argv)\n"
+    assert (
+        tmp_path / "fix.py"
+    ).read_text() == "import os\nimport sys\n\nprint(sys.argv)\n"
 
 
 @requires_ruff
@@ -848,7 +851,10 @@ def test_ruff_organize_imports(tmp_path):
     with LspSession(session, ["ruff", "server"]) as handle:
         staged = handle.code_action("order.py", "source.organizeImports.ruff")
     assert staged == [tmp_path / "order.py"]
-    assert session.read("order.py") == "import os\nimport sys\n\nprint(os.name, sys.argv)\n"
+    assert (
+        session.read("order.py")
+        == "import os\nimport sys\n\nprint(os.name, sys.argv)\n"
+    )
 
 
 @requires_ruff
@@ -890,6 +896,4 @@ def test_pyright_sees_staged_content_not_disk(tmp_path):
     session.write("alpha.py", "def gamma():\n    return 2\n")
     with LspSession(session, [_pyright, "--stdio"]) as handle:
         refs = handle.references("alpha.py", 1, 5, "gamma")
-    assert [(r.path, r.line, r.column) for r in refs] == [
-        (tmp_path / "alpha.py", 1, 4)
-    ]
+    assert [(r.path, r.line, r.column) for r in refs] == [(tmp_path / "alpha.py", 1, 4)]

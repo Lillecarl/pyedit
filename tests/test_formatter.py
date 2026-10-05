@@ -108,9 +108,7 @@ def test_formatter_without_stdout_is_rejected(project, script, tmp_path, capsys)
     assert (project / "src" / "a.py").read_text() == "alpha = 1\nbeta = 2\n"
 
 
-def test_formatter_reverting_to_disk_drops_the_file(
-    project, script, tmp_path, capsys
-):
+def test_formatter_reverting_to_disk_drops_the_file(project, script, tmp_path, capsys):
     # the stub ignores stdin and echoes the file as it lies on disk:
     # script change + formatter revert = no net change, no diff
     revert = tmp_path / "revert.py"

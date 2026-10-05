@@ -43,9 +43,7 @@ def format_staged(
         content = staged[path]
         if not isinstance(content, str) or isinstance(content, Symlink):
             continue
-        if config is not None and config.excluded(
-            session.root, session.relpath(path)
-        ):
+        if config is not None and config.excluded(session.root, session.relpath(path)):
             continue
         argv = formatters.get(path.suffix.lstrip("."))
         if not argv:
@@ -57,9 +55,7 @@ def format_staged(
     return changed
 
 
-def _run(
-    session: EditSession, argv: list[str], text: str, path: Path
-) -> str:
+def _run(session: EditSession, argv: list[str], text: str, path: Path) -> str:
     cmd = [word.replace("{path}", str(path)) for word in argv]
     try:
         done = subprocess.run(

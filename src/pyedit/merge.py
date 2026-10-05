@@ -53,8 +53,7 @@ class VFS:
         self._parent = current() or getattr(pyedit, "session", None)
         if self._parent is None:
             raise RuntimeError(
-                "no edit session is running: VFS scopes merge into the "
-                "active session"
+                "no edit session is running: VFS scopes merge into the active session"
             )
         # the scope edits the parent's tree, not the cwd: its root
         # and budgets must be the parent's, or paths and limits

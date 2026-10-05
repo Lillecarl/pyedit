@@ -48,9 +48,7 @@ def test_second_scope_ignores_lines_moved_by_the_first(root, project):
     to account for lines the first one inserted above it."""
     (project / "src" / "a.py").write_text("alpha = 1\nmiddle\nbeta = 2\n")
     with VFS():
-        pyedit.edit(
-            "src/a.py", "alpha = 1\n", "alpha = 1\n# inserted header\n# more\n"
-        )
+        pyedit.edit("src/a.py", "alpha = 1\n", "alpha = 1\n# inserted header\n# more\n")
     with VFS():
         pyedit.edit("src/a.py", "beta = 2\n", "beta = 22\n")
     merged = root.staged_content(project / "src" / "a.py")
@@ -215,7 +213,9 @@ def test_nested_scopes(root, project):
             pyedit.write("src/a.py", "alpha = 1\nbeta = 2\ncomment = 'added'\n")
         pyedit.edit("src/b.py", "gamma = 3\n", "gamma = 33\n")
     staged = root.staged()
-    assert staged[project / "src" / "a.py"] == "alpha = 1\nbeta = 2\ncomment = 'added'\n"
+    assert (
+        staged[project / "src" / "a.py"] == "alpha = 1\nbeta = 2\ncomment = 'added'\n"
+    )
     assert staged[project / "src" / "b.py"] == "gamma = 33\n"
 
 

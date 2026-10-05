@@ -57,8 +57,7 @@ def __getattr__(name: str):
     session = current() or globals().get("session")
     if session is None:
         raise AttributeError(
-            f"module {__name__!r} has no attribute {name!r}: "
-            "no edit session is running"
+            f"module {__name__!r} has no attribute {name!r}: no edit session is running"
         )
     if not hasattr(session, name):
         raise AttributeError(

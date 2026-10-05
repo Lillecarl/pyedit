@@ -14,9 +14,7 @@ def test_no_stray_control_characters():
     """`r"args.\\1"` written as `r"args.\1"` prints 0x01, not a
     backreference. It did, before 2026-09-14."""
     text = render_skill()
-    bad = sorted(
-        {ch for ch in text if ord(ch) < 32 and ch not in "\n\t"}
-    )
+    bad = sorted({ch for ch in text if ord(ch) < 32 and ch not in "\n\t"})
     assert not bad, f"control characters in the skill: {[hex(ord(c)) for c in bad]}"
 
 

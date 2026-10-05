@@ -257,8 +257,7 @@ def test_os_walk_merges(session, project):
         Path("src/sub/deep.py").write_text("x\n")
         Path("src/a.py").unlink()
         walk = {
-            root: (sorted(dirs), sorted(files))
-            for root, dirs, files in os.walk("src")
+            root: (sorted(dirs), sorted(files)) for root, dirs, files in os.walk("src")
         }
         assert walk[str(project / "src")] == (["sub"], ["b.py"])
         assert walk[str(project / "src" / "sub")] == ([], ["deep.py"])

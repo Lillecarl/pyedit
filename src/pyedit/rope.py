@@ -130,7 +130,9 @@ def references(
     with _vfs_patched(session):
         content = session.read(path)
         if not isinstance(content, str):
-            raise ValueError(f"{session.canon(path)} is binary; references work on text")
+            raise ValueError(
+                f"{session.canon(path)} is binary; references work on text"
+            )
         _require_token(content, line, column, name)
         offset = _offset(content, line, column)
         project = _project(session)
@@ -142,7 +144,10 @@ def references(
                 )
             try:
                 locations = find_occurrences(
-                    project, resource, offset, resources=_python_resources(session, project)
+                    project,
+                    resource,
+                    offset,
+                    resources=_python_resources(session, project),
                 )
             except RopeError as err:
                 raise ValueError(
@@ -215,7 +220,9 @@ def _require_token(content: str, line: int, column: int, name: str) -> None:
                 token = match.group()
                 break
     if token != name:
-        found = token if token is not None else line_text[column : column + 1] or "nothing"
+        found = (
+            token if token is not None else line_text[column : column + 1] or "nothing"
+        )
         raise ValueError(
             f"symbol at line {line}, column {column} is {found!r}, not {name!r}"
         )
@@ -234,7 +241,9 @@ def _offset(content: str, line: int, column: int) -> int:
         raise ValueError(f"column is 0-based, got {column}")
     lines = content.split("\n")
     if line > len(lines):
-        raise ValueError(f"line {line} is past the end of the file ({len(lines)} lines)")
+        raise ValueError(
+            f"line {line} is past the end of the file ({len(lines)} lines)"
+        )
     line_text = lines[line - 1]
     if column > len(line_text):
         raise ValueError(
@@ -256,9 +265,7 @@ def _project(session: EditSession) -> Project:
     return Project(session.root.as_posix(), ropefolder=None)
 
 
-def _resource_or_none(
-    project: Project, session: EditSession, path: str | Path
-):
+def _resource_or_none(project: Project, session: EditSession, path: str | Path):
     try:
         return project.get_resource(session.relpath(session.canon(path)))
     except Exception:
@@ -299,6 +306,10 @@ def _files_under(session: EditSession, folder: Path) -> list[Path]:
         for name in files:
             found.add(Path(root) / name)
     for staged_path, content in session.staged().items():
-        if content is not None and staged_path.is_relative_to(folder) and staged_path.is_file():
+        if (
+            content is not None
+            and staged_path.is_relative_to(folder)
+            and staged_path.is_file()
+        ):
             found.add(staged_path)
     return sorted(found)

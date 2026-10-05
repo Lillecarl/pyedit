@@ -204,9 +204,7 @@ def _offset_at(content: str, position: types.Position, encoding: str) -> int:
     return sum(len(part) + 1 for part in lines[: position.line]) + column
 
 
-def _apply_edits(
-    content: str, edits: list, encoding: str, path: Path
-) -> str:
+def _apply_edits(content: str, edits: list, encoding: str, path: Path) -> str:
     """Splice TextEdits into one new string, bottom-up so earlier
     offsets stay valid while later ones apply."""
     spans = []
@@ -328,11 +326,11 @@ class LspSession:
         if line is None or column is None:
             if line is not None or column is not None:
                 raise ValueError("pass both line and column, or neither")
-            line, column = syntax.locate_definition(
-                self._session, path, old_name
-            )
+            line, column = syntax.locate_definition(self._session, path, old_name)
         return self._call(
-            self._rename_symbol(self._session.canon(path), line, column, old_name, new_name)
+            self._rename_symbol(
+                self._session.canon(path), line, column, old_name, new_name
+            )
         )
 
     def references(
@@ -375,9 +373,7 @@ class LspSession:
         alternatives a batch run cannot judge between. Returns
         staged paths.
         """
-        return self._call(
-            self._code_action(path, _kinds(kind), tuple(only_titles))
-        )
+        return self._call(self._code_action(path, _kinds(kind), tuple(only_titles)))
 
     def code_action_all(
         self,
@@ -431,9 +427,7 @@ class LspSession:
             def _handle(*args, **kwargs):
                 return func(*args, **kwargs)
 
-        _on(
-            types.TEXT_DOCUMENT_PUBLISH_DIAGNOSTICS, self._track_diagnostics
-        )
+        _on(types.TEXT_DOCUMENT_PUBLISH_DIAGNOSTICS, self._track_diagnostics)
         _on(types.WINDOW_SHOW_MESSAGE, self._log_server_message)
         _on(types.WINDOW_LOG_MESSAGE, self._log_server_message)
         _on(types.TELEMETRY_EVENT, self._drop_telemetry)
@@ -445,9 +439,7 @@ class LspSession:
             self._accept_progress_create,
         )
         _on(types.CLIENT_REGISTER_CAPABILITY, self._accept_capability_change)
-        _on(
-            types.CLIENT_UNREGISTER_CAPABILITY, self._accept_capability_change
-        )
+        _on(types.CLIENT_UNREGISTER_CAPABILITY, self._accept_capability_change)
         _on(types.WORKSPACE_APPLY_EDIT, self._decline_apply_edit)
         _on(types.WORKSPACE_CONFIGURATION, self._answer_configuration)
         _on(types.WORKSPACE_WORKSPACE_FOLDERS, self._answer_workspace_folders)
@@ -471,9 +463,7 @@ class LspSession:
         """$/progress renders nowhere on a headless client; acknowledge
         and move on (create is accepted below so servers keep sending)."""
 
-    def _dismiss_message_request(
-        self, params: types.ShowMessageRequestParams
-    ) -> None:
+    def _dismiss_message_request(self, params: types.ShowMessageRequestParams) -> None:
         """No user to pick an action: log the prompt, take none."""
         self._log_server_message(params)
 
@@ -504,18 +494,14 @@ class LspSession:
         )
         return types.ApplyWorkspaceEditResult(applied=False)
 
-    def _answer_configuration(
-        self, params: types.ConfigurationParams
-    ) -> list[Any]:
+    def _answer_configuration(self, params: types.ConfigurationParams) -> list[Any]:
         """No per-scope configuration to report; servers use defaults
         (the python path goes out over didChangeConfiguration)."""
         return [None for _ in params.items]
 
     def _answer_workspace_folders(self, *_args: Any) -> list[Any]:
         """Report the session root, mirroring initialize."""
-        return [
-            types.WorkspaceFolder(uri=self._session.root.as_uri(), name="pyedit")
-        ]
+        return [types.WorkspaceFolder(uri=self._session.root.as_uri(), name="pyedit")]
 
     def _call(self, coro):
         return asyncio.run_coroutine_threadsafe(coro, self._loop).result(self._timeout)
@@ -627,9 +613,7 @@ class LspSession:
         for path in sorted(paths):
             await self._sync_one(session, path, staged.get(path))
 
-    async def _sync_one(
-        self, session: EditSession, path: Path, staged_content
-    ) -> None:
+    async def _sync_one(self, session: EditSession, path: Path, staged_content) -> None:
         content = staged_content
         if content is None:
             try:
@@ -706,9 +690,7 @@ class LspSession:
         for kind in kinds:
             content = session.read(path)
             if not isinstance(content, str):
-                raise ValueError(
-                    f"{path} is binary; code actions work on text"
-                )
+                raise ValueError(f"{path} is binary; code actions work on text")
             lines = content.split("\n")
             await self._sync_documents(session)
             actions = await self._request(
@@ -761,11 +743,7 @@ class LspSession:
                 # document URI, which round-trips exactly what didOpen
                 # sent, so _uri rebuilds the key verbatim
                 uri = _uri(path)
-                fresh = [
-                    e
-                    for e in edits
-                    if _edit_fingerprint(uri, e) not in applied
-                ]
+                fresh = [e for e in edits if _edit_fingerprint(uri, e) not in applied]
                 if not fresh:
                     continue
                 for staged in self._stage_changed(
@@ -842,9 +820,7 @@ class LspSession:
             for path in session.glob(pattern):
                 try:
                     with VFS():
-                        for staged in await self._code_action(
-                            path, kinds, only_titles
-                        ):
+                        for staged in await self._code_action(path, kinds, only_titles):
                             if staged not in result.staged:
                                 result.staged.append(staged)
                 except Exception as err:
@@ -939,7 +915,9 @@ class LspSession:
             raise ValueError(f"{path} is binary; the language server works on text")
         lines = content.split("\n")
         if line < 1 or line > len(lines):
-            raise ValueError(f"line {line} is past the end of the file ({len(lines)} lines)")
+            raise ValueError(
+                f"line {line} is past the end of the file ({len(lines)} lines)"
+            )
         if column < 0 or column > len(lines[line - 1]):
             raise ValueError(
                 f"column {column} is past the end of line {line} "
@@ -966,8 +944,12 @@ class LspSession:
         for path, edits in _edit_documents(edit).items():
             content = self._session.read(path)
             if not isinstance(content, str):
-                raise ValueError(f"the language server edited {path} but it is not text here")
-            self._session.write(path, _apply_edits(content, edits, self._encoding, path))
+                raise ValueError(
+                    f"the language server edited {path} but it is not text here"
+                )
+            self._session.write(
+                path, _apply_edits(content, edits, self._encoding, path)
+            )
             staged.append(path)
         return staged
 

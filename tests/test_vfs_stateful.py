@@ -140,9 +140,7 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
                 # a staged link cannot be followed; the apply
                 # invariant compares the materialized trees
                 continue
-            if rel not in staged_names and self._raw["islink"](
-                self.a_root / rel
-            ):
+            if rel not in staged_names and self._raw["islink"](self.a_root / rel):
                 # an unstaged link chases A's real disk, while the
                 # B mirror already holds staged effects on the
                 # target; the trees agree only once applied
@@ -222,9 +220,7 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
             view = self.session.read(path)
         except FileNotFoundError:
             view = None
-        staged = self.session.staged().get(
-            self.session.canon(path), "absent"
-        )
+        staged = self.session.staged().get(self.session.canon(path), "absent")
         if staged is None:
             self.session.delete(path)
         elif view is None:
@@ -296,9 +292,9 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
             for name in names:
                 path = Path(base) / name
                 if self._raw["islink"](path):
-                    out[str(path.relative_to(root))] = (
-                        self._raw["readlink"](path).encode()
-                    )
+                    out[str(path.relative_to(root))] = self._raw["readlink"](
+                        path
+                    ).encode()
                     continue
                 with self._raw["open"](path, "rb") as fh:
                     out[str(path.relative_to(root))] = fh.read()
@@ -353,9 +349,7 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
         oracle = self.oracle_read(path)
         if oracle is None:
             with pytest.raises(OSError):
-                self.session.edit(
-                    path, old, repl, start_line=start, stop_line=stop
-                )
+                self.session.edit(path, old, repl, start_line=start, stop_line=stop)
             return
         # mirror the documented contract: replace every occurrence
         # inside the 1-based inclusive line span, leave matches that
@@ -364,9 +358,7 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
         segment = "\n".join(lines[start - 1 : stop])
         if old not in segment:
             with pytest.raises(ValueError):
-                self.session.edit(
-                    path, old, repl, start_line=start, stop_line=stop
-                )
+                self.session.edit(path, old, repl, start_line=start, stop_line=stop)
             return
         self.session.edit(path, old, repl, start_line=start, stop_line=stop)
         new_segment = segment.replace(old, repl)

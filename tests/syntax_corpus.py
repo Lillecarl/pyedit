@@ -71,7 +71,13 @@ LANGUAGES = [
     ("json", ".json", '{"alpha": 1,\n "beta": [2, 3]\n}\n', '{"a": 1,,}\n', set()),
     ("yaml", ".yaml", "alpha: 1\nbeta:\n  gamma: 2\n", "alpha: [unclosed\n", set()),
     ("toml", ".toml", "alpha = 1\n\n[beta]\ngamma = 2\n", "[broken\n", set()),
-    ("nix", ".nix", "{\n  alpha = 1;\n  beta.gamma = 2;\n}\n", "{ alpha = ; }\n", {"alpha", "beta.gamma"}),
+    (
+        "nix",
+        ".nix",
+        "{\n  alpha = 1;\n  beta.gamma = 2;\n}\n",
+        "{ alpha = ; }\n",
+        {"alpha", "beta.gamma"},
+    ),
     (
         "ruby",
         ".rb",

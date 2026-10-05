@@ -21,9 +21,7 @@ def test_splice_applies_many_spans_in_one_pass(session, project):
         ],
     )
     assert n == 2
-    assert session.staged()[project / "s.py"] == (
-        "alpha = 42\nbeta = 2\ndelta = 3\n"
-    )
+    assert session.staged()[project / "s.py"] == ("alpha = 42\nbeta = 2\ndelta = 3\n")
 
 
 def test_splice_converts_ast_byte_columns(session, project):
@@ -34,9 +32,7 @@ def test_splice_converts_ast_byte_columns(session, project):
     tree = ast.parse(text)
     name = tree.body[1].value.right
     assert name.col_offset != 0
-    n = session.splice(
-        "u.py", [(2, name.col_offset, 2, name.end_col_offset, "y")]
-    )
+    n = session.splice("u.py", [(2, name.col_offset, 2, name.end_col_offset, "y")])
     assert n == 1
     assert session.staged()[project / "u.py"] == 's = "ααα"\ntotal = α + y\n'
 
@@ -199,7 +195,7 @@ def test_edit_rejects_invalid_line_ranges(session, project):
 
 def test_edit_re_replaces_with_backrefs_and_counts(session, project):
     session.write("r.py", 'x = variables["key"]\ny = other["keep"]\n')
-    n = session.edit_re("r.py", r'variables\["(\w+)"\]', r'args.\1')
+    n = session.edit_re("r.py", r'variables\["(\w+)"\]', r"args.\1")
     assert n == 1
     assert session.staged()[project / "r.py"] == 'x = args.key\ny = other["keep"]\n'
 
@@ -224,9 +220,7 @@ def test_find_returns_positions_that_feed_splice(session, project):
     session.write("f.py", "alpha one\nbeta two\nalpha three\n")
     hits = session.find("f.py", r"alpha (\w+)")
     assert hits == [(1, 0, "alpha one"), (3, 0, "alpha three")]
-    n = session.splice(
-        "f.py", [(ln, c, ln, c + len(t), "X") for ln, c, t in hits]
-    )
+    n = session.splice("f.py", [(ln, c, ln, c + len(t), "X") for ln, c, t in hits])
     assert n == 2
     assert session.staged()[project / "f.py"] == "X\nbeta two\nX\n"
 
@@ -348,12 +342,12 @@ def test_directory_rename_moves_symlinks(session, project):
 def test_glob_does_not_descend_into_symlinked_dirs(session, project):
     # the target sits outside the root, so the only way in is the
     # link; git never traverses symlinks for discovery either
-    outside = project.parent / 'outside-tree'
+    outside = project.parent / "outside-tree"
     outside.mkdir()
-    (outside / 'z.py').write_text('z = 1\n')
-    (project / 'src' / 'shortcut').symlink_to(outside, target_is_directory=True)
-    names = {p.name for p in session.glob('**/*.py')}
-    assert 'z.py' not in names
+    (outside / "z.py").write_text("z = 1\n")
+    (project / "src" / "shortcut").symlink_to(outside, target_is_directory=True)
+    names = {p.name for p in session.glob("**/*.py")}
+    assert "z.py" not in names
 
 
 def test_read_after_delete_raises(session, project):

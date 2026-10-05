@@ -35,13 +35,9 @@ def test_rename_accepts_cursor_just_after_token(pkg):
 
 def test_rename_symbol_resolves_the_definition_by_name(pkg):
     session = EditSession()
-    changed = session.rename_symbol(
-        "src/mod.py", None, None, "foo", "bar"
-    )
+    changed = session.rename_symbol("src/mod.py", None, None, "foo", "bar")
     assert pkg / "app.py" in changed
-    assert session.staged()[pkg / "src" / "mod.py"] == (
-        "def bar():\n    return 1\n"
-    )
+    assert session.staged()[pkg / "src" / "mod.py"] == ("def bar():\n    return 1\n")
 
 
 def test_references_resolve_by_name(pkg):
@@ -71,9 +67,7 @@ def test_rename_wrong_old_name_fails_loudly(pkg):
     with pytest.raises(ValueError, match="resolves to 'foo'"):
         session.rename_symbol("src/mod.py", 1, 5, "wrong", "bar")
     # the failed selection left only the materialized read, no changes
-    assert session.staged() == {
-        pkg / "src" / "mod.py": "def foo():\n    return 1\n"
-    }
+    assert session.staged() == {pkg / "src" / "mod.py": "def foo():\n    return 1\n"}
 
 
 def test_rename_rejects_non_identifiers(pkg):

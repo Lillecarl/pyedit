@@ -33,7 +33,9 @@ def project(tmp_path, monkeypatch):
 def dryrun_store(tmp_path, monkeypatch):
     """Keep dry-run artifacts inside each test's tmp."""
     root = tmp_path / "store"
-    monkeypatch.setattr(store, "store_dir", lambda: (root.mkdir(exist_ok=True), root)[1])
+    monkeypatch.setattr(
+        store, "store_dir", lambda: (root.mkdir(exist_ok=True), root)[1]
+    )
     return root
 
 

@@ -131,10 +131,7 @@ def test_anchor_found_when_the_hint_is_past_the_end(project):
         session,
         "--- a/src/a.py\n+++ b/src/a.py\n@@ -5,3 +5,3 @@\n two\n-three\n+THREE\n four\n",
     )
-    assert (
-        session.staged()[project / "src" / "a.py"]
-        == "one\ntwo\nTHREE\nfour\nfive\n"
-    )
+    assert session.staged()[project / "src" / "a.py"] == "one\ntwo\nTHREE\nfour\nfive\n"
 
 
 def test_anchor_found_at_the_far_end_from_a_zero_hint(project):
@@ -144,10 +141,7 @@ def test_anchor_found_at_the_far_end_from_a_zero_hint(project):
         session,
         "--- a/src/a.py\n+++ b/src/a.py\n@@ -1,3 +1,3 @@\n three\n-four\n+FOUR\n five\n",
     )
-    assert (
-        session.staged()[project / "src" / "a.py"]
-        == "one\ntwo\nthree\nFOUR\nfive\n"
-    )
+    assert session.staged()[project / "src" / "a.py"] == "one\ntwo\nthree\nFOUR\nfive\n"
 
 
 def test_context_mismatch_raises(project):
@@ -207,16 +201,10 @@ def test_roundtrip_through_pyedit_output(project):
     from pyedit.diff import unified_diffs
     from pyedit.session import display_path
 
-    produced = "".join(
-        diff for _, diff in unified_diffs(session.staged())
-    )
+    produced = "".join(diff for _, diff in unified_diffs(session.staged()))
     roundtrip = EditSession()
     apply_diff(roundtrip, produced)
     assert roundtrip.staged()[project / "src" / "a.py"] == "ALPHA = 1\nbeta = 2\n"
-
-
-
-
 
 
 def test_a_binary_section_names_the_other_entry_point(project):

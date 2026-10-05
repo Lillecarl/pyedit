@@ -56,7 +56,9 @@ class LanguageRules:
         titled = self.title(node)
         if titled is not None:
             return titled
-        if node.type in _SELF_NAMED and not any(child.is_named for child in node.children):
+        if node.type in _SELF_NAMED and not any(
+            child.is_named for child in node.children
+        ):
             return node.text.decode("utf-8", errors="replace")
         return None
 
@@ -78,7 +80,9 @@ class LanguageRules:
                         line=row + 1,
                         column=char_column(line_text, byte_column),
                         message=(
-                            "syntax error" if not node.is_missing else f"missing {node.type}"
+                            "syntax error"
+                            if not node.is_missing
+                            else f"missing {node.type}"
                         ),
                     )
                 )
@@ -89,7 +93,11 @@ class LanguageRules:
 
 
 _PLAIN = [
-    ("tree_sitter_javascript", (".js", ".jsx", ".mjs", ".cjs"), ("variable_declarator", "command")),
+    (
+        "tree_sitter_javascript",
+        (".js", ".jsx", ".mjs", ".cjs"),
+        ("variable_declarator", "command"),
+    ),
     ("tree_sitter_typescript", (".ts", ".mts", ".cts"), ("variable_declarator",)),
     ("tree_sitter_tsx", (".tsx",), ("variable_declarator",)),
     ("tree_sitter_go", (".go",), ("parameter_declaration", "field_declaration")),

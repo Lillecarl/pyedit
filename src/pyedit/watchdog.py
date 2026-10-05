@@ -115,4 +115,3 @@ def _prune(keep: int = _KEEP) -> None:
     dumps = sorted(dump_dir().glob("timeout-*.log"))
     for old in dumps[:-keep]:
         _REAL_UNLINK(old)
-

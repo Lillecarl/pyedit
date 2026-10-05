@@ -159,9 +159,7 @@ def install(session: EditSession) -> Callable[[], None]:
 
     def coerce(content, binary: bool):
         if isinstance(content, Symlink):
-            raise ValueError(
-                "this path is a staged symlink; a handle cannot follow it"
-            )
+            raise ValueError("this path is a staged symlink; a handle cannot follow it")
         if isinstance(content, bytes):
             if binary:
                 return content
@@ -236,7 +234,9 @@ def install(session: EditSession) -> Callable[[], None]:
             else:
                 current().write(dest / entry.name, current().read(entry))
 
-    def _open_path(self, mode="r", buffering=-1, encoding=None, errors=None, newline=None):
+    def _open_path(
+        self, mode="r", buffering=-1, encoding=None, errors=None, newline=None
+    ):
         return _open(self, mode, buffering, encoding, errors, newline)
 
     def _write_text(self, data, *args, **kwargs):
@@ -247,7 +247,9 @@ def install(session: EditSession) -> Callable[[], None]:
 
     def _write_bytes(self, data):
         if not isinstance(data, (bytes, bytearray, memoryview)):
-            raise TypeError(f"a bytes-like object is required, not {type(data).__name__}")
+            raise TypeError(
+                f"a bytes-like object is required, not {type(data).__name__}"
+            )
         current().write(resolve(self), bytes(data))
         return len(data)
 
@@ -287,7 +289,10 @@ def install(session: EditSession) -> Callable[[], None]:
         rx = glob_re(pattern)
         out: dict[Path, Path] = {}
         for match in path_glob(
-            self, pattern, case_sensitive=case_sensitive, recurse_symlinks=recurse_symlinks
+            self,
+            pattern,
+            case_sensitive=case_sensitive,
+            recurse_symlinks=recurse_symlinks,
         ):
             resolved = resolve(match)
             if staged(resolved) is None:
@@ -343,9 +348,7 @@ def install(session: EditSession) -> Callable[[], None]:
 
     def _os_makedirs(name, mode=0o777, exist_ok=False, **kwargs):
         if kwargs:
-            return os_makedirs(
-                name, mode=mode, exist_ok=exist_ok, **kwargs
-            )
+            return os_makedirs(name, mode=mode, exist_ok=exist_ok, **kwargs)
         p = resolve(name)
         if p.is_dir():
             if exist_ok:
@@ -364,7 +367,9 @@ def install(session: EditSession) -> Callable[[], None]:
             if onerror is not None:
                 onerror(err)
             return
-        dirs = [e for e in listing if e.is_dir() and (followlinks or not e.is_symlink())]
+        dirs = [
+            e for e in listing if e.is_dir() and (followlinks or not e.is_symlink())
+        ]
         files = [e for e in listing if not e.is_dir()]
         if topdown:
             yield str(top_path), [d.name for d in dirs], [f.name for f in files]
@@ -382,7 +387,6 @@ def install(session: EditSession) -> Callable[[], None]:
     def _os_path_isdir(path):
         return current().is_dir(path)
 
-
     def _os_path_islink(path):
         content = _staged_state(path)
         if content is _MISSING:
@@ -395,9 +399,7 @@ def install(session: EditSession) -> Callable[[], None]:
 
     def _fake_stat(content):
         mode = stat.S_IFLNK | 0o777 if isinstance(content, Symlink) else 0o100644
-        return os.stat_result(
-            (mode, 0, 0, 1, 0, 0, _content_size(content), 0, 0, 0)
-        )
+        return os.stat_result((mode, 0, 0, 1, 0, 0, _content_size(content), 0, 0, 0))
 
     def _os_stat(path, *args, **kwargs):
         content = _staged_state(path)
@@ -414,7 +416,6 @@ def install(session: EditSession) -> Callable[[], None]:
         if content is None:
             raise FileNotFoundError(str(resolve(path)))
         return str(content)
-
 
     def _os_lstat(path, *args, **kwargs):
         content = _staged_state(path)
@@ -508,7 +509,8 @@ def install(session: EditSession) -> Callable[[], None]:
                 for child in p.rglob("*"):
                     print(
                         f"rmtree sees {child} is_file={child.is_file()} "
-                        f"islink={child.is_symlink()}", flush=True
+                        f"islink={child.is_symlink()}",
+                        flush=True,
                     )
                     if child.is_file():
                         current().delete(child)

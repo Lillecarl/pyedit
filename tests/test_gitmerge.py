@@ -90,5 +90,3 @@ def test_symlink_retarget_merges_beside_a_text_edit(root, project):
         pyedit.symlink("src/b.py", "link", force=True)
     assert root.staged_content(root.canon("link")) == Symlink("src/b.py")
     assert root.staged_content(root.canon("src/a.py")) == "alpha = 10\nbeta = 2\n"
-
-

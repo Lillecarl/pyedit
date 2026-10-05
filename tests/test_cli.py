@@ -91,7 +91,11 @@ def test_apply_prints_undo_comment(project, script, capsys, dryrun_store):
     out, err = capsys.readouterr()
     lines = out.splitlines()
     token = undo_token(out)
-    assert lines[0] == lines[-1] == f"# pyedit undo {token} (pyedit apply {token} to revert)"
+    assert (
+        lines[0]
+        == lines[-1]
+        == f"# pyedit undo {token} (pyedit apply {token} to revert)"
+    )
     undo_text = (dryrun_store / f"{token}.diff").read_text()
     assert "-ALPHA = 1" in undo_text
     assert "+alpha = 1" in undo_text
@@ -115,9 +119,7 @@ def test_stored_id_replay_of_create_heavy_diffs(project, capsys):
     )
     script.write_text(body + "\n")
     assert run(project, script=script) == 0
-    token = re.search(
-        r"dry-run ([0-9a-f]{8})", capsys.readouterr().out
-    ).group(1)
+    token = re.search(r"dry-run ([0-9a-f]{8})", capsys.readouterr().out).group(1)
     assert replay(project, token) == 0
     assert all((project / f"mod{i}.py").exists() for i in range(10))
 
@@ -392,9 +394,7 @@ def test_dry_run_does_not_delete(project, capsys):
 
 
 def test_script_can_touch_any_path(project, script, capsys):
-    script.write_text(
-        'pyedit.write("outside/the_input.py", "anywhere\\n")\n'
-    )
+    script.write_text('pyedit.write("outside/the_input.py", "anywhere\\n")\n')
     assert run(project, script=script) == 0
     out = capsys.readouterr().out
     assert "+++ b/outside/the_input.py" in out
@@ -434,8 +434,7 @@ def test_ordinary_python_script_is_captured(project, capsys):
 def test_ordinary_python_apply_writes(project, capsys):
     script = project / "edit.py"
     script.write_text(
-        "from pathlib import Path\n"
-        "Path('src/brand_new/f.txt').write_text('fresh\\n')\n"
+        "from pathlib import Path\nPath('src/brand_new/f.txt').write_text('fresh\\n')\n"
     )
     assert run(project, "--apply", script=script) == 0
     assert (project / "src" / "brand_new" / "f.txt").read_text() == "fresh\n"
@@ -444,8 +443,7 @@ def test_ordinary_python_apply_writes(project, capsys):
 def test_binary_apply_writes_bytes(project, capsys):
     script = project / "edit.py"
     script.write_text(
-        "from pathlib import Path\n"
-        "Path('src/data.bin').write_bytes(bytes([0, 1, 2]))\n"
+        "from pathlib import Path\nPath('src/data.bin').write_bytes(bytes([0, 1, 2]))\n"
     )
     assert run(project, "--apply", script=script) == 0
     assert (project / "src" / "data.bin").read_bytes() == bytes([0, 1, 2])
@@ -473,9 +471,7 @@ def _script(project, body):
 
 
 def test_patch_api_stages_an_update(project, capsys):
-    script = _script(project, (
-        'pyedit.apply_v4a(open("plan.patch").read())\n'
-    ))
+    script = _script(project, ('pyedit.apply_v4a(open("plan.patch").read())\n'))
     (project / "plan.patch").write_text(
         "*** Begin Patch\n"
         "*** Update File: src/a.py\n"
@@ -491,12 +487,15 @@ def test_patch_api_stages_an_update(project, capsys):
 
 
 def test_patch_api_adds_a_file(project, capsys):
-    script = _script(project, (
-        'pyedit.apply_v4a("*** Begin Patch\\n"\n'
-        '                 "*** Add File: notes/todo.txt\\n"\n'
-        '                 "+write tests\\n"\n'
-        '                 "*** End Patch\\n")\n'
-    ))
+    script = _script(
+        project,
+        (
+            'pyedit.apply_v4a("*** Begin Patch\\n"\n'
+            '                 "*** Add File: notes/todo.txt\\n"\n'
+            '                 "+write tests\\n"\n'
+            '                 "*** End Patch\\n")\n'
+        ),
+    )
     assert run(project, script=script) == 0
     out = capsys.readouterr().out
     assert "+++ b/notes/todo.txt" in out
@@ -504,11 +503,14 @@ def test_patch_api_adds_a_file(project, capsys):
 
 
 def test_patch_api_apply_writes(project, capsys):
-    script = _script(project, (
-        'pyedit.apply_v4a("*** Begin Patch\\n"\n'
-        '                 "*** Delete File: src/b.py\\n"\n'
-        '                 "*** End Patch\\n")\n'
-    ))
+    script = _script(
+        project,
+        (
+            'pyedit.apply_v4a("*** Begin Patch\\n"\n'
+            '                 "*** Delete File: src/b.py\\n"\n'
+            '                 "*** End Patch\\n")\n'
+        ),
+    )
     assert run(project, "--apply", script=script) == 0
     assert not (project / "src" / "b.py").exists()
 
@@ -522,15 +524,9 @@ def test_symlink_target_is_not_syntax_checked(project):
 
 def test_diff_api_stages_an_update(project, capsys):
     (project / "plan.diff").write_text(
-        "--- a/src/a.py\n"
-        "+++ b/src/a.py\n"
-        "@@ -1 +1 @@\n"
-        "-alpha = 1\n"
-        "+alpha = 42\n"
+        "--- a/src/a.py\n+++ b/src/a.py\n@@ -1 +1 @@\n-alpha = 1\n+alpha = 42\n"
     )
-    script = _script(
-        project, 'pyedit.apply_diff_unidiff(open("plan.diff").read())\n'
-    )
+    script = _script(project, 'pyedit.apply_diff_unidiff(open("plan.diff").read())\n')
     assert run(project, script=script) == 0
     out = capsys.readouterr().out
     assert "+alpha = 42" in out
@@ -541,9 +537,7 @@ def test_diff_api_apply_writes(project, capsys):
     (project / "plan.diff").write_text(
         "--- /dev/null\n+++ b/src/fresh.txt\n@@ -0,0 +1 @@\n+new\n"
     )
-    script = _script(
-        project, 'pyedit.apply_diff_unidiff(open("plan.diff").read())\n'
-    )
+    script = _script(project, 'pyedit.apply_diff_unidiff(open("plan.diff").read())\n')
     assert run(project, "--apply", script=script) == 0
     assert (project / "src" / "fresh.txt").read_text() == "new\n"
 
@@ -586,14 +580,17 @@ def test_patch_inline_from_script(project, capsys):
 
 
 def test_patch_failure_returns_1(project, capsys):
-    script = _script(project, (
-        'pyedit.apply_v4a("*** Begin Patch\\n"\n'
-        '                 "*** Update File: src/missing.py\\n"\n'
-        '                 "@@\\n"\n'
-        '                 "-x\\n"\n'
-        '                 "+y\\n"\n'
-        '                 "*** End Patch\\n")\n'
-    ))
+    script = _script(
+        project,
+        (
+            'pyedit.apply_v4a("*** Begin Patch\\n"\n'
+            '                 "*** Update File: src/missing.py\\n"\n'
+            '                 "@@\\n"\n'
+            '                 "-x\\n"\n'
+            '                 "+y\\n"\n'
+            '                 "*** End Patch\\n")\n'
+        ),
+    )
     assert run(project, script=script) == 1
     _, err = capsys.readouterr()
     assert "nothing was written" in err

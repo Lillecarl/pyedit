@@ -56,7 +56,9 @@ def parse_patch(text: str) -> list[PatchOperation]:
     return operations
 
 
-def apply_patch(session, text: str, strict: bool = True) -> tuple[list[PatchOperation], list[str]]:
+def apply_patch(
+    session, text: str, strict: bool = True
+) -> tuple[list[PatchOperation], list[str]]:
     """Parse a patch envelope and stage every operation on the session.
 
     Fails closed: a failed operation rolls the whole input back.
@@ -69,7 +71,9 @@ def apply_patch(session, text: str, strict: bool = True) -> tuple[list[PatchOper
         op_mark = session.checkpoint()
         try:
             if operation.type == "create_file":
-                session.write(operation.path, apply_diff("", operation.diff or "", mode="create"))
+                session.write(
+                    operation.path, apply_diff("", operation.diff or "", mode="create")
+                )
             elif operation.type == "update_file":
                 _stage_update(session, operation)
             elif operation.type == "delete_file":
@@ -109,7 +113,9 @@ def _parse_add_file(lines: list[str], index: int) -> tuple[PatchOperation, int]:
         index += 1
     if not diff_lines:
         raise ValueError(f"Add File patch for {path} must include at least one + line")
-    return PatchOperation(type="create_file", path=path, diff=_join_diff(diff_lines)), index
+    return PatchOperation(
+        type="create_file", path=path, diff=_join_diff(diff_lines)
+    ), index
 
 
 def _parse_delete_file(lines: list[str], index: int) -> tuple[PatchOperation, int]:
@@ -135,7 +141,9 @@ def _parse_update_file(lines: list[str], index: int) -> tuple[PatchOperation, in
     if not diff_lines:
         raise ValueError(f"Update File patch for {path} must include a hunk")
     return (
-        PatchOperation(type="update_file", path=path, diff=_join_diff(diff_lines), move_to=move_to),
+        PatchOperation(
+            type="update_file", path=path, diff=_join_diff(diff_lines), move_to=move_to
+        ),
         index,
     )
 

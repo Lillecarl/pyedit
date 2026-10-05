@@ -46,7 +46,9 @@ def byte_offset(lines: list[str], line: int, column: int) -> int:
     """A (1-based line, 0-based char column) position as a byte offset,
     bounds-checked against the file shape."""
     if line < 1 or line > len(lines):
-        raise ValueError(f"line {line} is past the end of the file ({len(lines)} lines)")
+        raise ValueError(
+            f"line {line} is past the end of the file ({len(lines)} lines)"
+        )
     line_text = lines[line - 1]
     if column < 0 or column > len(line_text):
         raise ValueError(

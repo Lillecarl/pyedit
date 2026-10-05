@@ -110,7 +110,9 @@ def _sections(text: str) -> list[str]:
     starts[0] = 0
     bounds = starts + [len(lines)]
     return [
-        "".join(lines[a:b]) for a, b in zip(starts, bounds[1:]) if "".join(lines[a:b]).strip()
+        "".join(lines[a:b])
+        for a, b in zip(starts, bounds[1:])
+        if "".join(lines[a:b]).strip()
     ]
 
 
@@ -139,9 +141,11 @@ def apply_diff(session, text: str, strict: bool = True) -> list[AppliedFile]:
             if strict:
                 session.rollback(mark)
                 raise
-            failures.append(_strip_prefix(patched.target_file)
-                            or _strip_prefix(patched.source_file)
-                            or "?")
+            failures.append(
+                _strip_prefix(patched.target_file)
+                or _strip_prefix(patched.source_file)
+                or "?"
+            )
     return applied, failures
 
 

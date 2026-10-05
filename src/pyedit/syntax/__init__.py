@@ -69,7 +69,9 @@ def _no_grammar(suffix: str) -> ValueError:
 def _read_text(session, path: str | Path) -> str:
     content = session.read(path)
     if not isinstance(content, str):
-        raise ValueError(f"{session.canon(path)} is binary; syntax queries work on text")
+        raise ValueError(
+            f"{session.canon(path)} is binary; syntax queries work on text"
+        )
     return content
 
 
@@ -78,7 +80,7 @@ def _info(node, lines: list[str], rules) -> NodeInfo:
     end_row, end_byte = node.end_point
     name_node = node.child_by_field_name("name")
     name_row, name_byte = (
-        (name_node.start_point if name_node is not None else (None, None))
+        name_node.start_point if name_node is not None else (None, None)
     )
     return NodeInfo(
         kind=node.type,
@@ -89,9 +91,9 @@ def _info(node, lines: list[str], rules) -> NodeInfo:
         end_column=char_column(lines[end_row], end_byte),
         text=node.text.decode("utf-8", errors="replace"),
         name_line=None if name_row is None else name_row + 1,
-        name_column=None if name_byte is None else char_column(
-            lines[name_row], name_byte
-        ),
+        name_column=None
+        if name_byte is None
+        else char_column(lines[name_row], name_byte),
     )
 
 
@@ -144,9 +146,7 @@ def free_names(text: str) -> set[str]:
     visit(ast.parse(text))
     import builtins
 
-    return names - bound - {
-        n for n in dir(builtins) if not n.startswith("_")
-    }
+    return names - bound - {n for n in dir(builtins) if not n.startswith("_")}
 
 
 def locate_definition(session, path: str | Path, name: str) -> tuple[int, int]:

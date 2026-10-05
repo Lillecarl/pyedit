@@ -51,9 +51,7 @@ def apply(
                 for path in paths:
                     before = session.read(path)
                     for kind in table.actions:
-                        lsp.code_action(
-                            path, kind, only_titles=table.only_titles
-                        )
+                        lsp.code_action(path, kind, only_titles=table.only_titles)
                     if table.format:
                         lsp.format_file(path)
                     if session.read(path) != before:
@@ -63,7 +61,9 @@ def apply(
     return touched
 
 
-def _eligible(session, content, path: Path, suffixes: list[str], config: Config) -> bool:
+def _eligible(
+    session, content, path: Path, suffixes: list[str], config: Config
+) -> bool:
     if not isinstance(content, str) or isinstance(content, Symlink):
         return False
     if path.suffix.lstrip(".") not in suffixes:

@@ -80,8 +80,12 @@ def test_create_then_delete_nets_to_nothing(project):
     # a file created and deleted in the same session has no net change:
     # neither side exists, so the diff is empty by design
     session = EditSession()
-    apply_patch(session, "*** Begin Patch\n*** Add File: src/tmp.py\n+x = 1\n*** End Patch\n")
-    apply_patch(session, "*** Begin Patch\n*** Delete File: src/tmp.py\n*** End Patch\n")
+    apply_patch(
+        session, "*** Begin Patch\n*** Add File: src/tmp.py\n+x = 1\n*** End Patch\n"
+    )
+    apply_patch(
+        session, "*** Begin Patch\n*** Delete File: src/tmp.py\n*** End Patch\n"
+    )
     assert session.diff_git() == ""
 
 

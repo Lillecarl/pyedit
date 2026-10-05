@@ -205,9 +205,7 @@ class EditSession:
         if not self._respect_gitignore:
             return list(paths)
         ignore = self.ignore_filter
-        return [
-            p for p in paths if not ignore.ignored(p, is_dir=self.is_dir(p))
-        ]
+        return [p for p in paths if not ignore.ignored(p, is_dir=self.is_dir(p))]
 
     @property
     def ignore_filter(self) -> IgnoreFilter:
@@ -254,13 +252,14 @@ class EditSession:
         --no-gitignore."""
         rx = glob_re(pattern)
         found: set[Path] = set()
-        for match in glob_module.glob(os.path.join(self._root, pattern), recursive=True):
+        for match in glob_module.glob(
+            os.path.join(self._root, pattern), recursive=True
+        ):
             p = self.canon(match)
             if self.staged_content(p) is None:
                 continue
-            if (
-                (self.is_file(p) or self.is_link(p))
-                and not _traverses_symlink(p, self._root)
+            if (self.is_file(p) or self.is_link(p)) and not _traverses_symlink(
+                p, self._root
             ):
                 found.add(p)
         for staged_path, content in self._staged.items():
@@ -310,9 +309,7 @@ class EditSession:
 
     def write(self, path: str | Path, content: str | bytes) -> None:
         if not isinstance(content, (str, bytes)):
-            raise TypeError(
-                f"write() needs str or bytes, got {type(content).__name__}"
-            )
+            raise TypeError(f"write() needs str or bytes, got {type(content).__name__}")
         self._stage(self.canon(path), content)
 
     def symlink(self, target: str, path: str | Path, force: bool = False) -> None:
@@ -370,17 +367,12 @@ class EditSession:
         for i in range(len(norm) - 1):
             if norm[i + 1][0] < norm[i][1]:
                 raise ValueError(
-                    f"spans overlap at "
-                    f"{norm[i + 1][0][0]}:{norm[i + 1][0][1]}"
+                    f"spans overlap at {norm[i + 1][0][0]}:{norm[i + 1][0][1]}"
                 )
-        for (start, end, replacement) in reversed(norm):
+        for start, end, replacement in reversed(norm):
             sline, scol = start
             eline, ecol = end
-            joined = (
-                lines[sline - 1][:scol]
-                + replacement
-                + lines[eline - 1][ecol:]
-            )
+            joined = lines[sline - 1][:scol] + replacement + lines[eline - 1][ecol:]
             lines[sline - 1 : eline] = [joined]
         self.write(path, "\n".join(lines))
         return len(norm)
@@ -424,7 +416,9 @@ class EditSession:
                 f"{self.canon(path)} ({n_lines} lines)"
             )
         line_start = sum(len(part) + 1 for part in lines[: start - 1])
-        range_end = sum(len(part) + 1 for part in lines[: stop - 1]) + len(lines[stop - 1])
+        range_end = sum(len(part) + 1 for part in lines[: stop - 1]) + len(
+            lines[stop - 1]
+        )
         haystack = text[line_start:range_end]
         if not old:
             # "" counts len+1 times and replaces at every position,
@@ -438,7 +432,8 @@ class EditSession:
                 "compare its bytes with the file's, e.g. via repr(read()))"
             )
         self.write(
-            path, text[:line_start] + haystack.replace(old, new, count) + text[range_end:]
+            path,
+            text[:line_start] + haystack.replace(old, new, count) + text[range_end:],
         )
         return n if count < 0 else min(n, count)
 
@@ -473,9 +468,7 @@ class EditSession:
         rx = re.compile(pattern)
         text = self.read(path)
         if not isinstance(text, str):
-            raise ValueError(
-                f"{self.canon(path)} is binary; edit_re works on text"
-            )
+            raise ValueError(f"{self.canon(path)} is binary; edit_re works on text")
         lines = text.split("\n")
         n_lines = len(lines)
         start = 1 if start_line is None else start_line
@@ -491,9 +484,7 @@ class EditSession:
         )
         new, n = rx.subn(repl, text[line_start:range_end], count=max(count, 0))
         if n == 0:
-            raise ValueError(
-                f"pattern not found in {self.canon(path)}: {pattern!r}"
-            )
+            raise ValueError(f"pattern not found in {self.canon(path)}: {pattern!r}")
         self.write(path, text[:line_start] + new + text[range_end:])
         return n
 
@@ -511,9 +502,7 @@ class EditSession:
             staged_src is _MISSING and _disk_is_link(src)
         ):
             target = (
-                str(staged_src)
-                if staged_src is not _MISSING
-                else _disk_readlink(src)
+                str(staged_src) if staged_src is not _MISSING else _disk_readlink(src)
             )
             self._stage(src, None)
             self._stage(dst, Symlink(target))
@@ -523,9 +512,7 @@ class EditSession:
             self._stage(src, None)
             self._stage(dst, content)
             return
-        disk_files, disk_links = (
-            _disk_tree(src) if _disk_is_dir(src) else ([], [])
-        )
+        disk_files, disk_links = _disk_tree(src) if _disk_is_dir(src) else ([], [])
         moved = {
             path: content
             for path, content in self._staged.items()
@@ -614,7 +601,9 @@ class EditSession:
 
         return rope.rename_symbol(self, path, line, column, old_name, new_name)
 
-    def rename_module(self, path: str | Path, old_name: str, new_name: str) -> list[Path]:
+    def rename_module(
+        self, path: str | Path, old_name: str, new_name: str
+    ) -> list[Path]:
         """Rename a module file or package folder (`old_name` is the
         module's current name); stages the move and importer updates."""
         from pyedit import rope
@@ -689,8 +678,7 @@ class EditSession:
         from pyedit.diff import difflib_hunks, unified_diffs
 
         return "".join(
-            d
-            for _, d in unified_diffs(self.staged(), context, render=difflib_hunks)
+            d for _, d in unified_diffs(self.staged(), context, render=difflib_hunks)
         )
 
     def apply(self, paths=None) -> None:

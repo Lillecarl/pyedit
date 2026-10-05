@@ -10,10 +10,28 @@ from pyedit.session import EditSession
 
 # every submodule name is a word a session method may not use
 SHADOWED = {
-    "active", "cli", "config", "diff", "formatter", "gitignore",
-    "gitmerge", "gitpatch", "merge", "memgit", "patch", "render", "rope",
-    "session", "skill", "store", "syntax", "udiff", "vendor", "vfs",
-    "watchdog", "lsp_client",
+    "active",
+    "cli",
+    "config",
+    "diff",
+    "formatter",
+    "gitignore",
+    "gitmerge",
+    "gitpatch",
+    "merge",
+    "memgit",
+    "patch",
+    "render",
+    "rope",
+    "session",
+    "skill",
+    "store",
+    "syntax",
+    "udiff",
+    "vendor",
+    "vfs",
+    "watchdog",
+    "lsp_client",
 }
 
 

@@ -140,9 +140,7 @@ def _read(path: Path) -> dict:
         raise ConfigError(f"{path}: parent must be a non-empty path string")
     formatters = data.get("format", {})
     if not isinstance(formatters, dict):
-        raise ConfigError(
-            f"{path}: [format] must be a table of suffix = [command ...]"
-        )
+        raise ConfigError(f"{path}: [format] must be a table of suffix = [command ...]")
     normalized = {}
     for suffix, argv in formatters.items():
         suffix = suffix.lstrip(".")
@@ -153,9 +151,7 @@ def _read(path: Path) -> dict:
     lsp = data.get("lsp", {})
     if not isinstance(lsp, dict):
         raise ConfigError(f"{path}: [lsp] must be a table of name = {{...}}")
-    data["lsp"] = {
-        name: _lsp_table(path, name, table) for name, table in lsp.items()
-    }
+    data["lsp"] = {name: _lsp_table(path, name, table) for name, table in lsp.items()}
     data["exclude"] = _exclude(path, data.get("exclude", []))
     return data
 
