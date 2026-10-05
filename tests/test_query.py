@@ -174,6 +174,29 @@ def test_toml_key_feeds_splice(session):
     assert "omega = 1" in session.read(name)
 
 
+def test_bash_function_name(session):
+    name, text = sample_text("bash")
+    session.write(name, text)
+    names = query(session, name, "(function_definition name: (word) @n)")
+    assert [hit.text for hit in names] == ["alpha"]
+
+
+def test_tsx_function_and_method_names(session):
+    name, text = sample_text("tsx")
+    session.write(name, text)
+    funcs = query(session, name, "(function_declaration name: (identifier) @n)")
+    assert [hit.text for hit in funcs] == ["App"]
+    methods = query(session, name, "(method_definition name: (property_identifier) @n)")
+    assert [hit.text for hit in methods] == ["render"]
+
+
+def test_zig_function_name(session):
+    name, text = sample_text("zig")
+    session.write(name, text)
+    names = query(session, name, "(function_declaration name: (identifier) @n)")
+    assert [hit.text for hit in names] == ["alpha"]
+
+
 def test_predicate_filters_hits(session):
     name, text = sample_text("nix")
     session.write(name, text)
