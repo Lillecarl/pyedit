@@ -122,6 +122,31 @@ def test_cpp_function_and_class_names(session):
     assert [hit.text for hit in classes] == ["Beta"]
 
 
+def test_java_method_and_class_names(session):
+    name, text = sample_text("java")
+    session.write(name, text)
+    methods = query(session, name, "(method_declaration name: (identifier) @n)")
+    assert [hit.text for hit in methods] == ["alpha", "gamma"]
+    classes = query(session, name, "(class_declaration name: (identifier) @n)")
+    assert [hit.text for hit in classes] == ["Beta"]
+
+
+def test_ruby_method_and_class_names(session):
+    name, text = sample_text("ruby")
+    session.write(name, text)
+    methods = query(session, name, "(method name: (identifier) @n)")
+    assert [hit.text for hit in methods] == ["alpha", "gamma"]
+    classes = query(session, name, "(class name: (constant) @n)")
+    assert [hit.text for hit in classes] == ["Beta"]
+
+
+def test_lua_function_name(session):
+    name, text = sample_text("lua")
+    session.write(name, text)
+    names = query(session, name, "(function_declaration name: (identifier) @n)")
+    assert [hit.text for hit in names] == ["alpha"]
+
+
 def test_predicate_filters_hits(session):
     name, text = sample_text("nix")
     session.write(name, text)
