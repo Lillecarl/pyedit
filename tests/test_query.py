@@ -52,6 +52,35 @@ def test_python_function_names(session):
     assert sorted(hit.text for hit in names) == ["alpha", "gamma"]
 
 
+def test_javascript_function_names_feed_splice(session):
+    name, text = sample_text("javascript")
+    session.write(name, text)
+    names = query(session, name, "(function_declaration name: (identifier) @n)")
+    assert [hit.text for hit in names] == ["alpha"]
+    spans = [
+        (hit.start_line, hit.start_column, hit.end_line, hit.end_column, "omega")
+        for hit in names
+    ]
+    assert session.splice(name, spans) == 1
+    assert "function omega(x)" in session.read(name)
+
+
+def test_typescript_method_names(session):
+    name, text = sample_text("typescript")
+    session.write(name, text)
+    names = query(session, name, "(method_definition name: (property_identifier) @n)")
+    assert [hit.text for hit in names] == ["gamma"]
+
+
+def test_go_function_and_method_names(session):
+    name, text = sample_text("go")
+    session.write(name, text)
+    funcs = query(session, name, "(function_declaration name: (identifier) @n)")
+    assert [hit.text for hit in funcs] == ["Alpha"]
+    methods = query(session, name, "(method_declaration name: (field_identifier) @n)")
+    assert [hit.text for hit in methods] == ["delta"]
+
+
 def test_predicate_filters_hits(session):
     name, text = sample_text("nix")
     session.write(name, text)
