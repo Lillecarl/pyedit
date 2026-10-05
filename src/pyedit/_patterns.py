@@ -106,6 +106,22 @@ PATTERNS = {
     "zig": [
         ("test_zig_function_name", "(function_declaration name: (identifier) @n)"),
     ],
+    "css": [
+        (
+            "test_css_selector_names_feed_splice",
+            "(rule_set (selectors (class_selector) @s))",
+        ),
+        (
+            "test_css_selector_names_feed_splice",
+            "(rule_set (selectors (id_selector) @s))",
+        ),
+    ],
+    "fish": [
+        ("test_fish_function_name", "(function_definition name: (word) @n)"),
+    ],
+    "zsh": [
+        ("test_zsh_function_name", "(function_definition name: (word) @n)"),
+    ],
     "svelte": [
         ("test_svelte_tag_names_feed_splice", '((tag_name) @t (#eq? @t "h1"))'),
     ],

@@ -197,6 +197,35 @@ def test_zig_function_name(session):
     assert [hit.text for hit in names] == ["alpha"]
 
 
+def test_css_selector_names_feed_splice(session):
+    name, text = sample_text("css")
+    session.write(name, text)
+    classes = query(session, name, "(rule_set (selectors (class_selector) @s))")
+    assert [hit.text for hit in classes] == [".alpha"]
+    ids = query(session, name, "(rule_set (selectors (id_selector) @s))")
+    assert [hit.text for hit in ids] == ["#beta"]
+    spans = [
+        (hit.start_line, hit.start_column, hit.end_line, hit.end_column, ".omega")
+        for hit in classes
+    ]
+    assert session.splice(name, spans) == 1
+    assert ".omega {" in session.read(name)
+
+
+def test_fish_function_name(session):
+    name, text = sample_text("fish")
+    session.write(name, text)
+    names = query(session, name, "(function_definition name: (word) @n)")
+    assert [hit.text for hit in names] == ["alpha"]
+
+
+def test_zsh_function_name(session):
+    name, text = sample_text("zsh")
+    session.write(name, text)
+    names = query(session, name, "(function_definition name: (word) @n)")
+    assert [hit.text for hit in names] == ["alpha"]
+
+
 def test_predicate_filters_hits(session):
     name, text = sample_text("nix")
     session.write(name, text)

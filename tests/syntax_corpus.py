@@ -113,4 +113,25 @@ LANGUAGES = [
         "<h1>\n",
         set(),
     ),
+    (
+        "css",
+        ".css",
+        ".alpha {\n  color: red;\n}\n\n#beta {\n  margin: 0;\n}\n",
+        ".broken { color: \n",
+        {".alpha", "#beta"},
+    ),
+    (
+        "fish",
+        ".fish",
+        "function alpha\n    echo hi\nend\n",
+        "function broken(\n",
+        {"alpha"},
+    ),
+    (
+        "zsh",
+        ".zsh",
+        "alpha() {\n  echo hi\n}\n",
+        "if true; then\n",
+        {"alpha"},
+    ),
 ]
