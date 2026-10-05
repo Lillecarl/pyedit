@@ -15,7 +15,6 @@ unchanged line between those two regions, because git merges two
 changes only when one separates them.
 """
 
-import binascii
 import builtins
 import os
 import shutil
@@ -25,12 +24,12 @@ from pathlib import Path
 import pytest
 from hypothesis import settings
 from hypothesis import strategies as st
-from hypothesis.stateful import RuleBasedStateMachine, invariant, initialize, rule
+from hypothesis.stateful import RuleBasedStateMachine, initialize, invariant, rule
 
 import pyedit
 from pyedit import vfs as vfs_module
-from pyedit.merge import Collision, VFS
-from pyedit.session import EditSession, Symlink
+from pyedit.merge import VFS, Collision
+from pyedit.session import EditSession, Symlink, _disk_is_link, _disk_readlink
 
 FILES = ["a.txt", "b.txt", "dir/c.txt"]
 BIN = "img.bin"
@@ -134,7 +133,15 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
         # makes a path's existence agree on both sides, so reads
         # raise or agree per path
         staged = self.session.staged()
-        staged_names = {str(p.relative_to(self.a_root)) for p in staged}
+        staged_names = set()
+        for path in staged:
+            try:
+                staged_names.add(str(path.relative_to(self.a_root)))
+            except ValueError:
+                # the process-global patch stages everything the
+                # process writes, framework bookkeeping included;
+                # every_rel() skips the same out-of-tree paths
+                continue
         for rel in self.every_rel():
             if isinstance(staged.get(self.session.canon(rel)), Symlink):
                 # a staged link cannot be followed; the apply
@@ -317,8 +324,11 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
         for path, content in self.session.staged().items():
             base = None
             try:
-                if self._raw["islink"](path):
-                    base = self._raw["readlink"](path).encode()
+                # lstat semantics: a link's base is its target, even
+                # dangling; open() would follow it to the target's
+                # bytes or raise, both wrong answers here
+                if _disk_is_link(path):
+                    base = _disk_readlink(path).encode()
                 else:
                     with self._raw["open"](path, "rb") as fh:
                         base = fh.read()
@@ -398,11 +408,14 @@ class ScopeMachine(RuleBasedStateMachine):
         # reimplementing it, so the machine drives the deterministic
         # merge and test_merge.py pins the pairing instead.
         self.session = EditSession(root=self.root, find_renames=False)
+        # captured before the patch: the diff invariant needs real
+        # disk truth for out-of-tree entries the patch staged
+        self._raw_open = builtins.open
         self.restore = vfs_module.install(self.session)
         # scope rules operate through the router: a scope only
         # receives what pyedit.* routes, never direct method calls
         self._prior_session = pyedit.__dict__.get("session")
-        setattr(pyedit, "session", self.session)
+        pyedit.session = self.session
 
     def view(self, rel):
         if rel in self.overlay:
@@ -567,7 +580,12 @@ class ScopeMachine(RuleBasedStateMachine):
     @invariant()
     def staged_matches_model(self):
         expect = {self.root / rel: content for rel, content in self.overlay.items()}
-        assert self.session.staged() == expect
+        staged = {
+            path: content
+            for path, content in self.session.staged().items()
+            if path.is_relative_to(self.root)
+        }
+        assert staged == expect
 
     @invariant()
     def reads_match_model(self):
@@ -588,6 +606,26 @@ class ScopeMachine(RuleBasedStateMachine):
             rel in self.overlay and self.overlay[rel] != self.disk.get(rel)
             for rel in self.known
         )
+        if not changed:
+            # out-of-tree entries the patch staged (framework
+            # bookkeeping) render in the diff when they differ
+            # from real disk, which the model never tracks
+            for path, content in self.session.staged().items():
+                if path.is_relative_to(self.root):
+                    continue
+                if isinstance(content, str):
+                    content = content.encode()
+                try:
+                    if _disk_is_link(path):
+                        base = _disk_readlink(path).encode()
+                    else:
+                        with self._raw_open(path, "rb") as fh:
+                            base = fh.read()
+                except OSError:
+                    base = None
+                if content != base:
+                    changed = True
+                    break
         assert bool(self.session.diff_git().strip()) == changed
 
     def teardown(self):
@@ -595,7 +633,7 @@ class ScopeMachine(RuleBasedStateMachine):
         if self._prior_session is None:
             pyedit.__dict__.pop("session", None)
         else:
-            setattr(pyedit, "session", self._prior_session)
+            pyedit.session = self._prior_session
 
 
 ScopeMachine.TestCase.settings = settings(

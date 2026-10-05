@@ -495,7 +495,9 @@ class EditSession:
 
     def delete(self, path: str | Path) -> None:
         p = self.canon(path)
-        if p not in self._staged and not _disk_is_file(p):
+        # _disk_is_file follows links, so a dangling link needs its
+        # own check or deleting one raises FileNotFoundError
+        if p not in self._staged and not _disk_is_file(p) and not _disk_is_link(p):
             raise FileNotFoundError(f"no such file: {p}")
         self._stage(p, None)
 
@@ -746,8 +748,9 @@ class EditSession:
     def prune_unchanged(self) -> None:
         for path, content in list(self._staged.items()):
             if content is None:
-                # a deletion of an already-absent file is not pending
-                if not _disk_is_file(path):
+                # a deletion of an already-absent file is not pending;
+                # links need the lstat check, is_file follows them
+                if not _disk_is_file(path) and not _disk_is_link(path):
                     del self._staged[path]
                 continue
             if isinstance(content, Symlink):

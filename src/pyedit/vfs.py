@@ -507,12 +507,10 @@ def install(session: EditSession) -> Callable[[], None]:
             p = resolve(path)
             if p.is_dir():
                 for child in p.rglob("*"):
-                    print(
-                        f"rmtree sees {child} is_file={child.is_file()} "
-                        f"islink={child.is_symlink()}",
-                        flush=True,
-                    )
-                    if child.is_file():
+                    # links are never dirs to descend into: a dangling
+                    # link is not is_file, so it needs its own check
+                    # or rmtree leaves it behind on disk
+                    if child.is_symlink() or not child.is_dir():
                         current().delete(child)
             elif p.is_file():
                 raise NotADirectoryError(str(p))
