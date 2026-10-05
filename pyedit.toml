@@ -8,7 +8,7 @@
 # the request range -- a cursor, in practice -- so file-wide only
 # its range-blind fixes fire (unused-import removal). Its fixAll
 # kind covers redundant casts only.
-exclude = ["src/pyedit/vendor/**"]
+exclude = ["src/pyedit/vendor/**", "src/pyedit/corpus/**"]
 
 [lsp.ruff]
 command = ["ruff", "server"]

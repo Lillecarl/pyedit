@@ -15,8 +15,12 @@ import os
 import re
 import stat
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pyedit.gitignore import IgnoreFilter
+
+if TYPE_CHECKING:
+    from pyedit import syntax
 
 _MISSING = object()
 
@@ -24,6 +28,7 @@ _MISSING = object()
 class Symlink(str):
     """A symlink entry in the staged map; the value is the target
     path, stored and diffed like git stores a link's blob."""
+
 
 _GLOB_CACHE: dict[str, re.Pattern] = {}
 
@@ -649,6 +654,18 @@ class EditSession:
         from pyedit import syntax
 
         return syntax.problems(self, path)
+
+    def query(self, path: str | Path, pattern: str) -> list["syntax.QueryHit"]:
+        """S-expression query hits over staged content, splice-ready."""
+        from pyedit import syntax
+
+        return syntax.query(self, path, pattern)
+
+    def kinds(self, path: str | Path) -> dict[str, list[str]]:
+        """Named node kinds and field names for the file's grammar."""
+        from pyedit import syntax
+
+        return syntax.kinds(self, path)
 
     # --- engine ---
 

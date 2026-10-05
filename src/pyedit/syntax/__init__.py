@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import importlib
 import warnings
+from dataclasses import dataclass
 from pathlib import Path
 
 from pyedit.diff import display_path
@@ -20,37 +21,56 @@ from pyedit.syntax.rules import RULES, rules_for
 
 __all__ = [
     "NodeInfo",
+    "QueryHit",
     "SyntaxProblem",
+    "kinds",
     "known_language",
     "node_at",
     "outline",
     "problems",
+    "query",
     "render",
 ]
 
 _parsers: dict[str, object | None] = {}
+_languages: dict[str, object | None] = {}
+
+
+def _language_for(suffix: str):
+    """The tree-sitter Language for a suffix, or None when unavailable."""
+    if suffix in _languages:
+        return _languages[suffix]
+    rules = rules_for(suffix)
+    if rules is None:
+        _languages[suffix] = None
+        return None
+    try:
+        module = importlib.import_module(rules.grammar)
+        from tree_sitter import Language
+
+        with warnings.catch_warnings():
+            # the generated bindings hand back an int pointer; Language(int)
+            # is deprecated against the capsule API but works
+            warnings.simplefilter("ignore", DeprecationWarning)
+            language = Language(module.language())
+    except ImportError:
+        _languages[suffix] = None
+        return None
+    _languages[suffix] = language
+    return language
 
 
 def _parser_for(suffix: str):
     """The parser for a suffix, or None when no grammar is available."""
     if suffix in _parsers:
         return _parsers[suffix]
-    rules = rules_for(suffix)
-    if rules is None:
+    language = _language_for(suffix)
+    if language is None:
         _parsers[suffix] = None
         return None
-    try:
-        module = importlib.import_module(rules.grammar)
-        from tree_sitter import Language, Parser
+    from tree_sitter import Parser
 
-        with warnings.catch_warnings():
-            # the generated bindings hand back an int pointer; Language(int)
-            # is deprecated against the capsule API but works
-            warnings.simplefilter("ignore", DeprecationWarning)
-            parser = Parser(Language(module.language()))
-    except ImportError:
-        _parsers[suffix] = None
-        return None
+    parser = Parser(language)
     _parsers[suffix] = parser
     return parser
 
@@ -268,3 +288,91 @@ def problems(session, path: str | Path) -> list[SyntaxProblem]:
     if _parser_for(suffix) is not None:
         tree = _parser_for(suffix).parse(content.encode("utf-8"))
     return rules.problems(content, tree)
+
+
+@dataclass
+class QueryHit:
+    capture: str
+    kind: str
+    text: str
+    # splice-ready: 1-based lines, 0-based utf-8 BYTE columns
+    start_line: int
+    start_column: int
+    end_line: int
+    end_column: int
+    pattern_index: int = 0
+
+
+def query(session, path: str | Path, pattern: str) -> list[QueryHit]:
+    """S-expression query hits over staged content, ordered by position.
+
+    Columns are byte offsets, so spans feed splice() directly.
+    A bad pattern raises tree_sitter.QueryError naming row and column.
+    """
+    from tree_sitter import Query, QueryCursor
+
+    suffix = Path(path).suffix
+    language = _language_for(suffix)
+    if rules_for(suffix) is None or language is None:
+        raise _no_grammar(suffix)
+    text = _read_text(session, path)
+    tree = _parser_for(suffix).parse(text.encode("utf-8"))
+    hits = []
+    for index, captures in QueryCursor(Query(language, pattern)).matches(
+        tree.root_node
+    ):
+        for name, nodes in captures.items():
+            for node in nodes:
+                (start_row, start_byte), (end_row, end_byte) = (
+                    node.start_point,
+                    node.end_point,
+                )
+                hits.append(
+                    QueryHit(
+                        capture=name,
+                        kind=node.type,
+                        text=node.text.decode("utf-8", errors="replace"),
+                        start_line=start_row + 1,
+                        start_column=start_byte,
+                        end_line=end_row + 1,
+                        end_column=end_byte,
+                        pattern_index=index,
+                    )
+                )
+    hits.sort(
+        key=lambda hit: (
+            hit.start_line,
+            hit.start_column,
+            hit.end_line,
+            hit.end_column,
+        )
+    )
+    return hits
+
+
+def kinds(session, path: str | Path) -> dict[str, list[str]]:
+    """Named node kinds and field names for the file's grammar.
+
+    The query vocabulary without reading grammar sources: kinds lists
+    what a query can match, fields what it can constrain by name.
+    """
+    suffix = Path(path).suffix
+    language = _language_for(suffix)
+    if rules_for(suffix) is None or language is None:
+        raise _no_grammar(suffix)
+    return {
+        "kinds": sorted(
+            {
+                language.node_kind_for_id(i)
+                for i in range(language.node_kind_count)
+                if language.node_kind_for_id(i) and language.node_kind_is_named(i)
+            }
+        ),
+        "fields": sorted(
+            {
+                language.field_name_for_id(i)
+                for i in range(1, language.field_count + 1)
+                if language.field_name_for_id(i)
+            }
+        ),
+    }

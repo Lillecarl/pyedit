@@ -33,7 +33,7 @@ from pathlib import Path
 FRONTMATTER = """\
 ---
 name: pyedit
-description: Scripted multi-file edits with dry-run diffs. Use it for an edit the plain file tools handle badly - several files at once, one file in many places, a rename across a tree - and to stage a patch somebody else wrote (an OpenAI V4A envelope or a unified diff). Also gives tree-sitter outlines and syntax checks, and import-aware renames through rope or a language server.
+description: Scripted multi-file edits with dry-run diffs. Use it for an edit the plain file tools handle badly - several files at once, one file in many places, a rename across a tree - and to stage a patch somebody else wrote (an OpenAI V4A envelope or a unified diff). Also gives tree-sitter outlines, queries, syntax checks, and import-aware renames through rope or a language server.
 ---
 
 """
@@ -223,6 +223,10 @@ directory).
     pyedit.references(path, name,    every occurrence of the symbol, by
                 line=None,           name or at a position; lines are
                 column=None)         1-based
+    pyedit.query(path, pattern)      S-expr hits (capture, kind, text,
+                                     span); spans feed splice(); bad patterns
+                                     raise QueryError naming row/col
+    pyedit.kinds(path)               node kinds + fields per grammar
     pyedit.splice(path, spans)       many position splices in one pass;
                                      (start_line, start_col, end_line,
                                      end_col, replacement), lines
@@ -376,6 +380,10 @@ record, and the write stays revertible.
 `node_at`, `outline` and `check` (above) run on staged content.
 Verify a target with `node_at` before a range-limited `edit`; use
 `outline` to find definitions in a file too big for context.
+`kinds` lists queryable nodes; `query` hits feed `splice`:
+
+    hits = pyedit.query("cfg.nix", '(binding (integer_expression) @v)')
+    pyedit.splice("cfg.nix", [(h.start_line, h.start_column, h.end_line, h.end_column, "9") for h in hits])
 
 Languages: Python, JavaScript, TypeScript, TSX, Go, Rust, C, C++,
 Bash, JSON, YAML, TOML, Nix, Ruby, Java, Lua, Zig.
