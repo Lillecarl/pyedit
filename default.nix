@@ -1,7 +1,10 @@
 {
   pkgs ? import <nixpkgs> { },
-  # Present means `pyedit -r` works; absent (the default) means the
-  # flag refuses loudly. There is no runtime switch by design.
+  # A pyjj build means `pyedit -r` works; null (the standalone
+  # default) leaves it out and the flag refuses loudly. There is no
+  # runtime switch by design, and no nixpkgs pyjj exists, so a null
+  # here is honest: distributors pass their own build, or null to
+  # exclude it deliberately.
   pyjj ? null,
 }:
 let

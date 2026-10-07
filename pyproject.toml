@@ -44,6 +44,12 @@ dependencies = [
   "tree-sitter-svelte",
 ]
 
+[project.optional-dependencies]
+# -r needs pyjj; soft at runtime (import in try/except), opt-in here.
+# No nixpkgs or PyPI pyjj exists, so installers take it from whoever
+# carries the package: nix closures through the `pyjj` argument.
+jj = ["pyjj>=0.45"]
+
 [project.scripts]
 pyedit = "pyedit.cli:main"
 

@@ -112,6 +112,10 @@ let
       # with the same generator: callPackage
       # ../development/python-modules/tree-sitter-grammars { inherit
       # name grammarDrv; } against pkgs.tree-sitter-grammars
+      #
+      # pyjj rides below, not here: no nixpkgs pyjj exists, so the
+      # distributor passes its own build through the `pyjj` argument
+      # (null excludes it and -r refuses loudly instead)
       "tree-sitter-python"
       "tree-sitter-javascript"
       "tree-sitter-typescript"
