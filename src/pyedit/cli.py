@@ -359,7 +359,7 @@ def main(argv: list[str] | None = None) -> int:
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(result.diff)
 
-    if not result.files and not result.meta:
+    if not result.files and not result.meta and not result.history:
         print("pyedit: no changes", file=sys.stderr)
     elif result.op is not None:
         print(
@@ -396,6 +396,22 @@ def main(argv: list[str] | None = None) -> int:
     # unless --force, in which case the problems are on record anyway
     for key, (old, new) in result.meta.items():
         print(f"pyedit: {key}: {old!r} -> {new!r}", file=sys.stderr)
+    for entry in result.history:
+        print(
+            f"pyedit: committed {entry['id'][:12]} {entry['subject']!r} "
+            f"(op {entry['op']}; restore with: pyjj op restore {entry['op']})",
+            file=sys.stderr,
+        )
+        if entry["cleanup_op"] is not None:
+            print(
+                f"pyedit: working-copy cleanup (op {entry['cleanup_op']})",
+                file=sys.stderr,
+            )
+        for conflict in entry["conflicts"]:
+            print(
+                f"pyedit: conflict in {conflict}; resolve it there",
+                file=sys.stderr,
+            )
     if args.apply and result.problems and args.force:
         print("pyedit: applying with syntax problems (--force)", file=sys.stderr)
     if result.refused:

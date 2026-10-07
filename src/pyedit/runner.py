@@ -55,6 +55,9 @@ class Result:
     # staged commit metadata as key -> (old, new): description
     # and/or author on -r runs, empty otherwise
     meta: dict[str, tuple[str | None, str | None]] = field(default_factory=dict)
+    # commits a scope wrote past the session (pyedit.commit):
+    # id, subject, op, cleanup op and conflicts per commit
+    history: list[dict] = field(default_factory=list)
 
 
 class MetaWithoutTarget(Exception):
@@ -232,6 +235,7 @@ def finish(
         actions=actions,
         applied=applied,
         refused=refused,
+        history=session.history,
     )
 
 

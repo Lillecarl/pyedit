@@ -18,7 +18,8 @@ Per-commit `annotate`, diff, revsets and op log are readable today.
    (the binary-file rule). Builds toward 2 and 3. [DONE]
 2. **One scope per commit: `with pyedit.commit("msg")`.** A scope
    becomes a child commit on clean exit, abandoned on error.
-   Plan-shaped history with discard-on-error as the net.
+   Plan-shaped history with discard-on-error as the net. Shipped
+   as insert-after-REV with automatic reparenting. [DONE]
 3. **`-r` over a revset.** Same script against every commit in a
    revset: export, edit, amend, sequentially; stop loud on first
    conflict with the op id to restore.

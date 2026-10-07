@@ -1,7 +1,8 @@
 import pytest
 
 import pyedit
-from pyedit import VFS, Collision
+from pyedit import VFS, Collision, jjrev
+from pyedit.jjrev import JjRevError
 from pyedit.session import EditSession
 
 
@@ -259,6 +260,117 @@ def test_scopes_continue_after_a_collision(root):
     assert root.staged_content(root.canon("src/b.py")) == "gamma = 30\n"
 
 
+def _commit_fakes(monkeypatch, create):
+    monkeypatch.setattr(jjrev, "find_repo_root", lambda start: start)
+    monkeypatch.setattr(jjrev, "resolve_ids", lambda root, rev: ("aaa", "bbb"))
+
+    def fake_export(repo_root, rev, dest):
+        assert rev == "aaa"
+        (dest / "a.py").write_bytes(b"old\n")
+        return ["a.py"]
+
+    monkeypatch.setattr(jjrev, "export_tree", fake_export)
+    monkeypatch.setattr(jjrev, "create_after", create)
+
+
+def test_commit_scope_records_history_not_parent(root, project, tmp_path, monkeypatch):
+    from pyedit import runner
+
+    created = {}
+
+    def fake_create(repo_root, rev, message, changes):
+        created.update(message=message, changes=changes)
+        return ("newhex123456", "op1", None, [])
+
+    _commit_fakes(monkeypatch, fake_create)
+    with pyedit.commit("inserted subject", after="B"):
+        pyedit.write("a.py", "new\n")
+    assert root.staged() == {}
+    assert created == {"message": "inserted subject", "changes": {"a.py": "new\n"}}
+    assert root.history == [
+        {
+            "id": "newhex123456",
+            "subject": "inserted subject",
+            "op": "op1",
+            "cleanup_op": None,
+            "conflicts": [],
+        }
+    ]
+    result = runner.finish(root, runner.Options())
+    assert result.history == root.history
+
+
+def test_commit_scope_empty_refuses(root, project, tmp_path, monkeypatch):
+    def fake_create(repo_root, rev, message, changes):
+        if not changes:
+            raise JjRevError("nothing to commit: the scope staged no changes")
+        raise AssertionError("create_after ran with no changes")
+
+    _commit_fakes(monkeypatch, fake_create)
+    with pytest.raises(JjRevError, match="nothing to commit"):
+        with pyedit.commit("empty", after="B"):
+            pass
+    assert root.history == []
+
+
+def test_commit_scope_meta_refuses(root, project, tmp_path, monkeypatch):
+    def no_create(*args, **kwargs):
+        raise AssertionError("create_after called with staged meta")
+
+    _commit_fakes(monkeypatch, no_create)
+    with pytest.raises(JjRevError, match="pyedit.commit"):
+        with pyedit.commit("m", after="B"):
+            pyedit.describe("smuggled")
+    assert root.history == []
+
+
+def test_nested_commit_scopes_record_in_order(root, project, tmp_path, monkeypatch):
+    def fake_create(repo_root, rev, message, changes):
+        return (f"{message}-id", "op", None, [])
+
+    _commit_fakes(monkeypatch, fake_create)
+    with pyedit.commit("outer", after="B"):
+        pyedit.write("a.py", "1\n")
+        with pyedit.commit("inner", after="B"):
+            pyedit.write("b.py", "2\n")
+    assert [record["subject"] for record in root.history] == ["inner", "outer"]
+
+
+def test_commit_scope_machinery_bypasses_the_overlay(
+    root, project, tmp_path, monkeypatch
+):
+    # filesystem work the scope does itself (export, scratch
+    # cleanup) must reach disk: under an installed overlay every
+    # patched call routes into a session, so without the bypass the
+    # parent ends up staging the scratch dir
+    from pyedit import vfs
+
+    def fake_create(repo_root, rev, message, changes):
+        return ("newhex123456", "op1", None, [])
+
+    _commit_fakes(monkeypatch, fake_create)
+    restore = vfs.install(root)
+    try:
+        with pyedit.commit("m", after="B"):
+            pyedit.write("a.py", "new\n")
+    finally:
+        restore()
+    assert root.staged() == {}
+
+
+def test_commit_scope_inside_vfs_survives_merge(root, project, tmp_path, monkeypatch):
+    def fake_create(repo_root, rev, message, changes):
+        return (f"{message}-id", "op", None, [])
+
+    _commit_fakes(monkeypatch, fake_create)
+    with VFS():
+        pyedit.write("v.py", "v\n")
+        with pyedit.commit("inner", after="B"):
+            pyedit.write("c.py", "c\n")
+    assert set(root.staged()) == {project / "v.py"}
+    assert [record["subject"] for record in root.history] == ["inner"]
+
+
 def test_scope_meta_merges_when_disjoint(root):
     with VFS():
         pyedit.describe("A fine subject")
@@ -281,9 +393,8 @@ def test_same_meta_value_is_idempotent(root):
 def test_divergent_meta_collides(root):
     with VFS():
         pyedit.describe("first")
-    with pytest.raises(Collision, match="description: set by two scopes"):
-        with VFS():
-            pyedit.describe("second")
+    with pytest.raises(Collision, match="description: set by two scopes"), VFS():
+        pyedit.describe("second")
     assert root.meta == {"description": "first"}
 
 

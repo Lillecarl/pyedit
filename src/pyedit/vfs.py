@@ -15,6 +15,7 @@ import os
 import shutil
 import stat
 from collections.abc import Callable
+from contextlib import contextmanager
 from pathlib import Path
 
 from pyedit.session import (
@@ -24,6 +25,11 @@ from pyedit.session import (
     _content_size,
     glob_re,
 )
+
+# The live patch table: (owner, name, original, replacement) while a
+# script run holds the overlay, empty otherwise.
+_overlaid: list = []
+_suspended_depth = 0
 
 
 class _StagedTextIO(io.StringIO):
@@ -569,9 +575,42 @@ def install(session: EditSession) -> Callable[[], None]:
     originals = [(owner, name, getattr(owner, name)) for owner, name, _ in patches]
     for owner, name, replacement in patches:
         setattr(owner, name, replacement)
+    global _overlaid
+    _overlaid = [
+        (owner, name, original, replacement)
+        for (owner, name, original), (_, _, replacement) in zip(originals, patches)
+    ]
 
     def restore() -> None:
+        global _overlaid
         for owner, name, original in originals:
             setattr(owner, name, original)
+        _overlaid = []
 
     return restore
+
+
+@contextmanager
+def suspended():
+    """Real filesystem calls inside a script run.
+
+    Everything the overlay patches routes into the active session,
+    which is what scripts want and what machinery must escape: the
+    commit scope materializes its base tree, lends working-copy
+    files to jj transactions and removes its scratch dir, all of
+    which have to reach disk. Without an overlay installed this is
+    a no-op, so library and test callers pay nothing.
+    """
+    global _suspended_depth
+    if not _overlaid or _suspended_depth:
+        yield
+        return
+    _suspended_depth += 1
+    for owner, name, original, _replacement in _overlaid:
+        setattr(owner, name, original)
+    try:
+        yield
+    finally:
+        for owner, name, _original, replacement in _overlaid:
+            setattr(owner, name, replacement)
+        _suspended_depth -= 1

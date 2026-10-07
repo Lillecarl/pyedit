@@ -615,3 +615,30 @@ def test_skill_writes_file(project, capsys):
     assert content.startswith("---\nname: pyedit\n")
     assert "## Source" in content
     assert str(Path(pyedit.skill.__file__).resolve().parent) in content
+
+
+def test_apply_with_commit_scope_reports_the_commit(
+    project, script, capsys, monkeypatch
+):
+    from pyedit import jjrev
+
+    monkeypatch.setattr(jjrev, "find_repo_root", lambda start: project)
+    monkeypatch.setattr(jjrev, "resolve_ids", lambda root, rev: ("aaa", "bbb"))
+
+    def fake_export(repo_root, rev, dest):
+        (dest / "a.py").write_bytes(b"old\n")
+        return ["a.py"]
+
+    monkeypatch.setattr(jjrev, "export_tree", fake_export)
+    monkeypatch.setattr(
+        jjrev,
+        "create_after",
+        lambda repo_root, rev, message, changes: ("newhex1234567890", "op1", None, []),
+    )
+    script.write_text(
+        'with pyedit.commit("made", after="B"):\n    pyedit.write("a.py", "new\\n")\n'
+    )
+    assert run(project, "--apply", script=script) == 0
+    err = capsys.readouterr().err
+    assert "pyedit: committed newhex123456 'made'" in err
+    assert "pyedit: no changes" not in err

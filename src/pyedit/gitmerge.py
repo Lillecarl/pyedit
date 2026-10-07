@@ -59,6 +59,7 @@ def merge(parent, child) -> None:
     theirs = child.staged()
     ours = parent.staged()
     _merge_meta(parent, child)
+    _merge_history(parent, child)
     paths = sorted(set(theirs) | set(ours))
     if not paths:
         return
@@ -124,6 +125,12 @@ def _merge_meta(parent, child) -> None:
     for key, value in theirs.items():
         if key not in ours:
             parent._meta[key] = value
+
+
+def _merge_history(parent, child) -> None:
+    """Commits the scope wrote stay on record: history is facts
+    about the oplog, so scopes never collide on it, they append."""
+    parent._history.extend(child.history)
 
 
 def _conflict(repo: MemoryRepo, back: dict, triple) -> str:

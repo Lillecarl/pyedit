@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pyedit.fdin import read_fd
 from pyedit.lsp_client import LspSession
-from pyedit.merge import VFS, Collision
+from pyedit.merge import VFS, Collision, commit
 from pyedit.session import Symlink
 
 # hatchling writes the pyproject version into the installed metadata;
@@ -22,6 +22,7 @@ __all__ = [
     "apply_diff_git",
     "apply_diff_unidiff",
     "apply_v4a",
+    "commit",
     "lsp",
     "read_fd",
 ]

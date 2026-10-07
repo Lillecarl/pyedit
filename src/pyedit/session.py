@@ -223,6 +223,10 @@ class EditSession:
         # describe()/author(), applied by the revision amend; anything
         # else finishes loud instead of dropping it silently
         self._meta: dict[str, str] = {}
+        # history written past the session: commit scopes append
+        # their record here (and VFS merges carry it up); facts about
+        # the oplog, so checkpoints never roll them back
+        self._history: list[dict] = []
         self._bytes_used = 0
         self._files_used = 0
 
@@ -704,6 +708,12 @@ class EditSession:
         """Staged commit metadata: description and/or author for the
         -r target. Tree-only runs never set it."""
         return dict(self._meta)
+
+    @property
+    def history(self) -> list[dict]:
+        """Commits a scope wrote past this session: one record per
+        commit with its id, subject, op, cleanup op and conflicts."""
+        return list(self._history)
 
     def describe(self, message: str) -> None:
         """Stage a new description for the -r revision's commit.

@@ -84,7 +84,7 @@ one-line notes. Replay it by id, never by piping the text back.
 
 `pyedit mcp` serves one stdio tool, `run`: the same runner, no
 shell, so `script` arrives byte-exact as JSON. Tool descriptions
-stay minimal; this document describes the calls.
+stay minimal.
 
 | CLI | MCP `run` |
 |---|---|
@@ -326,6 +326,10 @@ Scopes nest.
     with pyedit.VFS():
         pyedit.edit("src/app.py", "VERSION = 1", "VERSION = 2")
 
+`pyedit.commit(msg, after=REV)`: scope becomes a commit after
+REV (default `@-`); children reparent, parent keeps the record,
+empty refuses.
+
 **Two scopes must not edit neighbouring lines.** git merges two
 changed regions only when at least one unchanged line separates them.
 Put such edits in ONE scope, where they run in order on the staged
@@ -395,8 +399,7 @@ Mechanical pattern rewrite:
 
     pyedit.edit_re("src/app.py", r"variables\\[\\"(\\w+)\\"\\]", r"args.\\1")
 
-Structural rewrite with ast + splice -- parse staged text, compute
-spans from nodes, replace in one call:
+Structural rewrite with ast + splice:
 
     import ast
     text = pyedit.read("src/app.py")

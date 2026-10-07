@@ -169,7 +169,10 @@ def _conflict_names(repo) -> list[str]:
 
 
 def amend_commit(
-    repo_root: Path, rev: str, changes: dict[str, object], meta: dict[str, str] | None = None
+    repo_root: Path,
+    rev: str,
+    changes: dict[str, object],
+    meta: dict[str, str] | None = None,
 ) -> tuple[str, str, str | None, list[str]]:
     """Rewrite REV with new contents; return (new id, op, cleanup, conflicts).
 
@@ -204,39 +207,17 @@ def amend_commit(
         repo = pyjj.open(str(repo_root))
         target = repo.resolve(rev)
         at = repo.resolve("@")
-        at_files = set(at.list_files(None))
         target_files = set(target.list_files(None))
     except JjRevError:
         raise
     except Exception as err:
         raise JjRevError(f"cannot resolve {rev!r}: {err}") from err
 
-    saved: dict[str, tuple] = {}
-    dirty: list[str] = []
+    saved = _check_clean(repo_root, at, changes)
     for rel, new in changes.items():
-        old = _wc_state(repo_root / rel)
-        if rel in at_files:
-            try:
-                want = _tree_state(at, rel)
-            except JjRevError:
-                dirty.append(f"{rel} (unreadable in @)")
-                continue
-            if (old[0], old[1]) != (want[0], want[1]):
-                dirty.append(rel)
-                continue
-        elif old[0] != "absent":
-            dirty.append(rel)
-            continue
-        refusal = _refuse_flip(target_files, target, rel, old, new)
+        refusal = _refuse_flip(target_files, target, rel, saved[rel], new)
         if refusal is not None:
             raise JjRevError(refusal)
-        saved[rel] = old
-    if dirty:
-        raise JjRevError(
-            "working copy has uncommitted changes in "
-            + ", ".join(sorted(dirty))
-            + "; commit or shelve them first, nothing was written"
-        )
 
     wc_hex = _hex(at)
     if wc_hex == _hex(target):
@@ -256,18 +237,159 @@ def amend_commit(
         op = repo.operation_id
     except Exception as err:
         raise JjRevError(f"amending {rev!r} failed: {err}") from err
+    cleanup = _reconcile_wc(repo_root, repo, rev, op, wc_hex, saved, changes)
+    return _hex(written), op, cleanup, _conflict_names(repo)
+
+
+def create_after(
+    repo_root: Path, rev: str, message: str, changes: dict[str, object]
+) -> tuple[str, str, str | None, list[str]]:
+    """A new commit after REV carrying `changes`; return (id, op, cleanup,
+    conflicts). REV's children reparent onto it, so the stack keeps its
+    shape with the new commit in the middle.
+
+    The tree starts as REV's whole tree with the staged values over
+    it, exact bytes through the same vehicle the amend uses (the
+    working copy lends its files to the entry snapshot, then goes
+    back to what it held). An empty scope refuses: a commit that
+    carries no edit is a `jj new` the caller should ask for plainly.
+    A conflicted REV refuses first: whole-tree copies carry markers
+    nowhere. Rewriting a public child to reparent it refuses through
+    jj's own guard.
+    """
+    require_pyjj()
+    if not isinstance(message, str):
+        raise JjRevError(f"commit message needs str, got {type(message).__name__}")
+    if not changes:
+        raise JjRevError("nothing to commit: the scope staged no changes")
+    try:
+        repo = pyjj.open(str(repo_root))
+        base = repo.resolve(rev)
+        at = repo.resolve("@")
+    except JjRevError:
+        raise
+    except Exception as err:
+        raise JjRevError(f"cannot resolve {rev!r}: {err}") from err
+    if base.has_conflict:
+        raise JjRevError(
+            f"{rev} carries conflicts; resolve them there before "
+            "committing on top of it, nothing was written"
+        )
+    if _hex(base) == _hex(at):
+        raise JjRevError(
+            f"cannot commit after {rev}: it names the working-copy "
+            "commit itself, whose half-snapshotted state no insert "
+            "builds on; describe it and advance, or pick @-, nothing "
+            "was written"
+        )
+
+    saved = _check_clean(repo_root, at, changes)
+    for rel, new in changes.items():
+        _write_wc(repo_root, base, rel, new)
+    # The cleanup restores the working copy from the commit holding
+    # the pre-run content, which only the pre-snapshot id names: the
+    # snapshot below folds the vehicle into @ under a new id.
+    wc_hex = _hex(at)
+    # Fold the vehicle before resolving anything the block
+    # rewrites: the entry snapshot replaces @ when dirty, so
+    # pre-snapshot objects (notably @ itself as a child) would
+    # address a commit the block no longer holds. The block's own
+    # entry snapshot is then a clean no-op.
+    repo.snapshot()
+    try:
+        base = repo.resolve(rev)
+        at = repo.resolve("@")
+        kids = repo.revset(f"{_hex(base)}+")
+    except Exception as err:
+        raise JjRevError(f"cannot resolve {rev!r}: {err}") from err
+    base_hex = _hex(base)
+    # whether the surgery moves @ itself: its rebased content then
+    # carries the change through history, and no cleanup may lift
+    # it back out as leftover vehicle
+    reparented = _hex(at) in {kid.id.hex() for kid in kids}
+    try:
+        with repo.atomic(f"pyedit commit after {rev}", allow_conflicts=True) as tx:
+            new = tx.new([rev], message=message, edit=False)
+            new = tx.restore(None, into=new, from_revision=rev)
+            new = tx.restore(sorted(changes), into=new, from_revision="@")
+            _reparent(tx, repo, base_hex, new, kids)
+        op = repo.operation_id
+    except Exception as err:
+        raise JjRevError(f"committing after {rev!r} failed: {err}") from err
+    cleanup = _reconcile_wc(
+        repo_root, repo, rev, op, wc_hex, saved, changes, reparented
+    )
+    return _hex(new), op, cleanup, _conflict_names(repo)
+
+
+def _check_clean(repo_root: Path, at, changes: dict[str, object]) -> dict[str, tuple]:
+    """The working copy holds no uncommitted state on touched paths.
+
+    Returns what each path held, for the reconcile to put back. The
+    vehicle borrows these files, so anything else there refuses
+    naming the paths; nothing was written.
+    """
+    at_files = set(at.list_files(None))
+    saved: dict[str, tuple] = {}
+    dirty: list[str] = []
+    for rel in changes:
+        old = _wc_state(repo_root / rel)
+        if rel in at_files:
+            try:
+                want = _tree_state(at, rel)
+            except JjRevError:
+                dirty.append(f"{rel} (unreadable in @)")
+                continue
+            if (old[0], old[1]) != (want[0], want[1]):
+                dirty.append(rel)
+                continue
+        elif old[0] != "absent":
+            dirty.append(rel)
+            continue
+        saved[rel] = old
+    if dirty:
+        raise JjRevError(
+            "working copy has uncommitted changes in "
+            + ", ".join(sorted(dirty))
+            + "; commit or shelve them first, nothing was written"
+        )
+    return saved
+
+
+def _reconcile_wc(
+    repo_root: Path,
+    repo,
+    rev: str,
+    op: str,
+    wc_hex: str,
+    saved: dict[str, tuple],
+    changes: dict[str, object],
+    reparented: bool = False,
+) -> str | None:
+    """The working copy after the transaction; return the cleanup op.
+
+    The entry snapshot took the vehicle files into @ and the block
+    rebased it: when @ still holds the pre-run content the vehicle
+    files go back byte-identical; when it holds the staged bytes a
+    second transaction moves them back out; otherwise jj checked out
+    rebased descendants itself, and the files stay as checkout wrote
+    them, verified against the rebased commit. When the block
+    reparented @ itself the staged match means the rebase carried
+    the change, not leftover vehicle, so no cleanup lifts it out:
+    the files stay as checkout wrote them, verified.
+    """
     current = repo.resolve("@")
-    cleanup = None
     if _matches_saved(current, saved):
         _restore_wc(repo_root, saved)
         _verify_wc(repo_root, saved)
-    elif _matches_staged(current, changes):
+        return None
+    if _matches_staged(current, changes) and not reparented:
         # the rebased tip still holds the staged bytes: the entry
         # snapshot committed them there and the rebase kept them, so
         # move them back out, leaving the copy as found
         try:
             with repo.atomic(
-                f"pyedit -r {rev} (working-copy cleanup)",
+                f"pyedit working-copy cleanup after {rev}",
                 allow_conflicts=True,
             ) as tx:
                 tx.restore(sorted(changes), into="@", from_revision=wc_hex)
@@ -276,9 +398,36 @@ def amend_commit(
             raise JjRevError(f"cleaning up after {rev!r}: {err}") from err
         _restore_wc(repo_root, saved)
         _verify_wc(repo_root, saved)
-    else:
-        _verify_rebased(repo_root, current, saved, rev, op)
-    return _hex(written), op, cleanup, _conflict_names(repo)
+        return cleanup
+    _verify_rebased(repo_root, current, saved, rev, op)
+    return None
+
+
+def _reparent(tx, repo, base_hex: str, new, kids) -> None:
+    """Move REV's children onto the inserted commit, in the open block.
+
+    Each child keeps every parent but REV, which the new commit
+    replaces: merges stay merges. `new` is the restore's own return,
+    already the transaction's state, so no resolution can land on a
+    commit the block replaced. jj's own guard refuses public
+    children first; the exit's rebase carries the grandchildren.
+    """
+    if not kids:
+        return
+    raw = tx.transaction
+    raw.check_rewritable(repo.settings, [kid.id for kid in kids])
+    inner = getattr(repo, "_repo", None)
+    if inner is None:
+        raise JjRevError(
+            "pyjj no longer exposes the readonly repo; "
+            "reparenting needs a pyjj verb for it"
+        )
+    new_id = new.id
+    for kid in kids:
+        parents = [
+            new_id if parent.hex() == base_hex else parent for parent in kid.parent_ids
+        ]
+        raw.rewrite_commit(repo.settings, kid).set_parents(parents).write(inner)
 
 
 def target_meta(repo_root: Path, rev: str) -> dict[str, str]:
@@ -308,9 +457,7 @@ def retitle(repo_root: Path, rev: str, meta: dict[str, str]) -> str:
     require_pyjj()
     try:
         repo = require_pyjj().open(str(repo_root))
-        with repo.atomic(
-            f"pyedit -r {rev} (metadata)", allow_conflicts=True
-        ) as tx:
+        with repo.atomic(f"pyedit -r {rev} (metadata)", allow_conflicts=True) as tx:
             _apply_meta(repo, tx, repo.resolve(rev), meta)
         return repo.operation_id
     except Exception as err:
@@ -342,9 +489,9 @@ def _rewrite_author(repo, tx, commit, who: str):
             commit.author.timestamp.millis_since_epoch,
             commit.author.timestamp.tz_offset_minutes,
         )
-        builder = tx.transaction.rewrite_commit(
-            repo.settings, commit
-        ).set_author(module.Signature(name, email, stamp))
+        builder = tx.transaction.rewrite_commit(repo.settings, commit).set_author(
+            module.Signature(name, email, stamp)
+        )
         inner = getattr(repo, "_repo", None)
         if inner is None:
             raise JjRevError(

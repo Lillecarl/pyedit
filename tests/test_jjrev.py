@@ -118,6 +118,10 @@ class FakeBuilder:
         self.commit.author = sig
         return self
 
+    def set_parents(self, parents):
+        self.commit._parents = list(parents)
+        return self
+
     def write(self, _repo):
         return self.commit
 
@@ -134,12 +138,19 @@ class FakeRawTx:
         self.rewrites.append(commit.id.hex())
         return FakeBuilder(commit)
 
+    def check_rewritable(self, _settings, ids):
+        self.repo.checked.extend(commit_id.hex() for commit_id in ids)
+        blocked = self.repo.unrewritable & {commit_id.hex() for commit_id in ids}
+        if blocked:
+            raise FakeError(f"mirror: {sorted(blocked)} are immutable")
+
 
 class FakeTx:
     def __init__(self, repo):
         self.repo = repo
         self.restored = []
         self.described = []
+        self.news = []
         self.raw = FakeRawTx(repo)
 
     @property
@@ -154,14 +165,32 @@ class FakeTx:
         target.description = message
         return target
 
+    def new(self, parents, message=None, edit=True):
+        """An empty child commit, detached: the block's own restores
+        take its object directly, never a re-resolution."""
+        if isinstance(parents, str):
+            parents = [parents]
+        self.news.append((list(parents), message, edit))
+        child = FakeCommit(cid=f"new-{len(self.news)}", description=message or "")
+        # reachable the way a post-block resolution finds it
+        self.repo.by_cid[child.id.hex()] = child
+        return child
+
     def restore(self, paths, into="@", from_revision=None):
         if from_revision is None:
             raise FakeError("mirror: restore needs from_revision")
-        self.restored.append((list(paths or []), into, from_revision))
-        self.repo.last_paths = list(paths or [])
+        # None paths carry the whole source tree, the way the
+        # binding restores everything when paths is None; a commit
+        # object into records under its own id
+        recorded = into if isinstance(into, str) else into.id.hex()
+        self.restored.append(
+            (list(paths) if paths is not None else None, recorded, from_revision)
+        )
+        self.repo.last_paths = list(paths) if paths is not None else None
         source = self.repo.resolve(from_revision)
-        target = self.repo.resolve(into)
-        for rel in paths or []:
+        target = into if not isinstance(into, str) else self.repo.resolve(into)
+        names = paths if paths is not None else list(source._files)
+        for rel in names:
             if rel in source._files:
                 target._files[rel] = source._files[rel]
                 if rel in source._execs:
@@ -176,8 +205,8 @@ class FakeTx:
                 target._files.pop(rel, None)
                 target._execs.discard(rel)
                 target._links.discard(rel)
-        if into != "@":
-            # the amend rewrote history: jj rebases @ onto it, so
+        if recorded != "@":
+            # the block rewrote history: jj rebases @ onto it, so
             # later @ reads meet the rebased commit
             self.repo.moved = True
         # the rewritten commit itself: later rewrites in the same
@@ -222,6 +251,9 @@ class FakeRepo:
         # sentinels for the escape hatch (settings, readonly repo)
         self.settings = object()
         self._repo = object()
+        # ids the guard was asked about; hexes it must refuse
+        self.checked = []
+        self.unrewritable = set()
 
     @property
     def root(self):
@@ -239,20 +271,37 @@ class FakeRepo:
                 return commit
         raise FakeError(f"revision {rev!r} names nothing")
 
+    def revset(self, rev):
+        # children queries only ("HEX+"): the commits naming that
+        # hex among their parents, in repo order
+        if not rev.endswith("+"):
+            raise FakeError(f"mirror: revset models children queries, got {rev!r}")
+        base = rev[:-1]
+        return [
+            commit
+            for commit in self.commits.values()
+            if base in [parent.hex() for parent in commit.parent_ids]
+        ]
+
     def snapshot(self):
         """Fold the working-copy files into @, the way atomic entry
-        does; the replaced commit stays reachable by its id."""
+        does; the replaced commit stays reachable by its id. A clean
+        working copy rewrites nothing, the way the binding skips a
+        snapshot that would bump the id for no reason."""
         old = self.commits["@"]
-        self.by_cid[old.id.hex()] = old
         files = {}
         for path in Path(self._root).rglob("*"):
             if path.is_file() and not path.is_symlink():
                 files[path.relative_to(self._root).as_posix()] = path.read_bytes()
+        if files == old._files:
+            return
+        self.by_cid[old.id.hex()] = old
         self.commits["@"] = FakeCommit(
             files=files,
             cid=old.id.hex() + "-snap",
             description=old.description,
             author=old.author,
+            parents=old.parent_ids,
         )
 
     def conflicts(self):
@@ -668,3 +717,117 @@ def test_run_revision_dry_run_shows_meta_and_writes_nothing(tmp_path, monkeypatc
     assert result.applied is False and result.op is None
     assert result.meta == {"description": ("old", "new")}
     assert result.files == []
+
+
+# A below B below @, plus a merge M off B: the insert reparenting shape
+def _commit_stack(root, monkeypatch):
+    (root / "a.py").write_bytes(b"b1\n")
+    (root / "keep.py").write_bytes(b"keep\n")
+    (root / "b.py").write_bytes(b"b\n")
+    a = FakeCommit(files={"a.py": b"a1\n", "keep.py": b"keep\n"}, cid="aaaa")
+    b = FakeCommit(
+        files={"a.py": b"b1\n", "keep.py": b"keep\n", "b.py": b"b\n"},
+        cid="bbbb",
+        parents=[FakeId("aaaa")],
+        description="B subject",
+    )
+    at = FakeCommit(
+        files={"a.py": b"b1\n", "keep.py": b"keep\n", "b.py": b"b\n"},
+        cid="atat",
+        parents=[FakeId("bbbb")],
+    )
+    m = FakeCommit(
+        files={"a.py": b"b1\n", "m.py": b"m\n"},
+        cid="mmmm",
+        parents=[FakeId("bbbb"), FakeId("aaaa")],
+    )
+    repo = FakeRepo({"@": at, "B": b, "A": a, "M": m}, str(root))
+    monkeypatch.setattr(jjrev, "pyjj", fake_module(repo))
+    return repo
+
+
+def test_create_after_inserts_with_full_tree_and_reparents(tmp_path, monkeypatch):
+    # the new commit holds REV's whole tree with the staged values
+    # over it, and every child of REV moves onto it keeping its
+    # other parents: merges stay merges
+    repo = _commit_stack(tmp_path, monkeypatch)
+    new_hex, op, cleanup, conflicts = jjrev.create_after(
+        tmp_path, "B", "inserted", {"a.py": b"a2\n"}
+    )
+    assert new_hex == "new-1"
+    # no cleanup transaction: @ was reparented, so its staged bytes
+    # arrived through the rebase, not as leftover vehicle, and the
+    # files stay as checkout wrote them
+    assert (op, cleanup, conflicts) == ("op999", None, [])
+    assert len(repo.atomics) == 1
+    tx = repo.atomics[0].tx
+    assert tx.news == [(["B"], "inserted", False)]
+    assert tx.restored[0] == (None, "new-1", "B")
+    assert tx.restored[1] == (["a.py"], "new-1", "@")
+    # post-snapshot ids: the explicit snapshot folded the vehicle
+    # into @ before anything resolved the block's inputs
+    assert repo.checked == ["atat-snap", "mmmm"]
+    assert tx.raw.rewrites == ["atat-snap", "mmmm"]
+    inserted = repo.resolve(new_hex)
+    assert inserted.description == "inserted"
+    assert inserted.read_file("a.py") == b"a2\n"
+    assert inserted.read_file("keep.py") == b"keep\n"
+    assert inserted.read_file("b.py") == b"b\n"
+    assert [p.hex() for p in repo.resolve("@").parent_ids] == ["new-1"]
+    assert [p.hex() for p in repo.resolve("M").parent_ids] == ["new-1", "aaaa"]
+    assert repo.resolve("@").read_file("a.py") == b"a2\n"
+    assert repo.resolve("B").read_file("a.py") == b"b1\n"
+    assert (tmp_path / "a.py").read_bytes() == b"a2\n"
+
+
+def test_create_after_without_children_skips_surgery(tmp_path, monkeypatch):
+    repo = fake_repo(tmp_path, monkeypatch)
+    new_hex, op, cleanup, conflicts = jjrev.create_after(
+        tmp_path, "@-", "inserted", {"a.py": b"x\n"}
+    )
+    assert (op, cleanup, conflicts) == ("op999", "op999", [])
+    assert repo.atomics[0].tx.raw.rewrites == []
+    assert repo.checked == []
+    assert repo.resolve(new_hex).read_file("a.py") == b"x\n"
+    assert (tmp_path / "a.py").read_bytes() == b"old\n"
+
+
+def test_create_after_working_copy_itself_refuses(tmp_path, monkeypatch):
+    # whichever spelling names @, the half-snapshotted vehicle has
+    # nothing sound to build on: describe it and advance instead
+    repo = fake_repo(tmp_path, monkeypatch)
+    with pytest.raises(JjRevError, match="working-copy commit itself"):
+        jjrev.create_after(tmp_path, "@", "msg", {"a.py": b"x\n"})
+    with pytest.raises(JjRevError, match="working-copy commit itself"):
+        jjrev.create_after(tmp_path, "at", "msg", {"a.py": b"x\n"})
+    assert repo.atomics == []
+    assert (tmp_path / "a.py").read_bytes() == b"old\n"
+
+
+def test_create_after_empty_scope_refuses(tmp_path, monkeypatch):
+    repo = fake_repo(tmp_path, monkeypatch)
+    with pytest.raises(JjRevError, match="nothing to commit"):
+        jjrev.create_after(tmp_path, "@-", "msg", {})
+    assert repo.atomics == []
+
+
+def test_create_after_conflicted_base_refuses(tmp_path, monkeypatch):
+    repo = fake_repo(tmp_path, monkeypatch)
+    repo.resolve("@-").has_conflict = True
+    with pytest.raises(JjRevError, match="carries conflicts"):
+        jjrev.create_after(tmp_path, "@-", "msg", {"a.py": b"x\n"})
+    assert repo.atomics == []
+
+
+def test_create_after_immutable_child_refuses(tmp_path, monkeypatch):
+    repo = _commit_stack(tmp_path, monkeypatch)
+    repo.unrewritable = {"mmmm"}
+    with pytest.raises(JjRevError, match="committing after"):
+        jjrev.create_after(tmp_path, "B", "msg", {"a.py": b"a2\n"})
+
+
+def test_create_after_message_needs_str(tmp_path, monkeypatch):
+    repo = fake_repo(tmp_path, monkeypatch)
+    with pytest.raises(JjRevError, match="needs str"):
+        jjrev.create_after(tmp_path, "@-", None, {"a.py": b"x\n"})
+    assert repo.atomics == []
