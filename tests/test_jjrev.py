@@ -3,8 +3,11 @@
 Everything here runs against fakes: pyjj is an optional dependency
 and no test may need the real package or a jj binary. The fakes mirror
 the pyjj surface jjrev uses (open/resolve/read_file/is_executable/
-list_files/atomic/squash/operation_id); a live -r run proves the
-mirror.
+list_files/atomic/restore/conflicts/operation_id, plus the entry
+snapshot atomic() takes and the checkout it writes on exit); restore
+copies exact bytes the way jj restore does, never a merge. Rebase
+itself is jj's half and live-covered; the fakes pin our half: exact
+bytes into the target, the working copy put back, conflicts reported.
 """
 
 import os
@@ -27,11 +30,12 @@ class FakeId:
 
 
 class FakeCommit:
-    def __init__(self, files=None, execs=(), links=(), cid="aaaa"):
+    def __init__(self, files=None, execs=(), links=(), cid="aaaa", description=""):
         self._files = dict(files or {})
         self._execs = set(execs)
         self._links = set(links)
         self._id = cid
+        self.description = description
 
     @property
     def id(self):
@@ -64,13 +68,34 @@ class FakeError(Exception):
 class FakeTx:
     def __init__(self, repo):
         self.repo = repo
-        self.squashed = []
+        self.restored = []
 
-    def squash(self, revision, into=None, paths=None):
-        self.squashed.append((revision, into, list(paths or [])))
-        if self.repo.checkout_bytes is not None:
-            for rel in paths or []:
-                (Path(self.repo.root) / rel).write_bytes(self.repo.checkout_bytes)
+    def restore(self, paths, into="@", from_revision=None):
+        if from_revision is None:
+            raise FakeError("mirror: restore needs from_revision")
+        self.restored.append((list(paths or []), into, from_revision))
+        self.repo.last_paths = list(paths or [])
+        source = self.repo.resolve(from_revision)
+        target = self.repo.resolve(into)
+        for rel in paths or []:
+            if rel in source._files:
+                target._files[rel] = source._files[rel]
+                if rel in source._execs:
+                    target._execs.add(rel)
+                else:
+                    target._execs.discard(rel)
+                if rel in source._links:
+                    target._links.add(rel)
+                else:
+                    target._links.discard(rel)
+            else:
+                target._files.pop(rel, None)
+                target._execs.discard(rel)
+                target._links.discard(rel)
+        if into != "@":
+            # the amend rewrote history: jj rebases @ onto it, so
+            # later @ reads meet the rebased commit
+            self.repo.moved = True
         return FakeCommit(cid="rewritten")
 
 
@@ -83,10 +108,14 @@ class FakeAtomic:
 
     def __enter__(self):
         self.repo.atomics.append(self)
+        self.repo.snapshot()
         self.tx = FakeTx(self.repo)
         return self.tx
 
     def __exit__(self, *exc):
+        if self.repo.checkout_bytes is not None:
+            for rel in self.repo.last_paths or []:
+                (Path(self.repo.root) / rel).write_bytes(self.repo.checkout_bytes)
         return False
 
 
@@ -95,19 +124,47 @@ class FakeRepo:
         self.commits = commits
         self._root = root
         self.atomics = []
-        # bytes the fake squash lays into the working copy, standing
-        # in for jj checking out rebased descendants
+        self.by_cid = {}
+        self.moved = False
+        self.at_new = None
+        # commits carrying markers, for the conflicts report
+        self.conflicted = []
+        # bytes the fake checkout lays into the working copy on
+        # atomic exit, standing in for jj writing out the moved @
         self.checkout_bytes = None
+        self.last_paths = None
 
     @property
     def root(self):
         return self._root
 
     def resolve(self, rev):
+        if rev == "@" and self.moved and self.at_new is not None:
+            return self.at_new
         try:
             return self.commits[rev]
         except KeyError:
-            raise FakeError(f"revision {rev!r} names nothing") from None
+            pass
+        for commit in list(self.commits.values()) + list(self.by_cid.values()):
+            if commit.id.hex() == rev:
+                return commit
+        raise FakeError(f"revision {rev!r} names nothing")
+
+    def snapshot(self):
+        """Fold the working-copy files into @, the way atomic entry
+        does; the replaced commit stays reachable by its id."""
+        old = self.commits["@"]
+        self.by_cid[old.id.hex()] = old
+        files = {}
+        for path in Path(self._root).rglob("*"):
+            if path.is_file() and not path.is_symlink():
+                files[path.relative_to(self._root).as_posix()] = path.read_bytes()
+        self.commits["@"] = FakeCommit(
+            files=files, cid=old.id.hex() + "-snap", description=old.description
+        )
+
+    def conflicts(self):
+        return list(self.conflicted)
 
     def atomic(self, description, allow_conflicts=False):
         return FakeAtomic(self, description, allow_conflicts)
@@ -128,30 +185,15 @@ def fake_repo(root, monkeypatch):
     return repo
 
 
-class FakeMovingRepo(FakeRepo):
-    """@ resolves differently across calls: the amend's rebase moved
-    it mid-run, so reconcile meets a new working-copy commit."""
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.at_versions = []
-        self._at_calls = 0
-
-    def resolve(self, rev):
-        if rev == "@" and self.at_versions:
-            idx = min(self._at_calls, len(self.at_versions) - 1)
-            self._at_calls += 1
-            return self.at_versions[idx]
-        return super().resolve(rev)
-
-
-def fake_moving_repo(root, monkeypatch, old_bytes, new_bytes):
+def fake_moving_repo(root, monkeypatch, old_bytes, rebased_bytes):
+    """@ carries rebased content after the amend: the rebase moved it
+    mid-run, so reconcile meets a new working-copy commit."""
     (root / "a.py").write_bytes(old_bytes)
     at_old = FakeCommit(files={"a.py": old_bytes}, cid="at-old")
-    at_new = FakeCommit(files={"a.py": new_bytes}, cid="at-new")
+    at_new = FakeCommit(files={"a.py": rebased_bytes}, cid="at-new")
     target = FakeCommit(files={"a.py": b"older\n"}, cid="target")
-    repo = FakeMovingRepo({"@": at_old, "@-": target}, str(root))
-    repo.at_versions = [at_old, at_new]
+    repo = FakeRepo({"@": at_old, "@-": target}, str(root))
+    repo.at_new = at_new
     module = types.ModuleType("pyjj")
     module.open = lambda path: repo
     monkeypatch.setattr(jjrev, "pyjj", module)
@@ -188,9 +230,15 @@ def test_export_unreadable_entry_is_loud(tmp_path, monkeypatch):
 
 def test_amend_moves_changes_and_restores_wc(tmp_path, monkeypatch):
     repo = fake_repo(tmp_path, monkeypatch)
-    new_id, op = jjrev.amend_commit(tmp_path, "@-", {"a.py": b"new\n"})
-    assert (repo.atomics[0].allow_conflicts, new_id, op) == (True, "rewritten", "op999")
-    assert repo.atomics[0].tx.squashed == [("@", "@-", ["a.py"])]
+    new_id, op, cleanup, conflicts = jjrev.amend_commit(
+        tmp_path, "@-", {"a.py": b"new\n"}
+    )
+    assert (new_id, op, cleanup, conflicts) == ("rewritten", "op999", "op999", [])
+    assert repo.atomics[0].allow_conflicts is True
+    assert repo.atomics[0].tx.restored == [(["a.py"], "@-", "@")]
+    assert repo.atomics[1].tx.restored == [(["a.py"], "@", "at")]
+    assert repo.resolve("@-").read_file("a.py") == b"new\n"
+    assert repo.resolve("@").read_file("a.py") == b"old\n"
     assert (tmp_path / "a.py").read_bytes() == b"old\n"
 
 
@@ -209,11 +257,15 @@ def test_amend_adds_and_deletes(tmp_path, monkeypatch):
     repo.commits["@"] = FakeCommit(
         files={"a.py": b"old\n", "gone.py": b"bye\n"}, cid="at"
     )
-    new_id, op = jjrev.amend_commit(
+    new_id, op, cleanup, conflicts = jjrev.amend_commit(
         tmp_path, "@-", {"fresh.py": b"hi\n", "gone.py": None}
     )
-    assert op == "op999"
-    assert repo.atomics[0].tx.squashed == [("@", "@-", ["fresh.py", "gone.py"])]
+    assert (op, cleanup, conflicts) == ("op999", "op999", [])
+    assert repo.atomics[0].tx.restored == [(["fresh.py", "gone.py"], "@-", "@")]
+    target = repo.resolve("@-")
+    assert target.read_file("fresh.py") == b"hi\n"
+    with pytest.raises(FakeError):
+        target.read_file("gone.py")
     assert not (tmp_path / "fresh.py").exists()
     assert (tmp_path / "gone.py").read_bytes() == b"bye\n"
 
@@ -263,7 +315,7 @@ def test_revision_flow_exports_and_amends(tmp_path, monkeypatch):
 
     def fake_amend(repo_root, rev, changes):
         amended.update(changes)
-        return ("newid", "op1")
+        return ("newid", "op1", None, [])
 
     monkeypatch.setattr(jjrev, "amend_commit", fake_amend)
     (tmp_path / "a.py").write_text("old\n")
@@ -276,6 +328,7 @@ def test_revision_flow_exports_and_amends(tmp_path, monkeypatch):
     result = runner.run_revision(opts, "@-", stage)
     assert amended == {"a.py": "new\n"}
     assert result.applied is True and result.op == "op1"
+    assert result.cleanup_op is None and result.conflicts == []
     assert result.files == ["a.py"]
 
 
@@ -318,21 +371,66 @@ def test_markers_resolve_in_place(tmp_path):
 
 
 def test_rebased_checkout_is_left_alone(tmp_path, monkeypatch):
-    # the squash moved @ and jj checked the new tree out: restoring
-    # our saved bytes here would dirty the copy, so reconcile leaves
-    # matching files exactly as checkout wrote them
-    repo = fake_moving_repo(tmp_path, monkeypatch, b"old\n", b"new\n")
-    repo.checkout_bytes = b"new\n"
-    new_id, op = jjrev.amend_commit(tmp_path, "@-", {"a.py": b"new\n"})
-    assert op == "op999"
-    assert (tmp_path / "a.py").read_bytes() == b"new\n"
+    # the rebase moved @ onto content that is neither the pre-run
+    # state nor the staged bytes: checkout wrote it out, so reconcile
+    # verifies and leaves files exactly as checkout wrote them, with
+    # no cleanup transaction
+    repo = fake_moving_repo(tmp_path, monkeypatch, b"old\n", b"rebased\n")
+    repo.checkout_bytes = b"rebased\n"
+    new_id, op, cleanup, conflicts = jjrev.amend_commit(
+        tmp_path, "@-", {"a.py": b"new\n"}
+    )
+    assert (op, cleanup, conflicts) == ("op999", None, [])
+    assert len(repo.atomics) == 1
+    assert (tmp_path / "a.py").read_bytes() == b"rebased\n"
 
 
 def test_rebased_mismatch_is_loud(tmp_path, monkeypatch):
     # something else wrote the copy in the window: the amend stands,
     # and the mismatch names the op that holds it
-    repo = fake_moving_repo(tmp_path, monkeypatch, b"old\n", b"new\n")
+    repo = fake_moving_repo(tmp_path, monkeypatch, b"old\n", b"rebased\n")
     repo.checkout_bytes = b"someone-else\n"
     with pytest.raises(JjRevError, match="does not match rebased @"):
         jjrev.amend_commit(tmp_path, "@-", {"a.py": b"new\n"})
     assert (tmp_path / "a.py").read_bytes() == b"someone-else\n"
+
+
+def test_divergent_tip_content_stays_out_of_target(tmp_path, monkeypatch):
+    # the tip changed the same file the amend rewrites: the target
+    # takes the staged bytes exactly (restore copies, a squash would
+    # merge), and @ goes back to the tip content it held
+    (tmp_path / "a.py").write_bytes(b"tip\n")
+    at = FakeCommit(files={"a.py": b"tip\n"}, cid="at")
+    target = FakeCommit(files={"a.py": b"base\n"}, cid="target")
+    repo = FakeRepo({"@": at, "@-": target}, str(tmp_path))
+    module = types.ModuleType("pyjj")
+    module.open = lambda path: repo
+    monkeypatch.setattr(jjrev, "pyjj", module)
+    new_id, op, cleanup, conflicts = jjrev.amend_commit(
+        tmp_path, "@-", {"a.py": b"mine\n"}
+    )
+    assert (op, cleanup, conflicts) == ("op999", "op999", [])
+    assert len(repo.atomics) == 2
+    assert repo.resolve("@-").read_file("a.py") == b"mine\n"
+    assert repo.resolve("@").read_file("a.py") == b"tip\n"
+    assert (tmp_path / "a.py").read_bytes() == b"tip\n"
+
+
+def test_conflicts_are_reported(tmp_path, monkeypatch):
+    repo = fake_repo(tmp_path, monkeypatch)
+    repo.conflicted = [FakeCommit(cid="cccc", description="C: line\nbody")]
+    _, _, _, conflicts = jjrev.amend_commit(tmp_path, "@-", {"a.py": b"new\n"})
+    assert conflicts == ["cccc C: line"]
+
+
+def test_rev_naming_wc_refuses(tmp_path, monkeypatch):
+    (tmp_path / "a.py").write_bytes(b"old\n")
+    at = FakeCommit(files={"a.py": b"old\n"}, cid="at")
+    repo = FakeRepo({"@": at}, str(tmp_path))
+    module = types.ModuleType("pyjj")
+    module.open = lambda path: repo
+    monkeypatch.setattr(jjrev, "pyjj", module)
+    with pytest.raises(JjRevError, match="working copy itself"):
+        jjrev.amend_commit(tmp_path, "@", {"a.py": b"new\n"})
+    assert repo.atomics == []
+    assert (tmp_path / "a.py").read_bytes() == b"old\n"

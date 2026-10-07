@@ -362,6 +362,13 @@ def main(argv: list[str] | None = None) -> int:
             f"with: pyjj op restore {result.op})",
             file=sys.stderr,
         )
+        if result.cleanup_op is not None:
+            print(
+                f"pyedit: working-copy cleanup (op {result.cleanup_op})",
+                file=sys.stderr,
+            )
+        for entry in result.conflicts:
+            print(f"pyedit: conflict in {entry}; resolve it there", file=sys.stderr)
     elif opts.revision is not None:
         print(
             f"pyedit: dry-run against {opts.revision}; re-run with --apply to amend",

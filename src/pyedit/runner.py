@@ -50,6 +50,8 @@ class Result:
     applied: bool = False
     refused: bool = False
     op: str | None = None
+    cleanup_op: str | None = None
+    conflicts: list[str] = field(default_factory=list)
 
 
 def allowed(rel: str, include: list[str] | None, exclude: list[str] | None) -> bool:
@@ -292,7 +294,11 @@ def run_revision(opts: Options, revision: str, stage) -> Result:
             repo_changes[key] = content
         if not repo_changes:
             return result
-        _new_id, op = jjrev.amend_commit(repo_root, revision, repo_changes)
+        _new_id, op, cleanup_op, conflicts = jjrev.amend_commit(
+            repo_root, revision, repo_changes
+        )
         result.applied = True
         result.op = op
+        result.cleanup_op = cleanup_op
+        result.conflicts = conflicts
         return result

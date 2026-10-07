@@ -178,6 +178,8 @@ def run_edit(
         "actions": result.actions,
         "applied": result.applied,
         "op": result.op,
+        "cleanup_op": result.cleanup_op,
+        "conflicts": result.conflicts,
     }
 
 

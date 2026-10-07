@@ -1,10 +1,13 @@
 """Edit the tree at a jj revision, amend it back.
 
 `pyedit -r REV` reads base file content from REV's committed tree
-instead of the working copy, and --apply rewrites REV in place:
-descendants rebase (conflicts they gain are kept as markers for the
-next round) and the oplog keeps every step reversible. Resolve
-markers where they are first created, not at the tip.
+instead of the working copy, and --apply rewrites REV in place with
+the staged bytes exactly: descendants rebase (conflicts they gain
+are kept as markers for the next round) and the oplog keeps every
+step reversible. A squash would merge tip content into the target
+instead, so the amend restores exact bytes and reports the commits
+that carry markers. Resolve markers where they are first created,
+not at the tip.
 
 pyjj is a soft dependency: it is simply absent when the distributor
 leaves it out of the runtime closure, and only -r needs it.
@@ -117,20 +120,72 @@ def export_tree(repo_root: Path, rev: str, dest: Path) -> list[str]:
     return exported
 
 
+def _tree_state_opt(commit, rel: str) -> tuple:
+    """_tree_state, with absence as a value instead of a refusal."""
+    try:
+        return _tree_state(commit, rel)
+    except JjRevError:
+        return ("absent", None)
+
+
+def _matches_saved(commit, saved: dict[str, tuple]) -> bool:
+    """Every touched path in the commit holds its pre-run content."""
+    for rel, (kind, payload, _mode) in saved.items():
+        if _tree_state_opt(commit, rel) != (kind, payload):
+            return False
+    return True
+
+
+def _matches_staged(commit, changes: dict[str, object]) -> bool:
+    """Every touched path in the commit holds the staged bytes."""
+    for rel, new in changes.items():
+        if isinstance(new, Symlink):
+            want = ("link", str(new))
+        elif new is None:
+            want = ("absent", None)
+        else:
+            want = (
+                "file",
+                new.encode("utf-8") if isinstance(new, str) else bytes(new),
+            )
+        if _tree_state_opt(commit, rel) != want:
+            return False
+    return True
+
+
+def _conflict_names(repo) -> list[str]:
+    """Short id plus subject for every commit carrying markers."""
+    names = []
+    for commit in repo.conflicts():
+        subject = (commit.description or "").splitlines()
+        names.append(
+            f"{commit.id.hex()[:12]} {subject[0] if subject else '(no description)'}"
+        )
+    return names
+
+
 def amend_commit(
     repo_root: Path, rev: str, changes: dict[str, object]
-) -> tuple[str, str]:
-    """Rewrite REV with new contents; return (new commit id, op id).
+) -> tuple[str, str, str | None, list[str]]:
+    """Rewrite REV with new contents; return (new id, op, cleanup, conflicts).
 
     `changes` maps repo-relative posix paths to staged values: bytes
     or str for file content, None for deletion, a Symlink for a new
     link target. File changes, additions, deletions and link
     retargets are covered; flips between files and links are refused.
 
-    The working copy carries the new content just long enough for one
-    `squash`, then is restored byte- and mode-identical: it must start
-    clean on every touched path, or the run refuses naming them.
-    Descendant conflicts from the rebase are kept, not rolled back.
+    The working copy carries the new content just long enough for the
+    entry snapshot to take it into @; two restores then move exact
+    bytes, never a merge: first the staged bytes into REV (a squash
+    would fold divergent tip content in instead), then the touched
+    paths in @ back to what they held, so the copy is clean again.
+    The second restore runs only when the rebase left @ holding the
+    staged bytes; when it left markers or descendant content there,
+    the files stay exactly as checkout wrote them. `cleanup` names
+    the second transaction when one ran; `conflicts` names the
+    commits that carry markers, to resolve where they were created.
+    The working copy must start clean on every touched path, or the
+    run refuses naming them.
     """
     require_pyjj()
     if not changes:
@@ -174,20 +229,39 @@ def amend_commit(
         )
 
     wc_hex = _hex(at)
+    if wc_hex == _hex(target):
+        raise JjRevError(f"-r {rev} names the working copy itself; run without -r")
     for rel, new in changes.items():
         _write_wc(repo_root, target, rel, new)
     try:
         with repo.atomic(f"pyedit -r {rev}", allow_conflicts=True) as tx:
-            written = tx.squash("@", into=rev, paths=sorted(changes))
+            written = tx.restore(sorted(changes), into=rev, from_revision="@")
+        op = repo.operation_id
     except Exception as err:
         raise JjRevError(f"amending {rev!r} failed: {err}") from err
     current = repo.resolve("@")
-    if _hex(current) == wc_hex:
+    cleanup = None
+    if _matches_saved(current, saved):
+        _restore_wc(repo_root, saved)
+        _verify_wc(repo_root, saved)
+    elif _matches_staged(current, changes):
+        # the rebased tip still holds the staged bytes: the entry
+        # snapshot committed them there and the rebase kept them, so
+        # move them back out, leaving the copy as found
+        try:
+            with repo.atomic(
+                f"pyedit -r {rev} (working-copy cleanup)",
+                allow_conflicts=True,
+            ) as tx:
+                tx.restore(sorted(changes), into="@", from_revision=wc_hex)
+            cleanup = repo.operation_id
+        except Exception as err:
+            raise JjRevError(f"cleaning up after {rev!r}: {err}") from err
         _restore_wc(repo_root, saved)
         _verify_wc(repo_root, saved)
     else:
-        _verify_rebased(repo_root, current, saved, rev, repo.operation_id)
-    return _hex(written), repo.operation_id
+        _verify_rebased(repo_root, current, saved, rev, op)
+    return _hex(written), op, cleanup, _conflict_names(repo)
 
 
 def _wc_state(path: Path) -> tuple:
