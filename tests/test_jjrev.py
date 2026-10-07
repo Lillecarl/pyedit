@@ -33,21 +33,32 @@ class FakeId:
 
 class FakeCommit:
     def __init__(
-        self, files=None, execs=(), links=(), cid="aaaa", description="",
+        self,
+        files=None,
+        execs=(),
+        links=(),
+        cid="aaaa",
+        description="",
         author=None,
+        parents=(),
+        conflicted=False,
     ):
         self._files = dict(files or {})
         self._execs = set(execs)
         self._links = set(links)
         self._id = cid
         self.description = description
-        self.author = author or FakeSignature(
-            "A U Thor", "author@example.com"
-        )
+        self.author = author or FakeSignature("A U Thor", "author@example.com")
+        self._parents = list(parents)
+        self.has_conflict = conflicted
 
     @property
     def id(self):
         return FakeId(self._id)
+
+    @property
+    def parent_ids(self):
+        return list(self._parents)
 
     def list_files(self, paths):
         names = sorted(self._files)
@@ -137,8 +148,7 @@ class FakeTx:
 
     def describe(self, revision, message):
         target = (
-            revision if not isinstance(revision, str)
-            else self.repo.resolve(revision)
+            revision if not isinstance(revision, str) else self.repo.resolve(revision)
         )
         self.described.append((target.id.hex(), message))
         target.description = message
@@ -239,7 +249,9 @@ class FakeRepo:
             if path.is_file() and not path.is_symlink():
                 files[path.relative_to(self._root).as_posix()] = path.read_bytes()
         self.commits["@"] = FakeCommit(
-            files=files, cid=old.id.hex() + "-snap", description=old.description,
+            files=files,
+            cid=old.id.hex() + "-snap",
+            description=old.description,
             author=old.author,
         )
 
@@ -560,7 +572,8 @@ def test_amend_empty_is_loud(tmp_path, monkeypatch):
 def test_retitle_sets_metadata_without_tree_changes(tmp_path, monkeypatch):
     repo = fake_repo(tmp_path, monkeypatch)
     op = jjrev.retitle(
-        tmp_path, "@",
+        tmp_path,
+        "@",
         {"description": "wc subject", "author": "W C <wc@example.com>"},
     )
     assert op == "op999"
@@ -587,7 +600,8 @@ def test_run_revision_applies_and_prunes_meta(tmp_path, monkeypatch):
     monkeypatch.setattr(jjrev, "find_repo_root", lambda start: tmp_path)
     monkeypatch.setattr(jjrev, "resolve_ids", lambda root, rev: ("aaa", "bbb"))
     monkeypatch.setattr(
-        jjrev, "target_meta",
+        jjrev,
+        "target_meta",
         lambda root, rev: {
             "description": "same",
             "author": "A U Thor <author@example.com>",
@@ -623,15 +637,14 @@ def test_run_revision_applies_and_prunes_meta(tmp_path, monkeypatch):
     }
 
 
-def test_run_revision_dry_run_shows_meta_and_writes_nothing(
-    tmp_path, monkeypatch
-):
+def test_run_revision_dry_run_shows_meta_and_writes_nothing(tmp_path, monkeypatch):
     from pyedit import runner
 
     monkeypatch.setattr(jjrev, "find_repo_root", lambda start: tmp_path)
     monkeypatch.setattr(jjrev, "resolve_ids", lambda root, rev: ("aaa", "bbb"))
     monkeypatch.setattr(
-        jjrev, "target_meta",
+        jjrev,
+        "target_meta",
         lambda root, rev: {"description": "old", "author": "A <a@x>"},
     )
 
