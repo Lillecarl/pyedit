@@ -71,7 +71,7 @@ unrelated modifier (this run writes).
 | `--no-gitignore` | let glob discovery see .gitignored paths |
 | `--no-rename-detection` | merging scopes, do not pair a delete with an add of similar content |
 | `--timeout SECONDS` | kill the run and dump thread stacks (default 300; 0 disables) |
-| `-r REV` | edit REV's tree, amending on `--apply` |
+| `-r REV` | amend REV's tree on `--apply` (+`describe`,+`author` for message/author) |
 
 Exit: 0 ok, 1 input failed (nothing written), 2 usage, 124 timeout
 (stacks under `$XDG_STATE_HOME`).
@@ -433,8 +433,7 @@ Stdlib tools stage like everything else:
 - `read()` materializes a file into the staged map as a cache;
   `prune_unchanged()` drops entries equal to disk, so reading a file
   does not put it in the diff.
-- Discovery globs exclude .gitignore paths (`--no-gitignore` disables).
-  Explicit reads and writes still reach ignored paths.
+- Explicit reads and writes still reach ignored paths.
 """
 
 SOURCE_SECTION = """\

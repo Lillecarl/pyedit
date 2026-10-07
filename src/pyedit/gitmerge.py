@@ -58,6 +58,7 @@ def merge(parent, child) -> None:
     child.prune_unchanged()
     theirs = child.staged()
     ours = parent.staged()
+    _merge_meta(parent, child)
     paths = sorted(set(theirs) | set(ours))
     if not paths:
         return
@@ -99,6 +100,30 @@ def merge(parent, child) -> None:
     for path in paths:
         if path not in seen:
             parent._stage(path, None)
+
+
+def _merge_meta(parent, child) -> None:
+    """Carry the scope's staged commit metadata onto the parent.
+
+    Metadata has no lines for git to merge: a key one side never
+    set takes the other's value, equal values agree, and two
+    different values collide like a binary file -- the merge names
+    it instead of picking one."""
+    ours = parent.meta
+    theirs = child.meta
+    clashes = sorted(
+        key for key in theirs if key in ours and ours[key] != theirs[key]
+    )
+    if clashes:
+        raise Collision(
+            "; ".join(
+                f"{key}: set by two scopes with different content; "
+                "set it in one scope" for key in clashes
+            )
+        )
+    for key, value in theirs.items():
+        if key not in ours:
+            parent._meta[key] = value
 
 
 def _conflict(repo: MemoryRepo, back: dict, triple) -> str:

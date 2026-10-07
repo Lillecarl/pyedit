@@ -184,6 +184,24 @@ class BudgetExceeded(Exception):
     """Raised when staged content would exceed the materialization budget."""
 
 
+def _parse_author(who: str) -> str:
+    """"Name <email>", normalized. Anything else names the shape."""
+    if not isinstance(who, str):
+        raise TypeError(f"author() needs str, got {type(who).__name__}")
+    text = who.strip()
+    if not (text.endswith(">") and "<" in text):
+        raise ValueError(
+            f"author() needs 'Name <email>', got {who!r}"
+        )
+    name, email = text.rsplit("<", 1)
+    name, email = name.strip(), email[:-1].strip()
+    if not name or not email or " " in email:
+        raise ValueError(
+            f"author() needs 'Name <email>', got {who!r}"
+        )
+    return f"{name} <{email}>"
+
+
 class EditSession:
     def __init__(
         self,
@@ -201,6 +219,10 @@ class EditSession:
         self._root = (Path(root) if root else Path.cwd()).resolve()
         self._ignore_filter: IgnoreFilter | None = None
         self._staged: dict[Path, str | bytes | None] = {}
+        # commit metadata for -r runs: description/author staged by
+        # describe()/author(), applied by the revision amend; anything
+        # else finishes loud instead of dropping it silently
+        self._meta: dict[str, str] = {}
         self._bytes_used = 0
         self._files_used = 0
 
@@ -286,13 +308,15 @@ class EditSession:
             dict(self._staged),
             self._bytes_used,
             self._files_used,
+            dict(self._meta),
         )
 
     def rollback(self, checkpoint) -> None:
-        staged, used_bytes, used_files = checkpoint
+        staged, used_bytes, used_files, meta = checkpoint
         self._staged = staged
         self._bytes_used = used_bytes
         self._files_used = used_files
+        self._meta = meta
 
     # --- overlay IO ---
 
@@ -674,6 +698,30 @@ class EditSession:
 
     def staged(self) -> dict[Path, str | bytes | None]:
         return dict(self._staged)
+
+    @property
+    def meta(self) -> dict[str, str]:
+        """Staged commit metadata: description and/or author for the
+        -r target. Tree-only runs never set it."""
+        return dict(self._meta)
+
+    def describe(self, message: str) -> None:
+        """Stage a new description for the -r revision's commit.
+
+        Only -r applies it, in the same transaction as the tree
+        amend; any other run finishes loud instead of dropping it.
+        """
+        if not isinstance(message, str):
+            raise TypeError(
+                f"describe() needs str, got {type(message).__name__}"
+            )
+        self._meta["description"] = message
+
+    def author(self, who: str) -> None:
+        """Stage a new author for the -r revision's commit, as
+        "Name <email>". The commit keeps its timestamp: this renames
+        who wrote it, not when."""
+        self._meta["author"] = _parse_author(who)
 
     def diff_git(self, context: int = 3) -> str:
         """The staged changes as one git-style unified diff text.

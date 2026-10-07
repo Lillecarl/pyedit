@@ -9,6 +9,10 @@ instead, so the amend restores exact bytes and reports the commits
 that carry markers. Resolve markers where they are first created,
 not at the tip.
 
+`pyedit.describe()` and `pyedit.author()` stage the commit's
+message and author next to the tree; both land in the same
+transaction as the tree restore, so one op holds the whole amend.
+
 pyjj is a soft dependency: it is simply absent when the distributor
 leaves it out of the runtime closure, and only -r needs it.
 """
@@ -19,7 +23,7 @@ import os
 import stat
 from pathlib import Path
 
-from pyedit.session import Symlink
+from pyedit.session import Symlink, _parse_author
 
 try:
     import pyjj
@@ -165,7 +169,7 @@ def _conflict_names(repo) -> list[str]:
 
 
 def amend_commit(
-    repo_root: Path, rev: str, changes: dict[str, object]
+    repo_root: Path, rev: str, changes: dict[str, object], meta: dict[str, str] | None = None
 ) -> tuple[str, str, str | None, list[str]]:
     """Rewrite REV with new contents; return (new id, op, cleanup, conflicts).
 
@@ -173,6 +177,11 @@ def amend_commit(
     or str for file content, None for deletion, a Symlink for a new
     link target. File changes, additions, deletions and link
     retargets are covered; flips between files and links are refused.
+
+    `meta` stages commit metadata next to the tree: `description`
+    and/or `author` ("Name <email>", timestamp kept). Both land in
+    the same transaction as the tree restore, so one op holds the
+    whole amend and its restore undoes both together.
 
     The working copy carries the new content just long enough for the
     entry snapshot to take it into @; two restores then move exact
@@ -188,7 +197,8 @@ def amend_commit(
     run refuses naming them.
     """
     require_pyjj()
-    if not changes:
+    meta = dict(meta or {})
+    if not changes and not meta:
         raise JjRevError("nothing to amend")
     try:
         repo = pyjj.open(str(repo_root))
@@ -235,7 +245,14 @@ def amend_commit(
         _write_wc(repo_root, target, rel, new)
     try:
         with repo.atomic(f"pyedit -r {rev}", allow_conflicts=True) as tx:
-            written = tx.restore(sorted(changes), into=rev, from_revision="@")
+            if changes:
+                written = tx.restore(sorted(changes), into=rev, from_revision="@")
+            else:
+                # metadata-only: the pre-block commit is the state the
+                # transaction started from, which is what a rewrite
+                # takes
+                written = repo.resolve(rev)
+            written = _apply_meta(repo, tx, written, meta)
         op = repo.operation_id
     except Exception as err:
         raise JjRevError(f"amending {rev!r} failed: {err}") from err
@@ -262,6 +279,94 @@ def amend_commit(
     else:
         _verify_rebased(repo_root, current, saved, rev, op)
     return _hex(written), op, cleanup, _conflict_names(repo)
+
+
+def target_meta(repo_root: Path, rev: str) -> dict[str, str]:
+    """The commit's current description and author ("Name <email>").
+
+    The dry-run old side, and what a staged value is pruned against
+    when nothing changed.
+    """
+    require_pyjj()
+    try:
+        repo = require_pyjj().open(str(repo_root))
+        target = repo.resolve(rev)
+        return {
+            "description": target.description or "",
+            "author": _format_author(target.author),
+        }
+    except Exception as err:
+        raise JjRevError(f"cannot read metadata at {rev!r}: {err}") from err
+
+
+def retitle(repo_root: Path, rev: str, meta: dict[str, str]) -> str:
+    """Set description/author on REV with no tree changes; return the op.
+
+    The -r @ short-circuit: describing the working-copy commit
+    rewrites no tree, so it is always safe.
+    """
+    require_pyjj()
+    try:
+        repo = require_pyjj().open(str(repo_root))
+        with repo.atomic(
+            f"pyedit -r {rev} (metadata)", allow_conflicts=True
+        ) as tx:
+            _apply_meta(repo, tx, repo.resolve(rev), meta)
+        return repo.operation_id
+    except Exception as err:
+        raise JjRevError(f"setting metadata at {rev!r} failed: {err}") from err
+
+
+def _apply_meta(repo, tx, commit, meta: dict[str, str]):
+    """Description then author onto `commit`, inside the open block.
+
+    `describe` takes the commit object itself rather than a revset:
+    it is already the transaction's state, so no second resolution
+    can land on a commit the block replaced. The author has no
+    wrapper verb (a pyjj-side verb is the honest fix), so the raw
+    transaction rewrites it through the public builder.
+    """
+    if "description" in meta:
+        commit = tx.describe(commit, message=meta["description"])
+    if "author" in meta:
+        commit = _rewrite_author(repo, tx, commit, meta["author"])
+    return commit
+
+
+def _rewrite_author(repo, tx, commit, who: str):
+    """A new "Name <email>" on `commit`, keeping its timestamp."""
+    module = require_pyjj()
+    name, email = _split_author(_parse_author(who))
+    try:
+        stamp = module.Timestamp(
+            commit.author.timestamp.millis_since_epoch,
+            commit.author.timestamp.tz_offset_minutes,
+        )
+        builder = tx.transaction.rewrite_commit(
+            repo.settings, commit
+        ).set_author(module.Signature(name, email, stamp))
+        inner = getattr(repo, "_repo", None)
+        if inner is None:
+            raise JjRevError(
+                "pyjj no longer exposes the readonly repo; "
+                "the author rewrite needs a pyjj author verb"
+            )
+        return builder.write(inner)
+    except JjRevError:
+        raise
+    except Exception as err:
+        raise JjRevError(f"cannot set author: {err}") from err
+
+
+def _format_author(sig) -> str:
+    """A signature as the "Name <email>" that stages it back."""
+    return f"{sig.name} <{sig.email}>"
+
+
+def _split_author(who: str) -> tuple[str, str]:
+    """The name and email out of normalized "Name <email>"."""
+    name, email = who.rsplit("<", 1)
+    return name.strip(), email[:-1].strip()
 
 
 def _wc_state(path: Path) -> tuple:

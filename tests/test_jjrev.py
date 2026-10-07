@@ -3,11 +3,13 @@
 Everything here runs against fakes: pyjj is an optional dependency
 and no test may need the real package or a jj binary. The fakes mirror
 the pyjj surface jjrev uses (open/resolve/read_file/is_executable/
-list_files/atomic/restore/conflicts/operation_id, plus the entry
-snapshot atomic() takes and the checkout it writes on exit); restore
-copies exact bytes the way jj restore does, never a merge. Rebase
-itself is jj's half and live-covered; the fakes pin our half: exact
-bytes into the target, the working copy put back, conflicts reported.
+list_files/atomic/restore/describe/conflicts/operation_id/settings,
+the author rewrite through tx.transaction, Signature/Timestamp
+constructors, plus the entry snapshot atomic() takes and the checkout
+it writes on exit); restore copies exact bytes the way jj restore
+does, never a merge. Rebase itself is jj's half and live-covered;
+the fakes pin our half: exact bytes into the target, metadata in the
+same block, the working copy put back, conflicts reported.
 """
 
 import os
@@ -30,12 +32,18 @@ class FakeId:
 
 
 class FakeCommit:
-    def __init__(self, files=None, execs=(), links=(), cid="aaaa", description=""):
+    def __init__(
+        self, files=None, execs=(), links=(), cid="aaaa", description="",
+        author=None,
+    ):
         self._files = dict(files or {})
         self._execs = set(execs)
         self._links = set(links)
         self._id = cid
         self.description = description
+        self.author = author or FakeSignature(
+            "A U Thor", "author@example.com"
+        )
 
     @property
     def id(self):
@@ -65,10 +73,76 @@ class FakeError(Exception):
     pass
 
 
+class FakeTimestamp:
+    def __init__(self, millis=0, tz=0):
+        self.millis_since_epoch = millis
+        self.tz_offset_minutes = tz
+
+
+class FakeSignature:
+    def __init__(self, name, email, timestamp=None):
+        self.name = name
+        self.email = email
+        self.timestamp = timestamp or FakeTimestamp()
+
+
+def fake_module(repo):
+    """A pyjj stand-in with the constructors jjrev reaches for."""
+    module = types.ModuleType("pyjj")
+    module.open = lambda path: repo
+    module.Signature = FakeSignature
+    module.Timestamp = FakeTimestamp
+    return module
+
+
+class FakeBuilder:
+    def __init__(self, commit):
+        self.commit = commit
+
+    def set_description(self, message):
+        self.commit.description = message
+        return self
+
+    def set_author(self, sig):
+        self.commit.author = sig
+        return self
+
+    def write(self, _repo):
+        return self.commit
+
+
+class FakeRawTx:
+    """The escape hatch jjrev rewrites the author through: the
+    public builder, since the wrapper has no author verb."""
+
+    def __init__(self, repo):
+        self.repo = repo
+        self.rewrites = []
+
+    def rewrite_commit(self, _settings, commit):
+        self.rewrites.append(commit.id.hex())
+        return FakeBuilder(commit)
+
+
 class FakeTx:
     def __init__(self, repo):
         self.repo = repo
         self.restored = []
+        self.described = []
+        self.raw = FakeRawTx(repo)
+
+    @property
+    def transaction(self):
+        return self.raw
+
+    def describe(self, revision, message):
+        target = (
+            revision if not isinstance(revision, str)
+            else self.repo.resolve(revision)
+        )
+        self.described.append((target.id.hex(), message))
+        target.description = message
+        return target
 
     def restore(self, paths, into="@", from_revision=None):
         if from_revision is None:
@@ -96,7 +170,9 @@ class FakeTx:
             # the amend rewrote history: jj rebases @ onto it, so
             # later @ reads meet the rebased commit
             self.repo.moved = True
-        return FakeCommit(cid="rewritten")
+        # the rewritten commit itself: later rewrites in the same
+        # block (describe, author) land on it, not on an orphan
+        return target
 
 
 class FakeAtomic:
@@ -133,6 +209,9 @@ class FakeRepo:
         # atomic exit, standing in for jj writing out the moved @
         self.checkout_bytes = None
         self.last_paths = None
+        # sentinels for the escape hatch (settings, readonly repo)
+        self.settings = object()
+        self._repo = object()
 
     @property
     def root(self):
@@ -160,7 +239,8 @@ class FakeRepo:
             if path.is_file() and not path.is_symlink():
                 files[path.relative_to(self._root).as_posix()] = path.read_bytes()
         self.commits["@"] = FakeCommit(
-            files=files, cid=old.id.hex() + "-snap", description=old.description
+            files=files, cid=old.id.hex() + "-snap", description=old.description,
+            author=old.author,
         )
 
     def conflicts(self):
@@ -179,9 +259,7 @@ def fake_repo(root, monkeypatch):
     at = FakeCommit(files={"a.py": b"old\n"}, cid="at")
     target = FakeCommit(files={"a.py": b"older\n"}, cid="target")
     repo = FakeRepo({"@": at, "@-": target}, str(root))
-    module = types.ModuleType("pyjj")
-    module.open = lambda path: repo
-    monkeypatch.setattr(jjrev, "pyjj", module)
+    monkeypatch.setattr(jjrev, "pyjj", fake_module(repo))
     return repo
 
 
@@ -194,9 +272,7 @@ def fake_moving_repo(root, monkeypatch, old_bytes, rebased_bytes):
     target = FakeCommit(files={"a.py": b"older\n"}, cid="target")
     repo = FakeRepo({"@": at_old, "@-": target}, str(root))
     repo.at_new = at_new
-    module = types.ModuleType("pyjj")
-    module.open = lambda path: repo
-    monkeypatch.setattr(jjrev, "pyjj", module)
+    monkeypatch.setattr(jjrev, "pyjj", fake_module(repo))
     return repo
 
 
@@ -233,7 +309,7 @@ def test_amend_moves_changes_and_restores_wc(tmp_path, monkeypatch):
     new_id, op, cleanup, conflicts = jjrev.amend_commit(
         tmp_path, "@-", {"a.py": b"new\n"}
     )
-    assert (new_id, op, cleanup, conflicts) == ("rewritten", "op999", "op999", [])
+    assert (new_id, op, cleanup, conflicts) == ("target", "op999", "op999", [])
     assert repo.atomics[0].allow_conflicts is True
     assert repo.atomics[0].tx.restored == [(["a.py"], "@-", "@")]
     assert repo.atomics[1].tx.restored == [(["a.py"], "@", "at")]
@@ -302,6 +378,7 @@ def test_revision_flow_exports_and_amends(tmp_path, monkeypatch):
 
     monkeypatch.setattr(jjrev, "find_repo_root", lambda start: tmp_path)
     monkeypatch.setattr(jjrev, "resolve_ids", lambda root, rev: ("aaa", "bbb"))
+    monkeypatch.setattr(jjrev, "target_meta", lambda root, rev: {})
 
     exported = {}
 
@@ -313,8 +390,9 @@ def test_revision_flow_exports_and_amends(tmp_path, monkeypatch):
     monkeypatch.setattr(jjrev, "export_tree", fake_export)
     amended = {}
 
-    def fake_amend(repo_root, rev, changes):
+    def fake_amend(repo_root, rev, changes, meta=None):
         amended.update(changes)
+        amended["meta"] = meta
         return ("newid", "op1", None, [])
 
     monkeypatch.setattr(jjrev, "amend_commit", fake_amend)
@@ -326,7 +404,7 @@ def test_revision_flow_exports_and_amends(tmp_path, monkeypatch):
         session.write("a.py", "new\n")
 
     result = runner.run_revision(opts, "@-", stage)
-    assert amended == {"a.py": "new\n"}
+    assert amended == {"a.py": "new\n", "meta": None}
     assert result.applied is True and result.op == "op1"
     assert result.cleanup_op is None and result.conflicts == []
     assert result.files == ["a.py"]
@@ -434,3 +512,146 @@ def test_rev_naming_wc_refuses(tmp_path, monkeypatch):
         jjrev.amend_commit(tmp_path, "@", {"a.py": b"new\n"})
     assert repo.atomics == []
     assert (tmp_path / "a.py").read_bytes() == b"old\n"
+
+
+def test_amend_applies_tree_and_meta_in_one_block(tmp_path, monkeypatch):
+    # description and author land in the same transaction as the
+    # tree restore: one op holds the whole amend (the second atomic
+    # is the pre-existing working-copy cleanup, not a second amend)
+    repo = fake_repo(tmp_path, monkeypatch)
+    target = repo.resolve("@-")
+    target.description = "old subject"
+    meta = {"description": "new subject", "author": "New Name <new@example.com>"}
+    new_id, op, cleanup, conflicts = jjrev.amend_commit(
+        tmp_path, "@-", {"a.py": b"new\n"}, meta
+    )
+    assert (op, cleanup, conflicts) == ("op999", "op999", [])
+    assert len(repo.atomics) == 2
+    assert repo.atomics[0].tx.restored == [(["a.py"], "@-", "@")]
+    assert repo.atomics[0].tx.described == [("target", "new subject")]
+    assert repo.atomics[0].tx.raw.rewrites == ["target"]
+    assert repo.resolve("@-").read_file("a.py") == b"new\n"
+    assert repo.resolve("@-").description == "new subject"
+    author = repo.resolve("@-").author
+    assert (author.name, author.email) == ("New Name", "new@example.com")
+    assert (tmp_path / "a.py").read_bytes() == b"old\n"
+
+
+def test_amend_meta_only_skips_the_tree_restore(tmp_path, monkeypatch):
+    repo = fake_repo(tmp_path, monkeypatch)
+    new_id, op, cleanup, conflicts = jjrev.amend_commit(
+        tmp_path, "@-", {}, {"description": "reworded"}
+    )
+    assert (op, cleanup, conflicts) == ("op999", None, [])
+    assert len(repo.atomics) == 1
+    assert repo.atomics[0].tx.restored == []
+    assert repo.resolve("@-").description == "reworded"
+    assert repo.resolve("@-").read_file("a.py") == b"older\n"
+
+
+def test_amend_empty_is_loud(tmp_path, monkeypatch):
+    fake_repo(tmp_path, monkeypatch)
+    with pytest.raises(JjRevError, match="nothing to amend"):
+        jjrev.amend_commit(tmp_path, "@-", {}, None)
+    with pytest.raises(JjRevError, match="nothing to amend"):
+        jjrev.amend_commit(tmp_path, "@-", {}, {})
+
+
+def test_retitle_sets_metadata_without_tree_changes(tmp_path, monkeypatch):
+    repo = fake_repo(tmp_path, monkeypatch)
+    op = jjrev.retitle(
+        tmp_path, "@",
+        {"description": "wc subject", "author": "W C <wc@example.com>"},
+    )
+    assert op == "op999"
+    assert len(repo.atomics) == 1
+    assert repo.resolve("@").description == "wc subject"
+    assert repo.resolve("@").author.email == "wc@example.com"
+    assert (tmp_path / "a.py").read_bytes() == b"old\n"
+
+
+def test_target_meta_reads_old_values(tmp_path, monkeypatch):
+    repo = fake_repo(tmp_path, monkeypatch)
+    repo.resolve("@-").description = "base subject"
+    assert jjrev.target_meta(tmp_path, "@-") == {
+        "description": "base subject",
+        "author": "A U Thor <author@example.com>",
+    }
+
+
+def test_run_revision_applies_and_prunes_meta(tmp_path, monkeypatch):
+    # a reword to the same message rewrites nothing: the amend gets
+    # only what changed
+    from pyedit import runner
+
+    monkeypatch.setattr(jjrev, "find_repo_root", lambda start: tmp_path)
+    monkeypatch.setattr(jjrev, "resolve_ids", lambda root, rev: ("aaa", "bbb"))
+    monkeypatch.setattr(
+        jjrev, "target_meta",
+        lambda root, rev: {
+            "description": "same",
+            "author": "A U Thor <author@example.com>",
+        },
+    )
+
+    def fake_export(repo_root, rev, dest):
+        (dest / "a.py").write_bytes(b"old\n")
+        return ["a.py"]
+
+    monkeypatch.setattr(jjrev, "export_tree", fake_export)
+    amended = {}
+
+    def fake_amend(repo_root, rev, changes, meta=None):
+        amended["changes"] = changes
+        amended["meta"] = meta
+        return ("newid", "op1", None, [])
+
+    monkeypatch.setattr(jjrev, "amend_commit", fake_amend)
+    (tmp_path / "a.py").write_text("old\n")
+    opts = runner.Options(root=tmp_path, apply=True)
+
+    def stage(session):
+        session.write("a.py", "new\n")
+        session.describe("same")
+        session.author("New Name <new@example.com>")
+
+    result = runner.run_revision(opts, "@-", stage)
+    assert amended["meta"] == {"author": "New Name <new@example.com>"}
+    assert result.applied is True and result.op == "op1"
+    assert result.meta == {
+        "author": ("A U Thor <author@example.com>", "New Name <new@example.com>")
+    }
+
+
+def test_run_revision_dry_run_shows_meta_and_writes_nothing(
+    tmp_path, monkeypatch
+):
+    from pyedit import runner
+
+    monkeypatch.setattr(jjrev, "find_repo_root", lambda start: tmp_path)
+    monkeypatch.setattr(jjrev, "resolve_ids", lambda root, rev: ("aaa", "bbb"))
+    monkeypatch.setattr(
+        jjrev, "target_meta",
+        lambda root, rev: {"description": "old", "author": "A <a@x>"},
+    )
+
+    def fake_export(repo_root, rev, dest):
+        (dest / "a.py").write_bytes(b"old\n")
+        return ["a.py"]
+
+    monkeypatch.setattr(jjrev, "export_tree", fake_export)
+
+    def no_amend(*args, **kwargs):
+        raise AssertionError("amend called on a dry-run")
+
+    monkeypatch.setattr(jjrev, "amend_commit", no_amend)
+    (tmp_path / "a.py").write_text("old\n")
+    opts = runner.Options(root=tmp_path)
+
+    def stage(session):
+        session.describe("new")
+
+    result = runner.run_revision(opts, "@-", stage)
+    assert result.applied is False and result.op is None
+    assert result.meta == {"description": ("old", "new")}
+    assert result.files == []

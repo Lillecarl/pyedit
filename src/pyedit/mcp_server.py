@@ -180,6 +180,7 @@ def run_edit(
         "op": result.op,
         "cleanup_op": result.cleanup_op,
         "conflicts": result.conflicts,
+        "meta": {k: [o, n] for k, (o, n) in result.meta.items()},
     }
 
 

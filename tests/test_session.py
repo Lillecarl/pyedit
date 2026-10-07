@@ -368,3 +368,27 @@ def test_prune_unchanged_drops_identical_writes(session, project):
 def test_new_file_staging(session, project):
     session.write("src/new.py", "fresh = 1\n")
     assert session.staged()[project / "src" / "new.py"] == "fresh = 1\n"
+
+
+def test_describe_and_author_stage_meta(session):
+    session.describe("new subject")
+    session.author("New Name <new@example.com>")
+    assert session.meta == {
+        "description": "new subject",
+        "author": "New Name <new@example.com>",
+    }
+
+
+def test_author_rejects_anything_but_name_email(session):
+    for bad in ["noname", "Name <>", "<e@x>", "Name <a b>", "Name <no-close"]:
+        with pytest.raises(ValueError, match="Name <email>"):
+            session.author(bad)
+    assert session.meta == {}
+
+
+def test_finish_refuses_meta_without_a_revision(session):
+    from pyedit import runner
+
+    session.describe("lost message")
+    with pytest.raises(runner.MetaWithoutTarget, match="only -r REV"):
+        runner.finish(session, runner.Options())

@@ -257,3 +257,38 @@ def test_scopes_continue_after_a_collision(root):
     with VFS():
         pyedit.edit("src/b.py", "gamma = 3\n", "gamma = 30\n")
     assert root.staged_content(root.canon("src/b.py")) == "gamma = 30\n"
+
+
+def test_scope_meta_merges_when_disjoint(root):
+    with VFS():
+        pyedit.describe("A fine subject")
+    with VFS():
+        pyedit.author("New Name <new@example.com>")
+    assert root.meta == {
+        "description": "A fine subject",
+        "author": "New Name <new@example.com>",
+    }
+
+
+def test_same_meta_value_is_idempotent(root):
+    with VFS():
+        pyedit.describe("same")
+    with VFS():
+        pyedit.describe("same")
+    assert root.meta == {"description": "same"}
+
+
+def test_divergent_meta_collides(root):
+    with VFS():
+        pyedit.describe("first")
+    with pytest.raises(Collision, match="description: set by two scopes"):
+        with VFS():
+            pyedit.describe("second")
+    assert root.meta == {"description": "first"}
+
+
+def test_failed_scope_drops_its_meta(root):
+    with pytest.raises(RuntimeError), VFS():
+        pyedit.describe("doomed")
+        raise RuntimeError("boom")
+    assert root.meta == {}

@@ -318,7 +318,12 @@ def main(argv: list[str] | None = None) -> int:
 
         try:
             result = runner.finish(session, opts)
-        except (config.ConfigError, formatter.FormatterError, LspPassError) as exc:
+        except (
+            config.ConfigError,
+            formatter.FormatterError,
+            LspPassError,
+            runner.MetaWithoutTarget,
+        ) as exc:
             print(f"pyedit: {exc}", file=sys.stderr)
             print("pyedit: nothing was written", file=sys.stderr)
             return EXIT_SCRIPT_ERROR
@@ -354,7 +359,7 @@ def main(argv: list[str] | None = None) -> int:
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(result.diff)
 
-    if not result.files:
+    if not result.files and not result.meta:
         print("pyedit: no changes", file=sys.stderr)
     elif result.op is not None:
         print(
@@ -389,6 +394,8 @@ def main(argv: list[str] | None = None) -> int:
 
     # a dry-run warns; an apply of known-broken syntax refuses to write
     # unless --force, in which case the problems are on record anyway
+    for key, (old, new) in result.meta.items():
+        print(f"pyedit: {key}: {old!r} -> {new!r}", file=sys.stderr)
     if args.apply and result.problems and args.force:
         print("pyedit: applying with syntax problems (--force)", file=sys.stderr)
     if result.refused:

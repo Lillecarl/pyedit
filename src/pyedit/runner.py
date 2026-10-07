@@ -52,6 +52,15 @@ class Result:
     op: str | None = None
     cleanup_op: str | None = None
     conflicts: list[str] = field(default_factory=list)
+    # staged commit metadata as key -> (old, new): description
+    # and/or author on -r runs, empty otherwise
+    meta: dict[str, tuple[str | None, str | None]] = field(default_factory=dict)
+
+
+class MetaWithoutTarget(Exception):
+    """describe()/author() staged commit metadata with no -r
+    revision to apply it to: only -r amends a commit, so a plain run
+    refuses instead of dropping the metadata silently."""
 
 
 def allowed(rel: str, include: list[str] | None, exclude: list[str] | None) -> bool:
@@ -123,14 +132,23 @@ def finish(
     *,
     config_root: Path | None = None,
     store_ids: bool = True,
+    allow_meta: bool = False,
 ) -> Result:
     """Prune, filter, format, syntax-check, diff, store ids, maybe
     apply. A refused apply (broken syntax without --force) returns a
-    Result with refused set; nothing was written."""
+    Result with refused set; nothing was written. Staged commit
+    metadata (describe/author) needs a -r run to consume it: without
+    allow_meta the run refuses naming that, instead of dropping it
+    silently."""
     from pyedit import config, formatter, store
     from pyedit.diff import replayable_patch, unified_diffs
     from pyedit.syntax import render
 
+    if session.meta and not allow_meta:
+        raise MetaWithoutTarget(
+            "pyedit.describe()/pyedit.author() stage commit metadata; "
+            "only -r REV applies it to a commit"
+        )
     session.prune_unchanged()
 
     def selected() -> dict[Path, str | bytes | None]:
@@ -254,7 +272,15 @@ def run_revision(opts: Options, revision: str, stage) -> Result:
     if target_hex == wc_hex:
         session = new_session(opts)
         stage(session)
-        return finish(session, opts)
+        result = finish(session, opts, allow_meta=True)
+        if session.meta:
+            old = jjrev.target_meta(repo_root, revision)
+            new = _prune_meta(session.meta, old)
+            result.meta = {k: (old[k], v) for k, v in new.items()}
+            if opts.apply and new and not result.refused:
+                result.op = jjrev.retitle(repo_root, revision, new)
+                result.applied = True
+        return result
     prefix = inv_root.relative_to(repo_root)
     sub = "" if str(prefix) == "." else prefix.as_posix()
 
@@ -279,26 +305,42 @@ def run_revision(opts: Options, revision: str, stage) -> Result:
         try:
             stage(session)
             inner = replace(opts, apply=False)
-            result = finish(session, inner, config_root=inv_root, store_ids=False)
+            result = finish(
+                session, inner, config_root=inv_root, store_ids=False,
+                allow_meta=True,
+            )
         finally:
             os.chdir(previous_cwd)
         if result.problems and not opts.force:
             result.refused = True
             return result
         if not opts.apply:
+            if session.meta:
+                old = jjrev.target_meta(repo_root, revision)
+                new = _prune_meta(session.meta, old)
+                result.meta = {k: (old[k], v) for k, v in new.items()}
             return result
         repo_changes = {}
         for p, content in session.staged().items():
             rel = p.relative_to(session.root) if p.is_absolute() else p
             key = f"{sub}/{rel.as_posix()}" if sub else rel.as_posix()
             repo_changes[key] = content
-        if not repo_changes:
+        old = jjrev.target_meta(repo_root, revision)
+        new = _prune_meta(session.meta, old)
+        result.meta = {k: (old[k], v) for k, v in new.items()}
+        if not repo_changes and not new:
             return result
         _new_id, op, cleanup_op, conflicts = jjrev.amend_commit(
-            repo_root, revision, repo_changes
+            repo_root, revision, repo_changes, new or None
         )
         result.applied = True
         result.op = op
         result.cleanup_op = cleanup_op
         result.conflicts = conflicts
         return result
+
+
+def _prune_meta(staged: dict[str, str], old: dict[str, str]) -> dict[str, str]:
+    """Staged metadata minus values the commit already holds: a
+    reword to the same message rewrites nothing."""
+    return {k: v for k, v in staged.items() if old.get(k) != v}
