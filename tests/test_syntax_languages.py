@@ -25,6 +25,28 @@ def test_typescript5_export_type_star(suffix, source, tmp_path):
     assert problems(session, "sample" + suffix) == []
 
 
+SVELTE_TS = '<script lang="ts">\n{body}\n</script>\n<h1>hi</h1>\n'
+
+
+@pytest.mark.parametrize(
+    "source,flagged_line",
+    [
+        (SVELTE_TS.format(body='export type * from "./m";\nlet x: number = 1;'), None),
+        (SVELTE_TS.format(body="let x: = ;"), 2),
+        ("<script>\nlet x = ;\n</script>\n", 2),
+        ("<style>\nh1 { color: ; }\nh2 {{{\n</style>\n", 3),
+    ],
+    ids=["ts-valid", "ts-broken", "js-broken", "css-broken"],
+)
+def test_svelte_embedded_languages(source, flagged_line, tmp_path):
+    session = EditSession(respect_gitignore=False, root=tmp_path)
+    session.write("sample.svelte", source)
+    found = problems(session, "sample.svelte")
+    assert [p.line for p in found][:1] == (
+        [] if flagged_line is None else [flagged_line]
+    )
+
+
 def test_table_covers_every_shipped_suffix():
     covered = {id(RULES[suffix]) for _, suffix, *_ in LANGUAGES}
     assert {id(rules) for rules in RULES.values()} == covered

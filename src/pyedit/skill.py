@@ -392,6 +392,8 @@ Verify a target with `node_at` before a range-limited `edit`; use
 
 Languages: Python, JavaScript, TypeScript, TSX, Go, Rust, C, C++,
 Bash, Fish, Zsh, JSON, YAML, TOML, Nix, Ruby, Java, Lua, Zig, Svelte, CSS, Markdown.
+Svelte `<script>`/`<style>` bodies are checked as JS/TS/CSS (`check` only;
+`query`, `outline`, `node_at` see the Svelte tree).
 
 ## Examples
 

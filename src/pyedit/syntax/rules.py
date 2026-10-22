@@ -111,7 +111,6 @@ _PLAIN = [
     ("tree_sitter_java", (".java",), ()),
     ("tree_sitter_lua", (".lua",), ()),
     ("tree_sitter_zig", (".zig",), ()),
-    ("tree_sitter_svelte", (".svelte",), ()),
 ]
 
 
@@ -121,8 +120,9 @@ def _rules_by_suffix() -> dict[str, LanguageRules]:
     from pyedit.syntax.markdown import Markdown
     from pyedit.syntax.nix import Nix
     from pyedit.syntax.python import Python
+    from pyedit.syntax.svelte import Svelte
 
-    special = (*_PLAIN, C, Cpp, Css, Markdown, Python, Nix)
+    special = (*_PLAIN, C, Cpp, Css, Markdown, Python, Nix, Svelte)
     table: dict[str, LanguageRules] = {}
     for entry in special:
         rules = entry() if isinstance(entry, type) else LanguageRules(*entry)
