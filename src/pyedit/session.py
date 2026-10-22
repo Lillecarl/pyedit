@@ -82,6 +82,42 @@ def _disk_readlink(path: Path) -> str:
     return _REAL_READLINK(path)
 
 
+def _disk_snapshot(path: Path) -> str | bytes | Symlink | None:
+    """What disk holds at path in the staged map's terms: a Symlink,
+    text or bytes, or None when no file or link is there."""
+    if _disk_is_link(path):
+        return Symlink(_disk_readlink(path))
+    if _disk_is_file(path):
+        try:
+            return _slurp(path)
+        except OSError:
+            return None
+    return None
+
+
+def _same(a, b) -> bool:
+    """Staged-map equality: a link never equals text, and text equals
+    the bytes it encodes to."""
+    if a is None or b is None:
+        return a is b
+    if isinstance(a, Symlink) or isinstance(b, Symlink):
+        return isinstance(a, Symlink) and isinstance(b, Symlink) and str(a) == str(b)
+    if isinstance(a, str) and isinstance(b, bytes):
+        return a.encode() == b
+    if isinstance(a, bytes) and isinstance(b, str):
+        return a == b.encode()
+    return a == b
+
+
+class DiskChanged(ValueError):
+    """apply() found paths whose disk content changed after they were
+    staged; it wrote nothing."""
+
+    def __init__(self, paths: list[Path], message: str) -> None:
+        super().__init__(message)
+        self.paths = paths
+
+
 def _disk_tree(path: Path) -> tuple[list[Path], list[Path]]:
     """Real files and symlinks under path."""
     found: list[Path] = []
@@ -185,20 +221,16 @@ class BudgetExceeded(Exception):
 
 
 def _parse_author(who: str) -> str:
-    """"Name <email>", normalized. Anything else names the shape."""
+    """ "Name <email>", normalized. Anything else names the shape."""
     if not isinstance(who, str):
         raise TypeError(f"author() needs str, got {type(who).__name__}")
     text = who.strip()
     if not (text.endswith(">") and "<" in text):
-        raise ValueError(
-            f"author() needs 'Name <email>', got {who!r}"
-        )
+        raise ValueError(f"author() needs 'Name <email>', got {who!r}")
     name, email = text.rsplit("<", 1)
     name, email = name.strip(), email[:-1].strip()
     if not name or not email or " " in email:
-        raise ValueError(
-            f"author() needs 'Name <email>', got {who!r}"
-        )
+        raise ValueError(f"author() needs 'Name <email>', got {who!r}")
     return f"{name} <{email}>"
 
 
@@ -219,6 +251,10 @@ class EditSession:
         self._root = (Path(root) if root else Path.cwd()).resolve()
         self._ignore_filter: IgnoreFilter | None = None
         self._staged: dict[Path, str | bytes | None] = {}
+        # what disk held when each staged path entered the session:
+        # apply() refuses a path whose disk moved since, and an entry
+        # equal to its base is a cache, not a change
+        self._base: dict[Path, str | bytes | None] = {}
         # commit metadata for -r runs: description/author staged by
         # describe()/author(), applied by the revision amend; anything
         # else finishes loud instead of dropping it silently
@@ -247,8 +283,9 @@ class EditSession:
             self._ignore_filter = IgnoreFilter(root=self._root)
         return self._ignore_filter
 
-    def _stage(self, path: Path, content: str | bytes | None) -> None:
-        """Enforce budgets, track usage, and land content in the dict."""
+    def _stage(self, path: Path, content: str | bytes | None, base=_MISSING) -> None:
+        """Enforce budgets, track usage, and land content in the dict.
+        `base` is what disk held, when the caller just read it."""
         old = self._staged.get(path, _MISSING)
         old_bytes = 0 if old is _MISSING or old is None else _content_size(old)
         old_files = 0 if old is _MISSING or old is None else 1
@@ -274,7 +311,16 @@ class EditSession:
                 )
         self._bytes_used += delta_bytes
         self._files_used += delta_files
+        if path not in self._base:
+            self._base[path] = _disk_snapshot(path) if base is _MISSING else base
         self._staged[path] = content
+
+    def _unstage(self, path: Path) -> None:
+        content = self._staged.pop(path)
+        self._base.pop(path, None)
+        if content is not None:
+            self._bytes_used -= _content_size(content)
+            self._files_used -= 1
 
     # --- input discovery ---
 
@@ -310,14 +356,16 @@ class EditSession:
         must stage atomically or not at all."""
         return (
             dict(self._staged),
+            dict(self._base),
             self._bytes_used,
             self._files_used,
             dict(self._meta),
         )
 
     def rollback(self, checkpoint) -> None:
-        staged, used_bytes, used_files, meta = checkpoint
+        staged, base, used_bytes, used_files, meta = checkpoint
         self._staged = staged
+        self._base = base
         self._bytes_used = used_bytes
         self._files_used = used_files
         self._meta = meta
@@ -327,6 +375,15 @@ class EditSession:
     def read(self, path: str | Path) -> str | bytes:
         p = self.canon(path)
         content = self._staged.get(p, _MISSING)
+        if (
+            isinstance(content, str | bytes)
+            and not isinstance(content, Symlink)
+            and _same(content, self._base.get(p, _MISSING))
+        ):
+            # nothing in this session changed it: a cache of disk, which
+            # another program may have rewritten since
+            self._unstage(p)
+            content = _MISSING
         if content is not _MISSING:
             if content is None:
                 raise FileNotFoundError(f"file is deleted in this session: {p}")
@@ -340,7 +397,7 @@ class EditSession:
         if p.is_relative_to(self._root):
             # only project files are cached in the overlay; external
             # reads (stdlib, dependencies, /etc) would be junk
-            self._stage(p, content)
+            self._stage(p, content, base=content)
         return content
 
     def write(self, path: str | Path, content: str | bytes) -> None:
@@ -722,9 +779,7 @@ class EditSession:
         amend; any other run finishes loud instead of dropping it.
         """
         if not isinstance(message, str):
-            raise TypeError(
-                f"describe() needs str, got {type(message).__name__}"
-            )
+            raise TypeError(f"describe() needs str, got {type(message).__name__}")
         self._meta["description"] = message
 
     def author(self, who: str) -> None:
@@ -765,7 +820,21 @@ class EditSession:
 
         `paths` limits the write to those staged paths (the CLI uses it
         for its include/exclude filter)."""
-        for path, content in sorted((paths or self.staged()).items()):
+        targets = sorted((paths or self.staged()).items())
+        drifted = [
+            path
+            for path, content in targets
+            if not _same(disk := _disk_snapshot(path), self._base[path])
+            and not _same(disk, content)
+        ]
+        if drifted:
+            names = ", ".join(self.relpath(p) for p in drifted)
+            raise DiskChanged(
+                drifted,
+                f"disk changed after staging, so apply would overwrite it: {names}; "
+                "nothing was written. Re-read and re-stage those files.",
+            )
+        for path, content in targets:
             try:
                 if content is None:
                     try:
@@ -800,38 +869,19 @@ class EditSession:
                 raise ValueError(f"{path}: cannot overwrite a directory") from None
             except FileNotFoundError:
                 raise ValueError(f"{path}: parent directory vanished") from None
+        # disk now holds what was staged: the next edit is measured from it
+        self._base.update(targets)
 
     def staged_content(self, path: str | Path) -> str | bytes | None:
         return self._staged.get(self.canon(path), _MISSING)
 
     def prune_unchanged(self) -> None:
+        """Drop entries that change nothing: equal to what disk held when
+        staged (a read cache, even if disk moved since), or to disk now."""
         for path, content in list(self._staged.items()):
-            if content is None:
-                # a deletion of an already-absent file is not pending;
-                # links need the lstat check, is_file follows them
-                if not _disk_is_file(path) and not _disk_is_link(path):
-                    del self._staged[path]
-                continue
-            if isinstance(content, Symlink):
-                if _disk_is_link(path) and _disk_readlink(path) == str(content):
-                    del self._staged[path]
-                continue
-            if not _disk_is_file(path):
-                continue
-            try:
-                disk = _slurp(path)
-            except OSError:
-                continue
-            if isinstance(disk, str) and isinstance(content, bytes):
-                same = disk.encode() == content
-            elif isinstance(disk, bytes) and isinstance(content, str):
-                same = disk == content.encode()
-            else:
-                same = disk == content
-            if same:
-                del self._staged[path]
-                self._bytes_used -= _content_size(content)
-                self._files_used -= 1
+            base = self._base.get(path, _MISSING)
+            if _same(content, base) or _same(content, _disk_snapshot(path)):
+                self._unstage(path)
 
     # --- overlay-aware filesystem views (used by the stdlib patches) ---
 

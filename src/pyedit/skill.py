@@ -433,9 +433,12 @@ Stdlib tools stage like everything else:
   directories never appear in diffs.
 - Binary files stage as bytes. A text-mode handle on one is refused at
   open, where the real filesystem would defer the failure to read.
-- `read()` materializes a file into the staged map as a cache;
-  `prune_unchanged()` drops entries equal to disk, so reading a file
-  does not put it in the diff.
+- `read()` caches a file in the staged map. An entry the session
+  never changed re-reads disk on the next `read()`, and
+  `prune_unchanged()` drops it, so reading never puts a file in the
+  diff.
+- `apply()` raises `DiskChanged` and writes nothing when a staged
+  path's disk changed after it was staged.
 - Explicit reads and writes still reach ignored paths.
 """
 

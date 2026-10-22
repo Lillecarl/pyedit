@@ -3,7 +3,7 @@ import os
 import pytest
 
 from pyedit import Symlink
-from pyedit.session import EditSession
+from pyedit.session import DiskChanged, EditSession
 
 
 @pytest.fixture
@@ -96,6 +96,57 @@ def test_prune_drops_materialized_reads(session, project):
     session.read("src/a.py")
     session.prune_unchanged()
     assert session.staged() == {}
+
+
+def test_read_cache_follows_disk_after_an_outside_write(session, project):
+    """A read is a cache, not an edit: a formatter rewriting the file
+    after it shows through, and nothing stale stays to be applied."""
+    session.read("src/a.py")
+    (project / "src" / "a.py").write_text("alpha=1\n")
+    session.prune_unchanged()
+    assert session.staged() == {}
+    assert session.read("src/a.py") == "alpha=1\n"
+    (project / "src" / "a.py").write_text("alpha = 1\n")
+    assert session.read("src/a.py") == "alpha = 1\n"
+    session.apply()
+    assert (project / "src" / "a.py").read_text() == "alpha = 1\n"
+
+
+def test_apply_refuses_paths_changed_on_disk_after_staging(session, project):
+    """An outside write after staging would be lost; apply names it and
+    writes nothing, not even the paths that did not move."""
+    session.edit("src/a.py", "alpha = 1", "alpha = 2")
+    session.write("src/b.py", "gamma = 4\n")
+    (project / "src" / "a.py").write_text("alpha = 1\nbeta = 2\nC = 3\n")
+    with pytest.raises(DiskChanged, match="src/a.py") as refused:
+        session.apply()
+    assert refused.value.paths == [project / "src" / "a.py"]
+    assert (project / "src" / "a.py").read_text() == "alpha = 1\nbeta = 2\nC = 3\n"
+    assert (project / "src" / "b.py").read_text() == "gamma = 3\n"
+
+
+def test_apply_refuses_a_new_file_someone_else_created(session, project):
+    session.write("src/new.py", "mine\n")
+    (project / "src" / "new.py").write_text("theirs\n")
+    with pytest.raises(DiskChanged):
+        session.apply()
+
+
+def test_apply_accepts_disk_that_already_holds_the_staged_text(session, project):
+    session.edit("src/a.py", "alpha = 1", "alpha = 2")
+    (project / "src" / "a.py").write_text("alpha = 2\nbeta = 2\n")
+    session.apply()
+    assert (project / "src" / "a.py").read_text() == "alpha = 2\nbeta = 2\n"
+
+
+def test_rollback_restores_the_bases(session, project):
+    mark = session.checkpoint()
+    session.edit("src/a.py", "alpha = 1", "alpha = 2")
+    session.rollback(mark)
+    (project / "src" / "a.py").write_text("moved\n")
+    session.write("src/a.py", "mine\n")
+    session.apply()
+    assert (project / "src" / "a.py").read_text() == "mine\n"
 
 
 def test_read_sees_disk_content(session, project):
