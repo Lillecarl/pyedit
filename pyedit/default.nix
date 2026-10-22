@@ -14,6 +14,7 @@
   lsprotocol,
   pyright,
   ruff,
+  pyrefly,
   tree-sitter,
   tree-sitter-grammars,
   cacert,
@@ -186,11 +187,21 @@ let
       pytestCheckHook
       pyright
       ruff
+      pyrefly
       hypothesis
       git
     ];
 
     pythonImportsCheck = [ "pyedit" ];
+
+    # lint and types run after the tests, against the project config in
+    # pyproject.toml
+    postCheck = ''
+      export HOME=$TMPDIR
+      ruff check
+      ruff format --check
+      pyrefly check
+    '';
 
     meta = {
       description = "Scripted multi-file edits with dry-run diffs for AI agents";
