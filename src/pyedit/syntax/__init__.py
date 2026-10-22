@@ -14,10 +14,23 @@ import importlib
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pyedit.diff import display_path
-from pyedit.syntax.nodes import NodeInfo, SyntaxProblem, byte_offset, char_column
+from pyedit.syntax.nodes import (
+    NodeInfo,
+    SyntaxProblem,
+    byte_offset,
+    char_column,
+    node_text,
+)
 from pyedit.syntax.rules import RULES, rules_for
+
+if TYPE_CHECKING:
+    from tree_sitter import Language, Node, Parser, Tree
+
+    from pyedit.session import EditSession
+    from pyedit.syntax.rules import LanguageRules
 
 __all__ = [
     "NodeInfo",
@@ -32,11 +45,11 @@ __all__ = [
     "render",
 ]
 
-_parsers: dict[str, object | None] = {}
-_languages: dict[str, object | None] = {}
+_parsers: dict[str, Parser | None] = {}
+_languages: dict[str, Language | None] = {}
 
 
-def _language_for(suffix: str):
+def _language_for(suffix: str) -> Language | None:
     """The tree-sitter Language for a suffix, or None when unavailable."""
     if suffix in _languages:
         return _languages[suffix]
@@ -52,7 +65,7 @@ def _language_for(suffix: str):
             # the generated bindings hand back an int pointer; Language(int)
             # is deprecated against the capsule API but works
             warnings.simplefilter("ignore", DeprecationWarning)
-            language = Language(module.language())
+            language = Language(module.language())  # pyrefly: ignore[deprecated]
     except ImportError:
         _languages[suffix] = None
         return None
@@ -60,7 +73,7 @@ def _language_for(suffix: str):
     return language
 
 
-def _parser_for(suffix: str):
+def _parser_for(suffix: str) -> Parser | None:
     """The parser for a suffix, or None when no grammar is available."""
     if suffix in _parsers:
         return _parsers[suffix]
@@ -86,7 +99,7 @@ def _no_grammar(suffix: str) -> ValueError:
     )
 
 
-def _read_text(session, path: str | Path) -> str:
+def _read_text(session: EditSession, path: str | Path) -> str:
     content = session.read(path)
     if not isinstance(content, str):
         raise ValueError(
@@ -95,13 +108,16 @@ def _read_text(session, path: str | Path) -> str:
     return content
 
 
-def _info(node, lines: list[str], rules) -> NodeInfo:
+def _info(node: Node, lines: list[str], rules: LanguageRules) -> NodeInfo:
     start_row, start_byte = node.start_point
     end_row, end_byte = node.end_point
+    name_line: int | None = None
+    name_column: int | None = None
     name_node = node.child_by_field_name("name")
-    name_row, name_byte = (
-        name_node.start_point if name_node is not None else (None, None)
-    )
+    if name_node is not None:
+        name_row, name_byte = name_node.start_point
+        name_line = name_row + 1
+        name_column = char_column(lines[name_row], name_byte)
     return NodeInfo(
         kind=node.type,
         name=rules.title(node),
@@ -109,21 +125,19 @@ def _info(node, lines: list[str], rules) -> NodeInfo:
         start_column=char_column(lines[start_row], start_byte),
         end_line=end_row + 1,
         end_column=char_column(lines[end_row], end_byte),
-        text=node.text.decode("utf-8", errors="replace"),
-        name_line=None if name_row is None else name_row + 1,
-        name_column=None
-        if name_byte is None
-        else char_column(lines[name_row], name_byte),
+        text=node_text(node),
+        name_line=name_line,
+        name_column=name_column,
     )
 
 
-def _smallest_containing(root, offset: int):
+def _smallest_containing(root: Node, offset: int) -> Node | None:
     """The smallest named node whose span covers the byte offset.
 
     Spans are half-open, tree-sitter style: a cursor sitting exactly at
     a node's end belongs to what follows, not to it.
     """
-    best = None
+    best: Node | None = None
     stack = [root]
     while stack:
         node = stack.pop()
@@ -143,7 +157,7 @@ def free_names(text: str) -> set[str]:
     names: set[str] = set()
     bound: set[str] = set()
 
-    def visit(n):
+    def visit(n: ast.AST) -> None:
         if isinstance(n, ast.Name):
             (bound if isinstance(n.ctx, (ast.Store, ast.Del)) else names).add(n.id)
         elif isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name):
@@ -156,11 +170,9 @@ def free_names(text: str) -> set[str]:
         elif isinstance(n, ast.ImportFrom):
             for a in n.names:
                 bound.add(a.asname or a.name)
-        elif (
-            isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-            or isinstance(n, ast.ExceptHandler)
-            and n.name
-        ):
+        elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(n.name)
+        if isinstance(n, ast.ExceptHandler) and n.name is not None:
             bound.add(n.name)
         for child in ast.iter_child_nodes(n):
             visit(child)
@@ -171,7 +183,9 @@ def free_names(text: str) -> set[str]:
     return names - bound - {n for n in dir(builtins) if not n.startswith("_")}
 
 
-def locate_definition(session, path: str | Path, name: str) -> tuple[int, int]:
+def locate_definition(
+    session: EditSession, path: str | Path, name: str
+) -> tuple[int, int]:
     """The (line, column) of the identifier that defines `name`.
 
     Raises ValueError when the file has no definition or several,
@@ -183,7 +197,9 @@ def locate_definition(session, path: str | Path, name: str) -> tuple[int, int]:
     ]
     display = display_path(session.canon(path))
     if len(matches) == 1:
-        return matches[0].name_line, matches[0].name_column
+        line, column = matches[0].name_line, matches[0].name_column
+        assert line is not None and column is not None
+        return line, column
     if not matches:
         raise ValueError(f"no definition of {name!r} in {display}")
     listed = "; ".join(
@@ -196,7 +212,7 @@ def locate_definition(session, path: str | Path, name: str) -> tuple[int, int]:
     )
 
 
-def node_at(session, path: str | Path, line: int, column: int) -> NodeInfo:
+def node_at(session: EditSession, path: str | Path, line: int, column: int) -> NodeInfo:
     """The smallest syntax node at a position, with its named parent.
 
     The cursor may sit anywhere inside the node, including just after
@@ -205,12 +221,13 @@ def node_at(session, path: str | Path, line: int, column: int) -> NodeInfo:
     """
     suffix = Path(path).suffix
     rules = rules_for(suffix)
-    if rules is None or _parser_for(suffix) is None:
+    parser = _parser_for(suffix)
+    if rules is None or parser is None:
         raise _no_grammar(suffix)
     text = _read_text(session, path)
     lines = text.split("\n")
     offset = byte_offset(lines, line, column)
-    tree = _parser_for(suffix).parse(text.encode("utf-8"))
+    tree = parser.parse(text.encode("utf-8"))
     node = _smallest_containing(tree.root_node, offset)
     if node is None and offset > 0:
         node = _smallest_containing(tree.root_node, offset - 1)
@@ -220,7 +237,8 @@ def node_at(session, path: str | Path, line: int, column: int) -> NodeInfo:
         # at the cursor merely contains it
         after = _smallest_containing(tree.root_node, offset - 1) if offset > 0 else None
         if (
-            after is not None
+            node is not None
+            and after is not None
             and after is not node
             and after.end_byte == offset
             and node.start_byte <= after.start_byte
@@ -240,7 +258,7 @@ def node_at(session, path: str | Path, line: int, column: int) -> NodeInfo:
     return info
 
 
-def outline(session, path: str | Path) -> list[NodeInfo]:
+def outline(session: EditSession, path: str | Path) -> list[NodeInfo]:
     """Every named definition in the file, ordered by position.
 
     The generic rule is a node the language rules can title (a name
@@ -249,11 +267,12 @@ def outline(session, path: str | Path) -> list[NodeInfo]:
     """
     suffix = Path(path).suffix
     rules = rules_for(suffix)
-    if rules is None or _parser_for(suffix) is None:
+    parser = _parser_for(suffix)
+    if rules is None or parser is None:
         raise _no_grammar(suffix)
     text = _read_text(session, path)
     lines = text.split("\n")
-    tree = _parser_for(suffix).parse(text.encode("utf-8"))
+    tree = parser.parse(text.encode("utf-8"))
     result = []
     stack = [tree.root_node]
     while stack:
@@ -277,7 +296,7 @@ def render(problem: SyntaxProblem, text: str) -> str:
     return f"{gutter}{source}\n{' ' * len(gutter)}| {pad}{'^' * width}"
 
 
-def problems(session, path: str | Path) -> list[SyntaxProblem]:
+def problems(session: EditSession, path: str | Path) -> list[SyntaxProblem]:
     """Syntax problems in one file, in pyedit positions."""
     content = session.read(path)
     if not isinstance(content, str):
@@ -286,9 +305,10 @@ def problems(session, path: str | Path) -> list[SyntaxProblem]:
     rules = rules_for(suffix)
     if rules is None:
         return []
-    tree = None
-    if _parser_for(suffix) is not None:
-        tree = _parser_for(suffix).parse(content.encode("utf-8"))
+    tree: Tree | None = None
+    parser = _parser_for(suffix)
+    if parser is not None:
+        tree = parser.parse(content.encode("utf-8"))
     return rules.problems(content, tree)
 
 
@@ -305,7 +325,7 @@ class QueryHit:
     pattern_index: int = 0
 
 
-def query(session, path: str | Path, pattern: str) -> list[QueryHit]:
+def query(session: EditSession, path: str | Path, pattern: str) -> list[QueryHit]:
     """S-expression query hits over staged content, ordered by position.
 
     Columns are byte offsets, so spans feed splice() directly.
@@ -315,10 +335,11 @@ def query(session, path: str | Path, pattern: str) -> list[QueryHit]:
 
     suffix = Path(path).suffix
     language = _language_for(suffix)
-    if rules_for(suffix) is None or language is None:
+    parser = _parser_for(suffix)
+    if rules_for(suffix) is None or language is None or parser is None:
         raise _no_grammar(suffix)
     text = _read_text(session, path)
-    tree = _parser_for(suffix).parse(text.encode("utf-8"))
+    tree = parser.parse(text.encode("utf-8"))
     hits = []
     for index, captures in QueryCursor(Query(language, pattern)).matches(
         tree.root_node
@@ -333,7 +354,7 @@ def query(session, path: str | Path, pattern: str) -> list[QueryHit]:
                     QueryHit(
                         capture=name,
                         kind=node.type,
-                        text=node.text.decode("utf-8", errors="replace"),
+                        text=node_text(node),
                         start_line=start_row + 1,
                         start_column=start_byte,
                         end_line=end_row + 1,
@@ -352,7 +373,7 @@ def query(session, path: str | Path, pattern: str) -> list[QueryHit]:
     return hits
 
 
-def kinds(session, path: str | Path) -> dict[str, list[str]]:
+def kinds(session: EditSession, path: str | Path) -> dict[str, list[str]]:
     """Named node kinds and field names for the file's grammar.
 
     The query vocabulary without reading grammar sources: kinds lists
@@ -365,16 +386,17 @@ def kinds(session, path: str | Path) -> dict[str, list[str]]:
     return {
         "kinds": sorted(
             {
-                language.node_kind_for_id(i)
+                kind
                 for i in range(language.node_kind_count)
-                if language.node_kind_for_id(i) and language.node_kind_is_named(i)
+                if (kind := language.node_kind_for_id(i))
+                and language.node_kind_is_named(i)
             }
         ),
         "fields": sorted(
             {
-                language.field_name_for_id(i)
+                name
                 for i in range(1, language.field_count + 1)
-                if language.field_name_for_id(i)
+                if (name := language.field_name_for_id(i))
             }
         ),
     }

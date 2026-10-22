@@ -1,7 +1,14 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import pytest
 
 from pyedit.patch import PatchOperation, apply_patch, parse_patch
 from pyedit.session import EditSession
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 ENVELOPE = """\
 *** Begin Patch
@@ -42,7 +49,7 @@ def test_parse_patch_move_to():
     assert operations[0].type == "update_file"
 
 
-def test_v4a_is_the_only_session_name(project):
+def test_v4a_is_the_only_session_name(project: Path) -> None:
     """apply_patch was an alias for apply_v4a. One name per format,
     like the two diff entry points."""
     session = EditSession()
@@ -50,16 +57,18 @@ def test_v4a_is_the_only_session_name(project):
     assert not hasattr(session, "apply_patch")
 
 
-def test_a_missing_name_does_not_blame_the_session(project, monkeypatch):
+def test_a_missing_name_does_not_blame_the_session(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The old name must not report 'no edit session is running'."""
     import pyedit as module
 
     monkeypatch.setattr(module, "session", EditSession(), raising=False)
     with pytest.raises(AttributeError, match="pyedit skill"):
-        module.apply_patch
+        _ = module.apply_patch
 
 
-def test_apply_patch_stages_all_operations(project):
+def test_apply_patch_stages_all_operations(project: Path) -> None:
     session = EditSession()
     applied, _failures = apply_patch(session, ENVELOPE)
     assert len(applied) == 3
@@ -69,14 +78,14 @@ def test_apply_patch_stages_all_operations(project):
     assert staged[project / "src" / "b.py"] is None
 
 
-def test_deleting_a_pre_existing_file_renders_a_removal(project):
+def test_deleting_a_pre_existing_file_renders_a_removal(project: Path) -> None:
     session = EditSession()
     apply_patch(session, "*** Begin Patch\n*** Delete File: src/a.py\n*** End Patch\n")
     assert "+++ /dev/null" in session.diff_git()
     assert "-alpha = 1" in session.diff_git()
 
 
-def test_create_then_delete_nets_to_nothing(project):
+def test_create_then_delete_nets_to_nothing(project: Path) -> None:
     # a file created and deleted in the same session has no net change:
     # neither side exists, so the diff is empty by design
     session = EditSession()
@@ -89,7 +98,7 @@ def test_create_then_delete_nets_to_nothing(project):
     assert session.diff_git() == ""
 
 
-def test_apply_patch_update_with_move_to(project):
+def test_apply_patch_update_with_move_to(project: Path) -> None:
     session = EditSession()
     apply_patch(
         session,
@@ -106,7 +115,7 @@ def test_apply_patch_update_with_move_to(project):
     assert staged[project / "src" / "renamed.py"] == "alpha = 2\nbeta = 2\n"
 
 
-def test_apply_patch_anchor_names_context_above(project):
+def test_apply_patch_anchor_names_context_above(project: Path) -> None:
     (project / "src" / "a.py").write_text("def f():\n    alpha = 1\n")
     session = EditSession()
     apply_patch(
@@ -121,7 +130,7 @@ def test_apply_patch_anchor_names_context_above(project):
     assert session.staged()[project / "src" / "a.py"] == "def f():\n    alpha = 2\n"
 
 
-def test_apply_patch_update_missing_file_raises(project):
+def test_apply_patch_update_missing_file_raises(project: Path) -> None:
     session = EditSession()
     with pytest.raises(FileNotFoundError):
         apply_patch(
@@ -130,7 +139,7 @@ def test_apply_patch_update_missing_file_raises(project):
         )
 
 
-def test_apply_patch_unchanged_hunk_prunes_clean(project):
+def test_apply_patch_unchanged_hunk_prunes_clean(project: Path) -> None:
     session = EditSession()
     apply_patch(
         session,
@@ -140,7 +149,7 @@ def test_apply_patch_unchanged_hunk_prunes_clean(project):
     assert session.staged() == {}
 
 
-def test_apply_patch_binary_update_raises(project, tmp_path):
+def test_apply_patch_binary_update_raises(project: Path, tmp_path: Path) -> None:
     (project / "src" / "data.bin").write_bytes(b"\xff\xfe\x00\x01")
     session = EditSession()
     with pytest.raises(ValueError, match="binary"):

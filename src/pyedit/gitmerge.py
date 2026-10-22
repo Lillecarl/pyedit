@@ -34,11 +34,14 @@ repository.
 
 from __future__ import annotations
 
-from pathlib import Path
+import os
+from typing import TYPE_CHECKING
 
-from pyedit.memgit import MemoryRepo
+from pyedit.memgit import MemoryRepo, MemValue
 from pyedit.merge import Collision
 from pyedit.session import (
+    EditSession,
+    Staged,
     Symlink,
     _disk_is_file,
     _disk_is_link,
@@ -46,10 +49,15 @@ from pyedit.session import (
     _slurp,
 )
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from pygit2 import IndexEntry
+
 _LINK_MODE = 0o120000
 
 
-def merge(parent, child) -> None:
+def merge(parent: EditSession, child: EditSession) -> None:
     """Stage the scope's changes on the parent, resolved by git.
 
     Fails closed: one conflict raises and the parent keeps the state it
@@ -68,7 +76,7 @@ def merge(parent, child) -> None:
     back = {key: path for path, key in keys.items()}
 
     repo = MemoryRepo()
-    base = {}
+    base: dict[str, MemValue] = {}
     for path in paths:
         entry = _disk_entry(path)
         if entry is not None:
@@ -89,7 +97,7 @@ def merge(parent, child) -> None:
             )
         )
 
-    seen = set()
+    seen: set[Path] = set()
     for entry in merged:
         path = back[entry.path]
         seen.add(path)
@@ -103,7 +111,7 @@ def merge(parent, child) -> None:
             parent._stage(path, None)
 
 
-def _merge_meta(parent, child) -> None:
+def _merge_meta(parent: EditSession, child: EditSession) -> None:
     """Carry the scope's staged commit metadata onto the parent.
 
     Metadata has no lines for git to merge: a key one side never
@@ -112,14 +120,12 @@ def _merge_meta(parent, child) -> None:
     it instead of picking one."""
     ours = parent.meta
     theirs = child.meta
-    clashes = sorted(
-        key for key in theirs if key in ours and ours[key] != theirs[key]
-    )
+    clashes = sorted(key for key in theirs if key in ours and ours[key] != theirs[key])
     if clashes:
         raise Collision(
             "; ".join(
-                f"{key}: set by two scopes with different content; "
-                "set it in one scope" for key in clashes
+                f"{key}: set by two scopes with different content; set it in one scope"
+                for key in clashes
             )
         )
     for key, value in theirs.items():
@@ -127,15 +133,21 @@ def _merge_meta(parent, child) -> None:
             parent._meta[key] = value
 
 
-def _merge_history(parent, child) -> None:
+def _merge_history(parent: EditSession, child: EditSession) -> None:
     """Commits the scope wrote stay on record: history is facts
     about the oplog, so scopes never collide on it, they append."""
     parent._history.extend(child.history)
 
 
-def _conflict(repo: MemoryRepo, back: dict, triple) -> str:
+def _conflict(
+    repo: MemoryRepo,
+    back: dict[str, Path],
+    triple: tuple[IndexEntry | None, IndexEntry | None, IndexEntry | None],
+) -> str:
     ancestor, ours, theirs = triple
-    path = back[(ancestor or ours or theirs).path]
+    present = ancestor or ours or theirs
+    assert present is not None
+    path = back[os.fspath(present.path)]
     if ours is None:
         return f"{path}: deleted by an earlier edit, changed here"
     if theirs is None:
@@ -150,7 +162,9 @@ def _conflict(repo: MemoryRepo, back: dict, triple) -> str:
     )
 
 
-def _side(base: dict, keys: dict, overlay: dict) -> dict:
+def _side(
+    base: dict[str, MemValue], keys: dict[Path, str], overlay: dict[Path, Staged]
+) -> dict[str, MemValue]:
     """The ancestor, with this side's opinions layered on top."""
     side = dict(base)
     for path, value in overlay.items():
@@ -162,7 +176,7 @@ def _side(base: dict, keys: dict, overlay: dict) -> dict:
     return side
 
 
-def _entry(value):
+def _entry(value: str | bytes) -> MemValue:
     import pygit2
 
     if isinstance(value, Symlink):
@@ -172,7 +186,7 @@ def _entry(value):
     return (value, pygit2.enums.FileMode.BLOB)
 
 
-def _disk_entry(path: Path):
+def _disk_entry(path: Path) -> MemValue | None:
     if _disk_is_link(path):
         return _entry(Symlink(_disk_readlink(path)))
     if not _disk_is_file(path):
@@ -180,7 +194,7 @@ def _disk_entry(path: Path):
     return _entry(_slurp(path))
 
 
-def _key(session, path: Path) -> str:
+def _key(session: EditSession, path: Path) -> str:
     """A tree path for an overlay path.
 
     Tree paths are relative and may not escape the root, so a path
@@ -192,7 +206,7 @@ def _key(session, path: Path) -> str:
         return "__outside__/" + str(path).lstrip("/").replace("/", "%2F")
 
 
-def _decoded(data: bytes):
+def _decoded(data: bytes) -> str | bytes:
     """git's rule: a NUL makes it binary, everything else is text."""
     if b"\x00" in data:
         return data

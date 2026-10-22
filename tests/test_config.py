@@ -1,37 +1,39 @@
 """pyedit.toml discovery: layers, the parent pointer, loud schema errors."""
 
+from pathlib import Path
+
 import pytest
 
 from pyedit import config
 
 
-def write(path, text):
+def write(path: Path, text: str):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
     return path
 
 
-def test_no_config_anywhere(project):
+def test_no_config_anywhere(project: Path):
     assert config.load(project).formatters == {}
 
 
-def test_config_home_layer(project, config_home):
+def test_config_home_layer(project: Path, config_home: Path):
     write(config_home / "pyedit.toml", '[format]\nnix = ["nixfmt", "-"]\n')
     assert config.load(project).formatters == {"nix": ["nixfmt", "-"]}
 
 
-def test_session_root_layer(project):
+def test_session_root_layer(project: Path):
     write(project / "pyedit.toml", '[format]\npy = ["ruff", "format", "-"]\n')
     assert config.load(project).formatters == {"py": ["ruff", "format", "-"]}
 
 
-def test_root_overrides_config_home(project, config_home):
+def test_root_overrides_config_home(project: Path, config_home: Path):
     write(config_home / "pyedit.toml", '[format]\nnix = ["a"]\npy = ["b"]\n')
     write(project / "pyedit.toml", '[format]\npy = ["c"]\n')
     assert config.load(project).formatters == {"nix": ["a"], "py": ["c"]}
 
 
-def test_parent_provides_defaults_root_overrides(project):
+def test_parent_provides_defaults_root_overrides(project: Path):
     write(project.parent / "umbrella.toml", '[format]\nnix = ["a"]\npy = ["b"]\n')
     write(
         project / "pyedit.toml", 'parent = "../umbrella.toml"\n[format]\npy = ["c"]\n'
@@ -39,26 +41,26 @@ def test_parent_provides_defaults_root_overrides(project):
     assert config.load(project).formatters == {"nix": ["a"], "py": ["c"]}
 
 
-def test_parent_chain_follows_upwards(project):
+def test_parent_chain_follows_upwards(project: Path):
     write(project.parent / "top.toml", '[format]\nnix = ["a"]\n')
     write(project.parent / "mid.toml", 'parent = "top.toml"\n[format]\npy = ["b"]\n')
     write(project / "pyedit.toml", 'parent = "../mid.toml"\n')
     assert config.load(project).formatters == {"nix": ["a"], "py": ["b"]}
 
 
-def test_config_home_layer_also_follows_parent(project, config_home):
+def test_config_home_layer_also_follows_parent(project: Path, config_home: Path):
     write(config_home / "shared.toml", '[format]\nnix = ["a"]\n')
     write(config_home / "pyedit.toml", 'parent = "shared.toml"\n')
     assert config.load(project).formatters == {"nix": ["a"]}
 
 
-def test_missing_parent_target_is_loud(project):
+def test_missing_parent_target_is_loud(project: Path):
     write(project / "pyedit.toml", 'parent = "../absent.toml"\n')
-    with pytest.raises(config.ConfigError, match="absent.toml"):
+    with pytest.raises(config.ConfigError, match=r"absent\.toml"):
         config.load(project)
 
 
-def test_parent_cycle_is_loud(project):
+def test_parent_cycle_is_loud(project: Path):
     write(project / "a.toml", 'parent = "b.toml"\n[format]\nnix = ["x"]\n')
     write(project / "b.toml", 'parent = "a.toml"\n[format]\nnix = ["y"]\n')
     write(project / "pyedit.toml", 'parent = "b.toml"\n')
@@ -66,63 +68,64 @@ def test_parent_cycle_is_loud(project):
         config.load(project)
 
 
-def test_self_pointer_is_a_cycle(project):
+def test_self_pointer_is_a_cycle(project: Path):
     write(project / "pyedit.toml", 'parent = "pyedit.toml"\n')
     with pytest.raises(config.ConfigError, match="cycle"):
         config.load(project)
 
 
-def test_parent_must_be_a_string(project):
+def test_parent_must_be_a_string(project: Path):
     write(project / "pyedit.toml", "parent = 3\n")
     with pytest.raises(config.ConfigError, match="parent"):
         config.load(project)
 
 
-def test_invalid_toml_is_loud(project):
+def test_invalid_toml_is_loud(project: Path):
     write(project / "pyedit.toml", "[format\n")
     with pytest.raises(config.ConfigError, match="TOML"):
         config.load(project)
 
 
-def test_unknown_key_is_loud(project):
+def test_unknown_key_is_loud(project: Path):
     write(project / "pyedit.toml", 'formater = "typo"\n')
     with pytest.raises(config.ConfigError, match="formater"):
         config.load(project)
 
 
-def test_format_value_must_be_an_argv_list(project):
+def test_format_value_must_be_an_argv_list(project: Path):
     write(project / "pyedit.toml", '[format]\npy = "ruff"\n')
     with pytest.raises(config.ConfigError, match=r"\[format\].py"):
         config.load(project)
 
 
-def test_empty_command_is_loud(project):
+def test_empty_command_is_loud(project: Path):
     write(project / "pyedit.toml", "[format]\npy = []\n")
     with pytest.raises(config.ConfigError, match=r"\[format\].py"):
         config.load(project)
 
 
-def test_command_words_must_be_strings(project):
+def test_command_words_must_be_strings(project: Path):
     write(project / "pyedit.toml", "[format]\npy = [1]\n")
     with pytest.raises(config.ConfigError, match=r"\[format\].py"):
         config.load(project)
 
 
-def test_suffix_dots_are_normalized(project):
+def test_suffix_dots_are_normalized(project: Path):
     write(project / "pyedit.toml", '[format]\n".py" = ["ruff", "format", "-"]\n')
     assert config.load(project).formatters == {"py": ["ruff", "format", "-"]}
 
 
-def test_empty_suffix_is_loud(project):
+def test_empty_suffix_is_loud(project: Path):
     write(project / "pyedit.toml", '[format]\n"." = ["ruff"]\n')
     with pytest.raises(config.ConfigError, match="suffix"):
         config.load(project)
 
 
-def test_config_file_uses_platformdirs(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        "pyedit.config.user_config_dir", lambda *args, **kwargs: str(tmp_path)
-    )
+def test_config_file_uses_platformdirs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    def user_config_dir(*args: object, **kwargs: object) -> str:
+        return str(tmp_path)
+
+    monkeypatch.setattr("pyedit.config.user_config_dir", user_config_dir)
     assert config.config_file() == tmp_path / "pyedit.toml"
 
 
@@ -135,7 +138,7 @@ format = true
 """
 
 
-def test_lsp_table_parses(project):
+def test_lsp_table_parses(project: Path):
     write(project / "pyedit.toml", RUFF_LSP)
     table = config.load(project).lsp["ruff"]
     assert table.command == ["ruff", "server"]
@@ -144,7 +147,7 @@ def test_lsp_table_parses(project):
     assert table.format is True
 
 
-def test_lsp_format_only_needs_no_actions(project):
+def test_lsp_format_only_needs_no_actions(project: Path):
     write(
         project / "pyedit.toml",
         '[lsp.go]\ncommand = ["gopls"]\nsuffixes = ["go"]\nformat = true\n',
@@ -154,7 +157,7 @@ def test_lsp_format_only_needs_no_actions(project):
     assert table.format is True
 
 
-def test_lsp_table_without_work_is_loud(project):
+def test_lsp_table_without_work_is_loud(project: Path):
     write(
         project / "pyedit.toml",
         '[lsp.ruff]\ncommand = ["ruff", "server"]\nsuffixes = ["py"]\n',
@@ -163,7 +166,7 @@ def test_lsp_table_without_work_is_loud(project):
         config.load(project)
 
 
-def test_lsp_command_must_be_an_argv_list(project):
+def test_lsp_command_must_be_an_argv_list(project: Path):
     write(
         project / "pyedit.toml",
         '[lsp.ruff]\ncommand = "ruff"\nsuffixes = ["py"]\nformat = true\n',
@@ -172,7 +175,7 @@ def test_lsp_command_must_be_an_argv_list(project):
         config.load(project)
 
 
-def test_lsp_suffixes_must_not_be_empty(project):
+def test_lsp_suffixes_must_not_be_empty(project: Path):
     write(
         project / "pyedit.toml",
         '[lsp.ruff]\ncommand = ["ruff", "server"]\nsuffixes = []\nformat = true\n',
@@ -181,7 +184,7 @@ def test_lsp_suffixes_must_not_be_empty(project):
         config.load(project)
 
 
-def test_lsp_format_must_be_a_bool(project):
+def test_lsp_format_must_be_a_bool(project: Path):
     write(
         project / "pyedit.toml",
         '[lsp.ruff]\ncommand = ["ruff", "server"]\nsuffixes = ["py"]\nformat = "yes"\n',
@@ -190,7 +193,7 @@ def test_lsp_format_must_be_a_bool(project):
         config.load(project)
 
 
-def test_lsp_only_titles_parses(project):
+def test_lsp_only_titles_parses(project: Path):
     write(
         project / "pyedit.toml",
         '[lsp.pyrefly]\ncommand = ["pyrefly", "lsp"]\nsuffixes = ["py"]\nactions = ["quickfix"]\nonly_titles = ["Insert import", "Remove unused import"]\n',
@@ -199,12 +202,12 @@ def test_lsp_only_titles_parses(project):
     assert table.only_titles == ["Insert import", "Remove unused import"]
 
 
-def test_lsp_only_titles_defaults_to_empty(project):
+def test_lsp_only_titles_defaults_to_empty(project: Path):
     write(project / "pyedit.toml", RUFF_LSP)
     assert config.load(project).lsp["ruff"].only_titles == []
 
 
-def test_lsp_only_titles_must_be_prefix_strings(project):
+def test_lsp_only_titles_must_be_prefix_strings(project: Path):
     write(
         project / "pyedit.toml",
         '[lsp.ruff]\ncommand = ["ruff", "server"]\nsuffixes = ["py"]\nactions = ["quickfix"]\nonly_titles = ["ok", ""]\n',
@@ -213,7 +216,7 @@ def test_lsp_only_titles_must_be_prefix_strings(project):
         config.load(project)
 
 
-def test_lsp_unknown_subkey_is_loud(project):
+def test_lsp_unknown_subkey_is_loud(project: Path):
     write(
         project / "pyedit.toml",
         '[lsp.ruff]\ncommand = ["ruff", "server"]\nsuffixes = ["py"]\nformat = true\ntimeout = 3\n',
@@ -222,7 +225,7 @@ def test_lsp_unknown_subkey_is_loud(project):
         config.load(project)
 
 
-def test_lsp_tables_merge_by_name(project, config_home):
+def test_lsp_tables_merge_by_name(project: Path, config_home: Path):
     write(config_home / "pyedit.toml", RUFF_LSP)
     write(
         project / "pyedit.toml",
@@ -231,13 +234,13 @@ def test_lsp_tables_merge_by_name(project, config_home):
     assert set(config.load(project).lsp) == {"ruff", "go"}
 
 
-def test_exclude_parses_and_replaces(project, config_home):
+def test_exclude_parses_and_replaces(project: Path, config_home: Path):
     write(config_home / "pyedit.toml", 'exclude = ["vendor/**"]\n')
     write(project / "pyedit.toml", 'exclude = ["prompt-toolkit/**"]\n')
     assert config.load(project).exclude == ["prompt-toolkit/**"]
 
 
-def test_exclude_must_be_glob_strings(project):
+def test_exclude_must_be_glob_strings(project: Path):
     write(project / "pyedit.toml", 'exclude = "vendor/**"\n')
     with pytest.raises(config.ConfigError, match="exclude"):
         config.load(project)
@@ -246,7 +249,9 @@ def test_exclude_must_be_glob_strings(project):
         config.load(project)
 
 
-def test_excluded_matches_relative_absolute_and_home(monkeypatch, tmp_path):
+def test_excluded_matches_relative_absolute_and_home(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
     from pathlib import Path
 
     home = tmp_path / "home"

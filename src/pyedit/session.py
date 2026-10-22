@@ -10,22 +10,45 @@ before diffing, so plain reads never show up in the diff.
 
 from __future__ import annotations
 
+import contextlib
 import glob as glob_module
 import os
 import re
 import stat
+from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final, Literal, TypeAlias, TypedDict
 
 from pyedit.gitignore import IgnoreFilter
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from pyedit import syntax
     from pyedit.patch import PatchOperation
     from pyedit.rope import Reference
     from pyedit.udiff import AppliedFile
 
-_MISSING = object()
+
+class _Missing(Enum):
+    MISSING = 0
+
+
+_MISSING: Final = _Missing.MISSING
+
+Staged: TypeAlias = str | bytes | None
+Slot: TypeAlias = Staged | Literal[_Missing.MISSING]
+Checkpoint: TypeAlias = tuple[
+    dict[Path, Staged], dict[Path, Staged], int, int, dict[str, str]
+]
+
+
+class HistoryRecord(TypedDict):
+    id: str
+    subject: str
+    op: str
+    cleanup_op: str | None
+    conflicts: list[str]
 
 
 class Symlink(str):
@@ -33,7 +56,7 @@ class Symlink(str):
     path, stored and diffed like git stores a link's blob."""
 
 
-_GLOB_CACHE: dict[str, re.Pattern] = {}
+_GLOB_CACHE: dict[str, re.Pattern[str]] = {}
 
 # captured at import time, before the VFS layer patches os.stat: the
 # disk-truth helpers must never observe staged content
@@ -95,7 +118,7 @@ def _disk_snapshot(path: Path) -> str | bytes | Symlink | None:
     return None
 
 
-def _same(a, b) -> bool:
+def _same(a: object, b: object) -> bool:
     """Staged-map equality: a link never equals text, and text equals
     the bytes it encodes to."""
     if a is None or b is None:
@@ -182,7 +205,7 @@ def _traverses_symlink(path: Path, root: Path) -> bool:
     return False
 
 
-def glob_re(pattern: str) -> re.Pattern:
+def glob_re(pattern: str) -> re.Pattern[str]:
     """Compile a glob where * does not cross '/' and '**' does."""
     cached = _GLOB_CACHE.get(pattern)
     if cached is not None:
@@ -250,11 +273,11 @@ class EditSession:
         # agents pass what they have: coerce strings, never guess
         self._root = (Path(root) if root else Path.cwd()).resolve()
         self._ignore_filter: IgnoreFilter | None = None
-        self._staged: dict[Path, str | bytes | None] = {}
+        self._staged: dict[Path, Staged] = {}
         # what disk held when each staged path entered the session:
         # apply() refuses a path whose disk moved since, and an entry
         # equal to its base is a cache, not a change
-        self._base: dict[Path, str | bytes | None] = {}
+        self._base: dict[Path, Staged] = {}
         # commit metadata for -r runs: description/author staged by
         # describe()/author(), applied by the revision amend; anything
         # else finishes loud instead of dropping it silently
@@ -262,7 +285,7 @@ class EditSession:
         # history written past the session: commit scopes append
         # their record here (and VFS merges carry it up); facts about
         # the oplog, so checkpoints never roll them back
-        self._history: list[dict] = []
+        self._history: list[HistoryRecord] = []
         self._bytes_used = 0
         self._files_used = 0
 
@@ -270,7 +293,7 @@ class EditSession:
     def root(self) -> Path:
         return self._root
 
-    def filter_ignored(self, paths) -> list[Path]:
+    def filter_ignored(self, paths: Iterable[Path]) -> list[Path]:
         """Drop paths excluded by .gitignore rules (discovery only)."""
         if not self._respect_gitignore:
             return list(paths)
@@ -283,7 +306,7 @@ class EditSession:
             self._ignore_filter = IgnoreFilter(root=self._root)
         return self._ignore_filter
 
-    def _stage(self, path: Path, content: str | bytes | None, base=_MISSING) -> None:
+    def _stage(self, path: Path, content: Staged, base: Slot = _MISSING) -> None:
         """Enforce budgets, track usage, and land content in the dict.
         `base` is what disk held, when the caller just read it."""
         old = self._staged.get(path, _MISSING)
@@ -293,22 +316,28 @@ class EditSession:
         new_files = 0 if content is None else 1
         delta_bytes = new_bytes - old_bytes
         delta_files = new_files - old_files
-        if self._max_bytes is not None and delta_bytes > 0:
-            if self._bytes_used + delta_bytes > self._max_bytes:
-                raise BudgetExceeded(
-                    f"memory budget exceeded: staging this file would use "
-                    f"{self._bytes_used + delta_bytes} bytes (limit "
-                    f"{self._max_bytes}); narrow the scope or raise "
-                    "--max-materialized-bytes (0 disables the limit)"
-                )
-        if self._max_files is not None and delta_files > 0:
-            if self._files_used + delta_files > self._max_files:
-                raise BudgetExceeded(
-                    f"file budget exceeded: {self._files_used + delta_files} "
-                    f"files staged (limit {self._max_files}); narrow the "
-                    "scope or raise --max-materialized-files (0 disables "
-                    "the limit)"
-                )
+        if (
+            self._max_bytes is not None
+            and delta_bytes > 0
+            and self._bytes_used + delta_bytes > self._max_bytes
+        ):
+            raise BudgetExceeded(
+                f"memory budget exceeded: staging this file would use "
+                f"{self._bytes_used + delta_bytes} bytes (limit "
+                f"{self._max_bytes}); narrow the scope or raise "
+                "--max-materialized-bytes (0 disables the limit)"
+            )
+        if (
+            self._max_files is not None
+            and delta_files > 0
+            and self._files_used + delta_files > self._max_files
+        ):
+            raise BudgetExceeded(
+                f"file budget exceeded: {self._files_used + delta_files} "
+                f"files staged (limit {self._max_files}); narrow the "
+                "scope or raise --max-materialized-files (0 disables "
+                "the limit)"
+            )
         self._bytes_used += delta_bytes
         self._files_used += delta_files
         if path not in self._base:
@@ -351,7 +380,7 @@ class EditSession:
 
     # --- staging checkpoints ---
 
-    def checkpoint(self):
+    def checkpoint(self) -> Checkpoint:
         """A restorable snapshot of the staged map, for inputs that
         must stage atomically or not at all."""
         return (
@@ -362,7 +391,7 @@ class EditSession:
             dict(self._meta),
         )
 
-    def rollback(self, checkpoint) -> None:
+    def rollback(self, checkpoint: Checkpoint) -> None:
         staged, base, used_bytes, used_files, meta = checkpoint
         self._staged = staged
         self._base = base
@@ -426,7 +455,9 @@ class EditSession:
             )
         self._stage(p, Symlink(target))
 
-    def splice(self, path: str | Path, spans) -> int:
+    def splice(
+        self, path: str | Path, spans: Iterable[tuple[int, int, int, int, str]]
+    ) -> int:
         """Apply many position splices in one pass; return the count.
 
         Each span is (start_line, start_col, end_line, end_col,
@@ -476,7 +507,10 @@ class EditSession:
 
         from pyedit import syntax
 
-        return syntax.free_names(self.read(path))
+        text = self.read(path)
+        if not isinstance(text, str):
+            raise ValueError(f"{self.canon(path)} is binary; free_names works on text")
+        return syntax.free_names(text)
 
     def edit(
         self,
@@ -537,11 +571,11 @@ class EditSession:
         text = self.read(path)
         if not isinstance(text, str):
             raise ValueError(f"{self.canon(path)} is binary; find works on text")
-        out = []
+        out: list[tuple[int, int, str]] = []
         for lineno, line in enumerate(text.split("\n"), start=1):
-            for m in rx.finditer(line):
-                if m.group():
-                    out.append((lineno, m.start(), m.group()))
+            out.extend(
+                (lineno, m.start(), m.group()) for m in rx.finditer(line) if m.group()
+            )
         return out
 
     def edit_re(
@@ -606,7 +640,10 @@ class EditSession:
             self._stage(src, None)
             self._stage(dst, content)
             return
-        disk_files, disk_links = _disk_tree(src) if _disk_is_dir(src) else ([], [])
+        disk_files: list[Path] = []
+        disk_links: list[Path] = []
+        if _disk_is_dir(src):
+            disk_files, disk_links = _disk_tree(src)
         moved = {
             path: content
             for path, content in self._staged.items()
@@ -757,7 +794,7 @@ class EditSession:
 
     # --- engine ---
 
-    def staged(self) -> dict[Path, str | bytes | None]:
+    def staged(self) -> dict[Path, Staged]:
         return dict(self._staged)
 
     @property
@@ -767,7 +804,7 @@ class EditSession:
         return dict(self._meta)
 
     @property
-    def history(self) -> list[dict]:
+    def history(self) -> list[HistoryRecord]:
         """Commits a scope wrote past this session: one record per
         commit with its id, subject, op, cleanup op and conflicts."""
         return list(self._history)
@@ -814,7 +851,7 @@ class EditSession:
             d for _, d in unified_diffs(self.staged(), context, render=difflib_hunks)
         )
 
-    def apply(self, paths=None) -> None:
+    def apply(self, paths: dict[Path, Staged] | None = None) -> None:
         """Write staged content to disk now (raw os calls, so this is
         safe inside a scope whose filesystem patches are installed).
 
@@ -837,10 +874,9 @@ class EditSession:
         for path, content in targets:
             try:
                 if content is None:
-                    try:
+                    # already gone is fine: the staged deletion stands
+                    with contextlib.suppress(FileNotFoundError):
                         _REAL_REMOVE(path)
-                    except FileNotFoundError:
-                        pass  # already gone; the staged deletion stands
                     continue
                 _REAL_MAKEDIRS(path.parent, exist_ok=True)
                 if isinstance(content, Symlink):
@@ -872,7 +908,7 @@ class EditSession:
         # disk now holds what was staged: the next edit is measured from it
         self._base.update(targets)
 
-    def staged_content(self, path: str | Path) -> str | bytes | None:
+    def staged_content(self, path: str | Path) -> Slot:
         return self._staged.get(self.canon(path), _MISSING)
 
     def prune_unchanged(self) -> None:

@@ -3,21 +3,30 @@
 The rule these pin: a conflict is raised, never resolved quietly.
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import pytest
 
 import pyedit
 from pyedit import VFS, Collision
 from pyedit.session import EditSession, Symlink
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 
 @pytest.fixture
-def root(project, monkeypatch):
+def root(project: Path, monkeypatch: pytest.MonkeyPatch) -> EditSession:
     session = EditSession()
     monkeypatch.setattr(pyedit, "session", session, raising=False)
     return session
 
 
-def test_binary_divergence_raises_and_stages_nothing(root, project):
+def test_binary_divergence_raises_and_stages_nothing(
+    root: EditSession, project: Path
+) -> None:
     """A conflicted index yields every stage, not just stage 0.
 
     Taking them in order stages the path three times and the last
@@ -31,28 +40,30 @@ def test_binary_divergence_raises_and_stages_nothing(root, project):
     assert root.staged_content(root.canon("blob.bin")) == b"\x00first"
 
 
-def test_delete_against_edit_raises(root, project):
+def test_delete_against_edit_raises(root: EditSession, project: Path) -> None:
     with VFS():
         pyedit.delete("src/a.py")
     with pytest.raises(Collision), VFS():
         pyedit.edit("src/a.py", "alpha = 1\n", "alpha = 10\n")
 
 
-def test_two_creates_with_different_content_raise(root, project):
+def test_two_creates_with_different_content_raise(
+    root: EditSession, project: Path
+) -> None:
     with VFS():
         pyedit.write("new.py", "one = 1\n")
     with pytest.raises(Collision), VFS():
         pyedit.write("new.py", "two = 2\n")
 
 
-def test_same_line_edited_twice_raises(root, project):
+def test_same_line_edited_twice_raises(root: EditSession, project: Path) -> None:
     with VFS():
         pyedit.edit("src/a.py", "beta = 2\n", "beta = 20\n")
     with pytest.raises(Collision), VFS():
         pyedit.edit("src/a.py", "beta = 2\n", "beta = 99\n")
 
 
-def test_neighbouring_lines_collide(root, project):
+def test_neighbouring_lines_collide(root: EditSession, project: Path) -> None:
     """git merges two regions only with an unchanged line between them.
 
     One line of separation is the whole difference, so the message has
@@ -65,7 +76,7 @@ def test_neighbouring_lines_collide(root, project):
     assert root.staged_content(root.canon("src/a.py")) == "alpha = 10\nbeta = 2\n"
 
 
-def test_one_unchanged_line_is_enough(root, project):
+def test_one_unchanged_line_is_enough(root: EditSession, project: Path) -> None:
     (project / "src" / "a.py").write_text("alpha = 1\nmiddle\nbeta = 2\n")
     with VFS():
         pyedit.edit("src/a.py", "alpha = 1\n", "alpha = 10\n")
@@ -76,7 +87,9 @@ def test_one_unchanged_line_is_enough(root, project):
     )
 
 
-def test_symlink_retarget_merges_beside_a_text_edit(root, project):
+def test_symlink_retarget_merges_beside_a_text_edit(
+    root: EditSession, project: Path
+) -> None:
     """A kind pyedit's own merge cannot do: it treats a link as bytes."""
     (project / "link").symlink_to("src/a.py")
     with VFS():

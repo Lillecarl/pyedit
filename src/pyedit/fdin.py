@@ -11,15 +11,21 @@ from __future__ import annotations
 
 import contextlib
 import os
-from collections.abc import Iterator, Mapping
+from collections.abc import Mapping
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
 
 _CHUNK = 1 << 16
+
+Payloads = Mapping[str, str] | Mapping[int, str]
 
 _injected: dict[int, str] = {}
 
 
 @contextlib.contextmanager
-def injected(payloads: Mapping[str | int, str] | None) -> Iterator[None]:
+def injected(payloads: Payloads | None) -> Generator[None]:
     """Provide read_fd payloads without OS file descriptors.
 
     The MCP server has no shell to attach heredocs, so payloads

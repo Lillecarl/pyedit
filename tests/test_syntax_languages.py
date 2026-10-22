@@ -3,12 +3,19 @@ must parse clean and outline exactly its definitions; a broken sample
 must surface problems. Corpus lives in syntax_corpus.py, the CLI-level
 gate for the same rows lives in test_cli.py."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import pytest
 from syntax_corpus import LANGUAGES
 
 from pyedit.session import EditSession
 from pyedit.syntax import node_at, outline, problems
 from pyedit.syntax.rules import RULES
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @pytest.mark.parametrize("suffix", [".ts", ".tsx"])
@@ -19,7 +26,7 @@ from pyedit.syntax.rules import RULES
         'export type * as ns from "./mod";\n',
     ],
 )
-def test_typescript5_export_type_star(suffix, source, tmp_path):
+def test_typescript5_export_type_star(suffix: str, source: str, tmp_path: Path) -> None:
     session = EditSession(respect_gitignore=False, root=tmp_path)
     session.write("sample" + suffix, source)
     assert problems(session, "sample" + suffix) == []
@@ -38,7 +45,9 @@ SVELTE_TS = '<script lang="ts">\n{body}\n</script>\n<h1>hi</h1>\n'
     ],
     ids=["ts-valid", "ts-broken", "js-broken", "css-broken"],
 )
-def test_svelte_embedded_languages(source, flagged_line, tmp_path):
+def test_svelte_embedded_languages(
+    source: str, flagged_line: int | None, tmp_path: Path
+) -> None:
     session = EditSession(respect_gitignore=False, root=tmp_path)
     session.write("sample.svelte", source)
     found = problems(session, "sample.svelte")
@@ -47,7 +56,7 @@ def test_svelte_embedded_languages(source, flagged_line, tmp_path):
     )
 
 
-def test_table_covers_every_shipped_suffix():
+def test_table_covers_every_shipped_suffix() -> None:
     covered = {id(RULES[suffix]) for _, suffix, *_ in LANGUAGES}
     assert {id(rules) for rules in RULES.values()} == covered
 
@@ -55,7 +64,9 @@ def test_table_covers_every_shipped_suffix():
 @pytest.mark.parametrize(
     "name,suffix,correct,broken,names", LANGUAGES, ids=[entry[0] for entry in LANGUAGES]
 )
-def test_language_correct_and_incorrect(name, suffix, correct, broken, names, tmp_path):
+def test_language_correct_and_incorrect(
+    name: str, suffix: str, correct: str, broken: str, names: set[str], tmp_path: Path
+) -> None:
     session = EditSession(respect_gitignore=False, root=tmp_path)
     path = "sample" + suffix
 

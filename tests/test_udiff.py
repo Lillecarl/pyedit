@@ -1,8 +1,15 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import pytest
 
 from pyedit.diff import file_patch as _binary_patch
 from pyedit.session import EditSession, Symlink
 from pyedit.udiff import UnifiedDiffError, apply_diff
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 GIT_DIFF = """\
 diff --git a/src/a.py b/src/a.py
@@ -15,7 +22,7 @@ diff --git a/src/a.py b/src/a.py
 """
 
 
-def test_update_single_hunk(project):
+def test_update_single_hunk(project: Path) -> None:
     session = EditSession()
     applied, _failures = apply_diff(session, GIT_DIFF)
     assert applied[0].path == "src/a.py"
@@ -23,7 +30,7 @@ def test_update_single_hunk(project):
     assert session.staged()[project / "src" / "a.py"] == "alpha = 42\nbeta = 2\n"
 
 
-def test_update_multiple_hunks(project):
+def test_update_multiple_hunks(project: Path) -> None:
     (project / "src" / "a.py").write_text("l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\n")
     session = EditSession()
     apply_diff(
@@ -43,7 +50,7 @@ def test_update_multiple_hunks(project):
     )
 
 
-def test_create_and_delete_files(project):
+def test_create_and_delete_files(project: Path) -> None:
     session = EditSession()
     apply_diff(
         session,
@@ -64,7 +71,7 @@ def test_create_and_delete_files(project):
     assert staged[project / "src" / "b.py"] is None
 
 
-def test_no_prefix_paths(project):
+def test_no_prefix_paths(project: Path) -> None:
     session = EditSession()
     apply_diff(
         session,
@@ -73,7 +80,7 @@ def test_no_prefix_paths(project):
     assert session.staged()[project / "src" / "a.py"] == "alpha = 9\nbeta = 2\n"
 
 
-def test_no_newline_markers_on_both_sides(project):
+def test_no_newline_markers_on_both_sides(project: Path) -> None:
     (project / "src" / "a.py").write_text("alpha = 1")
     session = EditSession()
     apply_diff(
@@ -83,7 +90,7 @@ def test_no_newline_markers_on_both_sides(project):
     assert session.staged()[project / "src" / "a.py"] == "alpha = 2"
 
 
-def test_marker_only_on_old_side_adds_newline(project):
+def test_marker_only_on_old_side_adds_newline(project: Path) -> None:
     (project / "src" / "a.py").write_text("alpha = 1")
     session = EditSession()
     apply_diff(
@@ -93,7 +100,7 @@ def test_marker_only_on_old_side_adds_newline(project):
     assert session.staged()[project / "src" / "a.py"] == "alpha = 2\n"
 
 
-def test_insertion_after_no_newline_file(project):
+def test_insertion_after_no_newline_file(project: Path) -> None:
     (project / "src" / "a.py").write_text("alpha = 1")
     session = EditSession()
     apply_diff(
@@ -103,7 +110,7 @@ def test_insertion_after_no_newline_file(project):
     assert session.staged()[project / "src" / "a.py"] == "alpha = 1\nbeta = 2\n"
 
 
-def test_apply_matches_context_despite_trailing_whitespace(project):
+def test_apply_matches_context_despite_trailing_whitespace(project: Path) -> None:
     (project / "src" / "a.py").write_text("alpha = 1   \nbeta = 2\n")
     session = EditSession()
     apply_diff(
@@ -113,7 +120,7 @@ def test_apply_matches_context_despite_trailing_whitespace(project):
     assert session.staged()[project / "src" / "a.py"] == "alpha = 42\nbeta = 2\n"
 
 
-def test_context_line_keeps_the_file_whitespace(project):
+def test_context_line_keeps_the_file_whitespace(project: Path) -> None:
     (project / "src" / "a.py").write_text("alpha = 1\nbeta = 2\n")
     session = EditSession()
     apply_diff(
@@ -123,7 +130,7 @@ def test_context_line_keeps_the_file_whitespace(project):
     assert session.staged()[project / "src" / "a.py"] == "alpha = 1\nbeta = 42\n"
 
 
-def test_anchor_found_when_the_hint_is_past_the_end(project):
+def test_anchor_found_when_the_hint_is_past_the_end(project: Path) -> None:
     (project / "src" / "a.py").write_text("one\ntwo\nthree\nfour\nfive\n")
     session = EditSession()
     apply_diff(
@@ -133,7 +140,7 @@ def test_anchor_found_when_the_hint_is_past_the_end(project):
     assert session.staged()[project / "src" / "a.py"] == "one\ntwo\nTHREE\nfour\nfive\n"
 
 
-def test_anchor_found_at_the_far_end_from_a_zero_hint(project):
+def test_anchor_found_at_the_far_end_from_a_zero_hint(project: Path) -> None:
     (project / "src" / "a.py").write_text("one\ntwo\nthree\nfour\nfive\n")
     session = EditSession()
     apply_diff(
@@ -143,7 +150,7 @@ def test_anchor_found_at_the_far_end_from_a_zero_hint(project):
     assert session.staged()[project / "src" / "a.py"] == "one\ntwo\nthree\nFOUR\nfive\n"
 
 
-def test_context_mismatch_raises(project):
+def test_context_mismatch_raises(project: Path) -> None:
     session = EditSession()
     with pytest.raises(UnifiedDiffError, match="context not found"):
         apply_diff(
@@ -152,7 +159,7 @@ def test_context_mismatch_raises(project):
         )
 
 
-def test_binary_source_raises(project):
+def test_binary_source_raises(project: Path) -> None:
     (project / "src" / "data.bin").write_bytes(b"\xff\xfe\x00\x01")
     session = EditSession()
     with pytest.raises(UnifiedDiffError, match="binary"):
@@ -162,7 +169,7 @@ def test_binary_source_raises(project):
         )
 
 
-def test_rename_without_hunks(project):
+def test_rename_without_hunks(project: Path) -> None:
     session = EditSession()
     applied, _failures = apply_diff(
         session,
@@ -177,7 +184,7 @@ def test_rename_without_hunks(project):
     assert applied[0].action == "renamed"
 
 
-def test_multiple_files_in_one_diff(project):
+def test_multiple_files_in_one_diff(project: Path) -> None:
     session = EditSession()
     apply_diff(
         session,
@@ -194,7 +201,7 @@ def test_multiple_files_in_one_diff(project):
     assert staged[project / "src" / "a.py"] == "alpha = 42\nbeta = 2\n"
 
 
-def test_roundtrip_through_pyedit_output(project):
+def test_roundtrip_through_pyedit_output(project: Path) -> None:
     session = EditSession()
     session.edit("src/a.py", "alpha", "ALPHA")
     from pyedit.diff import unified_diffs
@@ -205,14 +212,14 @@ def test_roundtrip_through_pyedit_output(project):
     assert roundtrip.staged()[project / "src" / "a.py"] == "ALPHA = 1\nbeta = 2\n"
 
 
-def test_a_binary_section_names_the_other_entry_point(project):
+def test_a_binary_section_names_the_other_entry_point(project: Path) -> None:
     """One format, one applier: no quiet routing to libgit2."""
     session = EditSession()
     with pytest.raises(UnifiedDiffError, match="apply_diff_git"):
         apply_diff(session, _binary_patch("x.bin", None, b"\x00\x01\x02"))
 
 
-def test_a_symlink_section_names_the_other_entry_point(project):
+def test_a_symlink_section_names_the_other_entry_point(project: Path) -> None:
     session = EditSession()
     with pytest.raises(UnifiedDiffError, match="apply_diff_git"):
         apply_diff(session, _binary_patch("link", None, Symlink("a.py")))

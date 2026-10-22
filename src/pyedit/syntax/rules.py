@@ -12,7 +12,12 @@ The default `title` reads the grammar's `name` field, and the default
 
 from __future__ import annotations
 
-from pyedit.syntax.nodes import SyntaxProblem, char_column
+from typing import TYPE_CHECKING
+
+from pyedit.syntax.nodes import SyntaxProblem, char_column, node_text
+
+if TYPE_CHECKING:
+    from tree_sitter import Node, Tree
 
 # leaf node kinds that ARE their own name; grammars hang a `name` field
 # on the definition node, the identifier under it has none
@@ -44,13 +49,13 @@ class LanguageRules:
         if noise:
             self.noise = noise
 
-    def title(self, node) -> str | None:
+    def title(self, node: Node) -> str | None:
         name_node = node.child_by_field_name("name")
         if name_node is None:
             return None
-        return name_node.text.decode("utf-8", errors="replace")
+        return node_text(name_node)
 
-    def leaf_title(self, node) -> str | None:
+    def leaf_title(self, node: Node) -> str | None:
         """The name for whatever the cursor landed on: definitions carry
         a name field; a bare identifier is its own name."""
         titled = self.title(node)
@@ -59,10 +64,10 @@ class LanguageRules:
         if node.type in _SELF_NAMED and not any(
             child.is_named for child in node.children
         ):
-            return node.text.decode("utf-8", errors="replace")
+            return node_text(node)
         return None
 
-    def problems(self, text: str, tree) -> list[SyntaxProblem]:
+    def problems(self, text: str, tree: Tree | None) -> list[SyntaxProblem]:
         """Outermost tree-sitter errors in pyedit positions. `tree` is
         None when no grammar loaded; there is nothing to report then."""
         if tree is None:

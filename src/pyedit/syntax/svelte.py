@@ -7,9 +7,16 @@ languages pyedit has grammars for."""
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from pyedit.syntax.injection import injected_problems
-from pyedit.syntax.nodes import SyntaxProblem
+from pyedit.syntax.nodes import override
 from pyedit.syntax.rules import LanguageRules
+
+if TYPE_CHECKING:
+    from tree_sitter import Tree
+
+    from pyedit.syntax.nodes import SyntaxProblem
 
 _INJECTIONS = """
 ((script_element (raw_text) @injection.content)
@@ -34,7 +41,8 @@ class Svelte(LanguageRules):
     grammar = "tree_sitter_svelte"
     suffixes = (".svelte",)
 
-    def problems(self, text: str, tree) -> list[SyntaxProblem]:
+    @override
+    def problems(self, text: str, tree: Tree | None) -> list[SyntaxProblem]:
         if tree is None:
             return []
         found = super().problems(text, tree)

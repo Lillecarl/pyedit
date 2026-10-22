@@ -19,6 +19,7 @@ of writing it anywhere.
 from __future__ import annotations
 
 import builtins
+import contextlib
 import faulthandler
 import os
 import sys
@@ -42,10 +43,8 @@ def _real_makedirs(target: Path) -> None:
         stack.append(current)
         current = current.parent
     for part in reversed(stack):
-        try:
+        with contextlib.suppress(FileExistsError):
             _REAL_MKDIR(part)
-        except FileExistsError:
-            pass
 
 
 def state_dir() -> Path:

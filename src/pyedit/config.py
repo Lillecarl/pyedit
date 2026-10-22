@@ -23,6 +23,7 @@ import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from platformdirs import user_config_dir
 
@@ -83,20 +84,18 @@ def load(root: Path) -> Config:
     merged: dict[str, list[str]] = {}
     servers: dict[str, LspTable] = {}
     excluded: list[str] = []
-    for path, data in [*_chain(config_file()), *_chain(root / "pyedit.toml")]:
-        for suffix, argv in data.get("format", {}).items():
-            merged[suffix] = argv
-        for name, table in data.get("lsp", {}).items():
-            servers[name] = table
+    for _, data in [*_chain(config_file()), *_chain(root / "pyedit.toml")]:
+        merged.update(data.get("format", {}))
+        servers.update(data.get("lsp", {}))
         if "exclude" in data:
             excluded = data["exclude"]
     return Config(formatters=merged, lsp=servers, exclude=excluded)
 
 
-def _chain(start: Path) -> list[tuple[Path, dict]]:
+def _chain(start: Path) -> list[tuple[Path, dict[str, Any]]]:
     """`start` plus whatever its ``parent`` pointers lead to, parsed,
     outermost first. A missing `start` is an empty chain."""
-    pairs: list[tuple[Path, dict]] = []
+    pairs: list[tuple[Path, dict[str, Any]]] = []
     seen: set[Path] = set()
     current = start
     while current.is_file():
@@ -119,7 +118,7 @@ def _chain(start: Path) -> list[tuple[Path, dict]]:
     return pairs
 
 
-def _read(path: Path) -> dict:
+def _read(path: Path) -> dict[str, Any]:
     """Parse and validate one pyedit.toml."""
     try:
         text = path.read_text(encoding="utf-8")
@@ -156,7 +155,7 @@ def _read(path: Path) -> dict:
     return data
 
 
-def _lsp_table(path: Path, name: str, table) -> LspTable:
+def _lsp_table(path: Path, name: str, table: Any) -> LspTable:
     where = f"{path}: [lsp.{name}]"
     if not isinstance(table, dict):
         raise ConfigError(f"{where} must be a table")
@@ -197,7 +196,7 @@ def _lsp_table(path: Path, name: str, table) -> LspTable:
     )
 
 
-def _exclude(path: Path, patterns) -> list[str]:
+def _exclude(path: Path, patterns: Any) -> list[str]:
     if not isinstance(patterns, list) or not all(
         isinstance(p, str) and p for p in patterns
     ):
@@ -205,7 +204,7 @@ def _exclude(path: Path, patterns) -> list[str]:
     return list(patterns)
 
 
-def _argv(path: Path, where: str, argv) -> list[str]:
+def _argv(path: Path, where: str, argv: Any) -> list[str]:
     where = f"{path}: {where}"
     if not isinstance(argv, list) or not argv:
         raise ConfigError(f"{where} must be a non-empty list of strings")

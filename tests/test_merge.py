@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import pytest
 
 import pyedit
@@ -5,16 +9,20 @@ from pyedit import VFS, Collision, jjrev
 from pyedit.jjrev import JjRevError
 from pyedit.session import EditSession
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
+
 
 @pytest.fixture
-def root(project, monkeypatch):
+def root(project: Path, monkeypatch: pytest.MonkeyPatch) -> EditSession:
     """The root session, bound as the module's live session."""
     session = EditSession()
     monkeypatch.setattr(pyedit, "session", session, raising=False)
     return session
 
 
-def test_sibling_scopes_merge_into_the_root(root, project):
+def test_sibling_scopes_merge_into_the_root(root: EditSession, project: Path) -> None:
     with VFS():
         pyedit.write("src/a.py", "alpha = 1\nbeta = 2\nALPHA = 11\n")
     with VFS():
@@ -24,13 +32,15 @@ def test_sibling_scopes_merge_into_the_root(root, project):
     assert staged[project / "src" / "b.py"] == "gamma = 3\ndelta = 4\n"
 
 
-def test_scope_edits_route_through_pyedit_without_a_name(root):
+def test_scope_edits_route_through_pyedit_without_a_name(root: EditSession) -> None:
     with VFS():
         pyedit.edit("src/a.py", "alpha", "ALPHA")
     assert root.staged_content(root.canon("src/a.py")) == "ALPHA = 1\nbeta = 2\n"
 
 
-def test_root_edits_do_not_route_through_scopes(root, project):
+def test_root_edits_do_not_route_through_scopes(
+    root: EditSession, project: Path
+) -> None:
     (project / "src" / "a.py").write_text("alpha = 1\nmiddle\nbeta = 2\n")
     pyedit.edit("src/a.py", "alpha", "ALPHA")
     with VFS():
@@ -44,7 +54,9 @@ def test_root_edits_do_not_route_through_scopes(root, project):
     )
 
 
-def test_second_scope_ignores_lines_moved_by_the_first(root, project):
+def test_second_scope_ignores_lines_moved_by_the_first(
+    root: EditSession, project: Path
+) -> None:
     """Line numbers are never consulted: the second edit does not have
     to account for lines the first one inserted above it."""
     (project / "src" / "a.py").write_text("alpha = 1\nmiddle\nbeta = 2\n")
@@ -56,7 +68,7 @@ def test_second_scope_ignores_lines_moved_by_the_first(root, project):
     assert merged == "alpha = 1\n# inserted header\n# more\nmiddle\nbeta = 22\n"
 
 
-def test_conflicting_edits_of_the_same_line_raise(root):
+def test_conflicting_edits_of_the_same_line_raise(root: EditSession) -> None:
     with VFS():
         pyedit.edit("src/a.py", "beta = 2\n", "beta = 20\n")
     with pytest.raises(Collision, match="nothing unchanged between"), VFS():
@@ -64,7 +76,7 @@ def test_conflicting_edits_of_the_same_line_raise(root):
     assert root.staged_content(root.canon("src/a.py")) == "alpha = 1\nbeta = 20\n"
 
 
-def test_failed_scope_keeps_earlier_merges(root):
+def test_failed_scope_keeps_earlier_merges(root: EditSession) -> None:
     with VFS():
         pyedit.write("src/b.py", "gamma = 3\n_epsilon = 5\n")
     with pytest.raises(ValueError, match="pattern not found"), VFS():
@@ -74,28 +86,28 @@ def test_failed_scope_keeps_earlier_merges(root):
     assert root.canon("src/a.py") not in root.staged()
 
 
-def test_delete_and_edit_conflict(root):
+def test_delete_and_edit_conflict(root: EditSession) -> None:
     with VFS():
         pyedit.delete("src/a.py")
     with pytest.raises(Collision, match="deleted by an earlier edit"), VFS():
         pyedit.edit("src/a.py", "alpha = 1\n", "alpha = 10\n")
 
 
-def test_edit_after_delete_conflict(root):
+def test_edit_after_delete_conflict(root: EditSession) -> None:
     with VFS():
         pyedit.edit("src/a.py", "alpha = 1\n", "alpha = 10\n")
     with pytest.raises(Collision, match="changed by an earlier edit"), VFS():
         pyedit.delete("src/a.py")
 
 
-def test_double_create_with_different_content(root):
+def test_double_create_with_different_content(root: EditSession) -> None:
     with VFS():
         pyedit.write("new.py", "one = 1\n")
     with pytest.raises(Collision, match="created by two edits"), VFS():
         pyedit.write("new.py", "two = 2\n")
 
 
-def test_double_create_with_same_content_is_idempotent(root):
+def test_double_create_with_same_content_is_idempotent(root: EditSession) -> None:
     with VFS():
         pyedit.write("new.py", "one = 1\n")
     with VFS():
@@ -103,7 +115,7 @@ def test_double_create_with_same_content_is_idempotent(root):
     assert root.staged_content(root.canon("new.py")) == "one = 1\n"
 
 
-def test_ambiguous_context_raises(root):
+def test_ambiguous_context_raises(root: EditSession) -> None:
     block = "".join(f"line{d}\n" for d in range(1, 13))
     content = block + block
     changed = content.replace("line4\n", "LINE4\n", 1) + "appended\n"
@@ -113,7 +125,9 @@ def test_ambiguous_context_raises(root):
         pyedit.write("src/dup.py", changed)
 
 
-def test_unique_context_despite_repetition_applies(root, project):
+def test_unique_context_despite_repetition_applies(
+    root: EditSession, project: Path
+) -> None:
     block = "".join(f"line{d}\n" for d in range(1, 13))
     content = block + block
     (project / "src" / "dup.py").write_text(content)
@@ -127,21 +141,21 @@ def test_unique_context_despite_repetition_applies(root, project):
     )
 
 
-def test_failed_scope_discards_itself(root):
+def test_failed_scope_discards_itself(root: EditSession) -> None:
     with pytest.raises(RuntimeError), VFS():
         pyedit.write("src/a.py", "alpha = 10\nbeta = 2\n")
         raise RuntimeError("agent changed its mind")
     assert root.staged() == {}
 
 
-def test_reading_scope_pollutes_nothing(root):
+def test_reading_scope_pollutes_nothing(root: EditSession) -> None:
     with VFS():
         pyedit.read("src/a.py")
         pyedit.glob("**/*.py")
     assert root.staged() == {}
 
 
-def test_binary_conflict(root):
+def test_binary_conflict(root: EditSession) -> None:
     (root.canon("blob.bin").parent / "blob.bin").write_bytes(b"\x00old")
     with VFS():
         pyedit.write("blob.bin", b"\x00first")
@@ -149,7 +163,7 @@ def test_binary_conflict(root):
         pyedit.write("blob.bin", b"\x00second")
 
 
-def test_an_edit_follows_a_rename(root):
+def test_an_edit_follows_a_rename(root: EditSession) -> None:
     """git pairs the delete with the add, so the edit is not lost."""
     with VFS():
         pyedit.rename("src/a.py", "src/renamed.py")
@@ -161,7 +175,9 @@ def test_an_edit_follows_a_rename(root):
     )
 
 
-def test_rename_as_delete_plus_create_without_detection(project, monkeypatch):
+def test_rename_as_delete_plus_create_without_detection(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """--no-rename-detection: the pairing is a similarity guess, and
     turning it off makes the rename collide with the edit instead."""
     session = EditSession(find_renames=False)
@@ -172,7 +188,9 @@ def test_rename_as_delete_plus_create_without_detection(project, monkeypatch):
         pyedit.edit("src/a.py", "alpha = 1\n", "alpha = 10\n")
 
 
-def test_rename_detection_reaches_a_nested_scope(project, monkeypatch):
+def test_rename_detection_reaches_a_nested_scope(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     session = EditSession(find_renames=False)
     monkeypatch.setattr(pyedit, "session", session, raising=False)
     with VFS() as outer:
@@ -181,7 +199,7 @@ def test_rename_detection_reaches_a_nested_scope(project, monkeypatch):
             assert inner._find_renames is False
 
 
-def test_apply_writes_merged_state(root, project):
+def test_apply_writes_merged_state(root: EditSession, project: Path) -> None:
     with VFS():
         pyedit.write("src/a.py", "alpha = 1\nbeta = 2\nnew = 3\n")
     with VFS():
@@ -191,7 +209,7 @@ def test_apply_writes_merged_state(root, project):
     assert (project / "brand.py").read_text() == "fresh = True\n"
 
 
-def test_diff_renders_the_merged_state(root):
+def test_diff_renders_the_merged_state(root: EditSession) -> None:
     with VFS():
         pyedit.edit("src/a.py", "alpha", "ALPHA")
     diff = root.diff_git()
@@ -199,7 +217,7 @@ def test_diff_renders_the_merged_state(root):
     assert "+ALPHA = 1" in diff
 
 
-def test_nested_scopes(root, project):
+def test_nested_scopes(root: EditSession, project: Path) -> None:
     with VFS():
         with VFS():
             pyedit.write("src/a.py", "alpha = 1\nbeta = 2\ncomment = 'added'\n")
@@ -211,7 +229,9 @@ def test_nested_scopes(root, project):
     assert staged[project / "src" / "b.py"] == "gamma = 33\n"
 
 
-def test_scope_root_follows_the_parent_not_the_cwd(tmp_path, monkeypatch):
+def test_scope_root_follows_the_parent_not_the_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     # a library caller passes root=; the scope must edit that tree
     # even though the cwd is elsewhere (#12)
     import os
@@ -229,7 +249,7 @@ def test_scope_root_follows_the_parent_not_the_cwd(tmp_path, monkeypatch):
         os.chdir(cwd)
 
 
-def test_same_file_scopes_do_not_drift(root, project):
+def test_same_file_scopes_do_not_drift(root: EditSession, project: Path) -> None:
     """The skill's promise, pinned: three edits to one file, each
     authored against the pristine disk text, merged by git.
 
@@ -250,7 +270,7 @@ def test_same_file_scopes_do_not_drift(root, project):
     )
 
 
-def test_scopes_continue_after_a_collision(root):
+def test_scopes_continue_after_a_collision(root: EditSession) -> None:
     with VFS():
         pyedit.edit("src/a.py", "beta = 2\n", "beta = 20\n")
     with pytest.raises(Collision), VFS():
@@ -260,11 +280,22 @@ def test_scopes_continue_after_a_collision(root):
     assert root.staged_content(root.canon("src/b.py")) == "gamma = 30\n"
 
 
-def _commit_fakes(monkeypatch, create):
-    monkeypatch.setattr(jjrev, "find_repo_root", lambda start: start)
-    monkeypatch.setattr(jjrev, "resolve_ids", lambda root, rev: ("aaa", "bbb"))
+def _find_repo_root(start: Path) -> Path:
+    return start
 
-    def fake_export(repo_root, rev, dest):
+
+def _resolve_ids(repo_root: Path, rev: str) -> tuple[str, str]:
+    return ("aaa", "bbb")
+
+
+def _commit_fakes(
+    monkeypatch: pytest.MonkeyPatch,
+    create: Callable[..., object],
+) -> None:
+    monkeypatch.setattr(jjrev, "find_repo_root", _find_repo_root)
+    monkeypatch.setattr(jjrev, "resolve_ids", _resolve_ids)
+
+    def fake_export(repo_root: Path, rev: str, dest: Path) -> list[str]:
         assert rev == "aaa"
         (dest / "a.py").write_bytes(b"old\n")
         return ["a.py"]
@@ -273,12 +304,16 @@ def _commit_fakes(monkeypatch, create):
     monkeypatch.setattr(jjrev, "create_after", create)
 
 
-def test_commit_scope_records_history_not_parent(root, project, tmp_path, monkeypatch):
+def test_commit_scope_records_history_not_parent(
+    root: EditSession, project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from pyedit import runner
 
-    created = {}
+    created: dict[str, object] = {}
 
-    def fake_create(repo_root, rev, message, changes):
+    def fake_create(
+        repo_root: Path, rev: str, message: str, changes: dict[str, object]
+    ) -> tuple[str, str, str | None, list[str]]:
         created.update(message=message, changes=changes)
         return ("newhex123456", "op1", None, [])
 
@@ -300,32 +335,46 @@ def test_commit_scope_records_history_not_parent(root, project, tmp_path, monkey
     assert result.history == root.history
 
 
-def test_commit_scope_empty_refuses(root, project, tmp_path, monkeypatch):
-    def fake_create(repo_root, rev, message, changes):
+def test_commit_scope_empty_refuses(
+    root: EditSession, project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_create(
+        repo_root: Path, rev: str, message: str, changes: dict[str, object]
+    ) -> tuple[str, str, str | None, list[str]]:
         if not changes:
             raise JjRevError("nothing to commit: the scope staged no changes")
         raise AssertionError("create_after ran with no changes")
 
     _commit_fakes(monkeypatch, fake_create)
-    with pytest.raises(JjRevError, match="nothing to commit"):
-        with pyedit.commit("empty", after="B"):
-            pass
+    with (
+        pytest.raises(JjRevError, match="nothing to commit"),
+        pyedit.commit("empty", after="B"),
+    ):
+        pass
     assert root.history == []
 
 
-def test_commit_scope_meta_refuses(root, project, tmp_path, monkeypatch):
-    def no_create(*args, **kwargs):
+def test_commit_scope_meta_refuses(
+    root: EditSession, project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def no_create(*args: object, **kwargs: object) -> None:
         raise AssertionError("create_after called with staged meta")
 
     _commit_fakes(monkeypatch, no_create)
-    with pytest.raises(JjRevError, match="pyedit.commit"):
-        with pyedit.commit("m", after="B"):
-            pyedit.describe("smuggled")
+    with (
+        pytest.raises(JjRevError, match=r"pyedit.commit"),
+        pyedit.commit("m", after="B"),
+    ):
+        pyedit.describe("smuggled")
     assert root.history == []
 
 
-def test_nested_commit_scopes_record_in_order(root, project, tmp_path, monkeypatch):
-    def fake_create(repo_root, rev, message, changes):
+def test_nested_commit_scopes_record_in_order(
+    root: EditSession, project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_create(
+        repo_root: Path, rev: str, message: str, changes: dict[str, object]
+    ) -> tuple[str, str, str | None, list[str]]:
         return (f"{message}-id", "op", None, [])
 
     _commit_fakes(monkeypatch, fake_create)
@@ -337,15 +386,20 @@ def test_nested_commit_scopes_record_in_order(root, project, tmp_path, monkeypat
 
 
 def test_commit_scope_machinery_bypasses_the_overlay(
-    root, project, tmp_path, monkeypatch
-):
+    root: EditSession,
+    project: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     # filesystem work the scope does itself (export, scratch
     # cleanup) must reach disk: under an installed overlay every
     # patched call routes into a session, so without the bypass the
     # parent ends up staging the scratch dir
     from pyedit import vfs
 
-    def fake_create(repo_root, rev, message, changes):
+    def fake_create(
+        repo_root: Path, rev: str, message: str, changes: dict[str, object]
+    ) -> tuple[str, str, str | None, list[str]]:
         return ("newhex123456", "op1", None, [])
 
     _commit_fakes(monkeypatch, fake_create)
@@ -358,8 +412,12 @@ def test_commit_scope_machinery_bypasses_the_overlay(
     assert root.staged() == {}
 
 
-def test_commit_scope_inside_vfs_survives_merge(root, project, tmp_path, monkeypatch):
-    def fake_create(repo_root, rev, message, changes):
+def test_commit_scope_inside_vfs_survives_merge(
+    root: EditSession, project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_create(
+        repo_root: Path, rev: str, message: str, changes: dict[str, object]
+    ) -> tuple[str, str, str | None, list[str]]:
         return (f"{message}-id", "op", None, [])
 
     _commit_fakes(monkeypatch, fake_create)
@@ -371,7 +429,7 @@ def test_commit_scope_inside_vfs_survives_merge(root, project, tmp_path, monkeyp
     assert [record["subject"] for record in root.history] == ["inner"]
 
 
-def test_scope_meta_merges_when_disjoint(root):
+def test_scope_meta_merges_when_disjoint(root: EditSession) -> None:
     with VFS():
         pyedit.describe("A fine subject")
     with VFS():
@@ -382,7 +440,7 @@ def test_scope_meta_merges_when_disjoint(root):
     }
 
 
-def test_same_meta_value_is_idempotent(root):
+def test_same_meta_value_is_idempotent(root: EditSession) -> None:
     with VFS():
         pyedit.describe("same")
     with VFS():
@@ -390,7 +448,7 @@ def test_same_meta_value_is_idempotent(root):
     assert root.meta == {"description": "same"}
 
 
-def test_divergent_meta_collides(root):
+def test_divergent_meta_collides(root: EditSession) -> None:
     with VFS():
         pyedit.describe("first")
     with pytest.raises(Collision, match="description: set by two scopes"), VFS():
@@ -398,7 +456,7 @@ def test_divergent_meta_collides(root):
     assert root.meta == {"description": "first"}
 
 
-def test_failed_scope_drops_its_meta(root):
+def test_failed_scope_drops_its_meta(root: EditSession) -> None:
     with pytest.raises(RuntimeError), VFS():
         pyedit.describe("doomed")
         raise RuntimeError("boom")

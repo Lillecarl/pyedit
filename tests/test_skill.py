@@ -30,7 +30,8 @@ EXAMPLES = (
 
 
 def _block_containing(text: str, marker: str) -> str:
-    blocks, current = [], []
+    blocks: list[str] = []
+    current: list[str] = []
     for line in text.splitlines():
         if line.startswith("    ") and line.strip():
             current.append(line[4:])
@@ -45,7 +46,7 @@ def _block_containing(text: str, marker: str) -> str:
 
 
 @pytest.mark.parametrize("marker", EXAMPLES)
-def test_every_python_example_compiles(marker):
+def test_every_python_example_compiles(marker: str) -> None:
     """An agent copies these verbatim, so they must be valid python."""
     compile(_block_containing(render_skill(), marker), "<skill>", "exec")
 

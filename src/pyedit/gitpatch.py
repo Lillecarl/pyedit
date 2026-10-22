@@ -18,8 +18,13 @@ not search, and here it does not need to.
 
 from __future__ import annotations
 
-from pyedit.memgit import MemGitError, MemoryRepo
-from pyedit.session import Symlink
+from typing import TYPE_CHECKING
+
+from pyedit.memgit import MemGitError, MemoryRepo, MemValue
+from pyedit.session import _MISSING, Symlink
+
+if TYPE_CHECKING:
+    from pyedit.session import EditSession
 
 _LINK_MODE = 0o120000
 
@@ -28,7 +33,7 @@ class GitPatchError(ValueError):
     pass
 
 
-def apply_patch(session, text: str) -> list[str]:
+def apply_patch(session: EditSession, text: str) -> list[str]:
     """Stage every file in `text`; returns the display paths touched.
 
     Fails closed: libgit2 applies the whole patch or none of it, and a
@@ -72,14 +77,14 @@ def _decoded(data: bytes) -> str | bytes:
         return data
 
 
-def _preimage(session, repo: MemoryRepo, text: str) -> dict:
+def _preimage(session: EditSession, repo: MemoryRepo, text: str) -> dict[str, MemValue]:
     """Seed a tree with what the session holds for every touched path.
 
     libgit2 names the paths, so nothing here parses the patch either.
     A path the patch creates is absent from the tree, which is what
     `git_apply_to_tree` expects.
     """
-    before = {}
+    before: dict[str, MemValue] = {}
     for delta in _deltas(repo, text):
         for path in (delta.old_file.path, delta.new_file.path):
             if path in before:
@@ -99,10 +104,7 @@ def _deltas(repo: MemoryRepo, text: str):
         raise GitPatchError(f"libgit2 cannot read this patch: {err}") from err
 
 
-_UNSET = object()
-
-
-def _session_entry(session, path):
+def _session_entry(session: EditSession, path: str) -> MemValue | None:
     """What the session holds for `path`, as memgit's (content, mode).
 
     None when nothing is there. Staged state wins over the disk: a
@@ -111,12 +113,12 @@ def _session_entry(session, path):
     """
     import pygit2
 
-    staged = session.staged().get(session.canon(path), _UNSET)
+    staged = session.staged().get(session.canon(path), _MISSING)
     if staged is None:
         return None
     if isinstance(staged, Symlink):
         return (str(staged), pygit2.enums.FileMode.LINK)
-    if staged is not _UNSET:
+    if staged is not _MISSING:
         return (staged, pygit2.enums.FileMode.BLOB)
     target = _disk_link_target(path)
     if target is not None:
@@ -127,7 +129,7 @@ def _session_entry(session, path):
         return None
 
 
-def _disk_link_target(path) -> str | None:
+def _disk_link_target(path: str) -> str | None:
     from pathlib import Path
 
     from pyedit.session import _disk_is_link, _disk_readlink

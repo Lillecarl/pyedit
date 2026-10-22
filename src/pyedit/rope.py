@@ -20,9 +20,10 @@ from __future__ import annotations
 import keyword
 import os
 import re
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from rope.base import change as rope_change
 from rope.base.exceptions import RopeError
@@ -31,7 +32,11 @@ from rope.contrib.findit import find_occurrences
 from rope.refactor.rename import Rename
 
 from pyedit import vfs
-from pyedit.session import EditSession
+
+if TYPE_CHECKING:
+    from rope.base.resources import Resource
+
+    from pyedit.session import EditSession
 
 
 @dataclass
@@ -119,7 +124,7 @@ def rename_module(
 
 
 def references(
-    session, path: str | Path, line: int, column: int, name: str
+    session: EditSession, path: str | Path, line: int, column: int, name: str
 ) -> list[Reference]:
     """Every occurrence of the symbol at (line, column).
 
@@ -181,19 +186,22 @@ def _vfs_patched(session: EditSession):
         restore()
 
 
-def _python_resources(session: EditSession, project: Project) -> list:
-    resources = []
+def _python_resources(session: EditSession, project: Project) -> list[Resource]:
+    resources: list[Resource] = []
     for path in session.glob("**/*.py"):
-        try:
+        with suppress(Exception):
             resources.append(project.get_resource(session.relpath(path)))
-        except Exception:
-            continue
     return resources
 
 
 def _require_selection(
-    renamer, old_name, session: EditSession, path: str | Path, line=None, column=None
-):
+    renamer: Rename,
+    old_name: str,
+    session: EditSession,
+    path: str | Path,
+    line: int | None = None,
+    column: int | None = None,
+) -> None:
     resolved = renamer.get_old_name()
     if resolved != old_name:
         where = f"{session.relpath(session.canon(path))}"
@@ -250,9 +258,12 @@ def _offset(content: str, line: int, column: int) -> int:
         )
     offset = sum(len(part) + 1 for part in lines[: line - 1]) + column
     # accept a cursor sitting just after a token, like editors do
-    if not _is_word_char(line_text, column):
-        if column > 0 and _is_word_char(line_text, column - 1):
-            offset -= 1
+    if (
+        not _is_word_char(line_text, column)
+        and column > 0
+        and _is_word_char(line_text, column - 1)
+    ):
+        offset -= 1
     return offset
 
 
@@ -271,7 +282,7 @@ def _resource_or_none(project: Project, session: EditSession, path: str | Path):
         return None
 
 
-def _stage_changes(session: EditSession, changes) -> list[Path]:
+def _stage_changes(session: EditSession, changes: rope_change.ChangeSet) -> list[Path]:
     staged: list[Path] = []
     for change in changes.changes:
         if isinstance(change, rope_change.ChangeContents):

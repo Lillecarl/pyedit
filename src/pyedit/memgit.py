@@ -47,6 +47,17 @@ from __future__ import annotations
 import re
 import sys
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, TypeAlias
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator, Mapping
+    from types import ModuleType
+
+    from pygit2 import Index, Oid, Tree
+    from pygit2.enums import FileMode
+
+MemValue: TypeAlias = "tuple[bytes | str, FileMode]"
+Blob: TypeAlias = "bytes | str | MemValue"
 
 _CDEF = """
 typedef struct git_repository git_repository;
@@ -88,10 +99,10 @@ class Entry:
     mode: int
 
 
-_STATE = None
+_STATE: tuple[Any, Any, ModuleType] | None = None
 
 
-def _libgit2():
+def _libgit2() -> tuple[Any, Any, ModuleType]:
     """The ABI-mode handle, opened once.
 
     Deferred like pygit2's own import in `pyedit.render`: importing
@@ -124,7 +135,7 @@ def _libgit2():
     return _STATE
 
 
-def _library_name(pygit2) -> str:
+def _library_name(pygit2: ModuleType) -> str:
     """The libgit2 already mapped into this process.
 
     dlopen of a library that is loaded returns that same instance, so
@@ -142,7 +153,9 @@ def _library_name(pygit2) -> str:
     return name
 
 
-def _library_candidates(pygit2, platform: str = sys.platform):
+def _library_candidates(
+    pygit2: ModuleType, platform: str = sys.platform
+) -> tuple[str, Callable[[str], bool]]:
     """The name to dlopen, and a test for a loaded path holding the
     same libgit2.
 
@@ -158,11 +171,15 @@ def _library_candidates(pygit2, platform: str = sys.platform):
     else:
         name = f"libgit2.so.{major}.{minor}"
         pattern = rf"libgit2\.so\.{major}\.{minor}(\.\d+)*"
-    matches = re.compile(pattern).fullmatch
-    return name, lambda path: matches(path.rpartition("/")[2]) is not None
+    fullmatch = re.compile(pattern).fullmatch
+
+    def is_loaded(path: str) -> bool:
+        return fullmatch(path.rpartition("/")[2]) is not None
+
+    return name, is_loaded
 
 
-def _maps_paths():
+def _maps_paths() -> Iterator[str]:
     """Every mapped file, out of the Linux process map."""
     try:
         with open("/proc/self/maps") as maps:
@@ -174,7 +191,7 @@ def _maps_paths():
         return
 
 
-def _dyld_paths():
+def _dyld_paths() -> Iterator[str]:
     """Every loaded image, out of the macOS dynamic linker."""
     import ctypes
 
@@ -217,7 +234,7 @@ class MemoryRepo:
         """Drop every object written so far."""
         self._lib.git_mempack_reset(self._backend)
 
-    def write(self, data: bytes | str):
+    def write(self, data: bytes | str) -> Oid:
         """Store a blob; returns its Oid."""
         if isinstance(data, str):
             data = data.encode()
@@ -231,7 +248,7 @@ class MemoryRepo:
         """
         return self._repo[self.write(data)]
 
-    def read(self, oid) -> bytes:
+    def read(self, oid: Oid) -> bytes:
         out = self._ffi.new("git_odb_object **")
         self._check(
             self._lib.git_odb_read(out, self._odb, self._ffi.from_buffer(oid.raw)),
@@ -244,7 +261,7 @@ class MemoryRepo:
             )
         )
 
-    def tree(self, files):
+    def tree(self, files: Mapping[str, Blob]) -> Tree:
         """Build a tree from {path: content} or {path: (content, mode)}."""
         index = self._pygit2.Index()
         for path, value in files.items():
@@ -254,7 +271,9 @@ class MemoryRepo:
             index.add(self._pygit2.IndexEntry(path, self.write(content), mode))
         return self._repo[index.write_tree(self._repo)]
 
-    def merge(self, ancestor, ours, theirs, find_renames: bool = True):
+    def merge(
+        self, ancestor: Tree, ours: Tree, theirs: Tree, find_renames: bool = True
+    ) -> Index:
         """Three-way merge of three trees; returns the index.
 
         A conflicted path carries every stage, so iterating the result
@@ -273,7 +292,9 @@ class MemoryRepo:
         flags = pygit2.enums.MergeFlag.FIND_RENAMES if find_renames else 0
         return self._repo.merge_trees(ancestor, ours, theirs, flags=flags)
 
-    def patch(self, before, after, context: int = 3) -> str:
+    def patch(
+        self, before: Mapping[str, Blob], after: Mapping[str, Blob], context: int = 3
+    ) -> str:
         """The git patch that turns one file map into the other.
 
         libgit2 writes it, so the mode lines a symlink needs (120000)
@@ -287,7 +308,7 @@ class MemoryRepo:
         )
         return diff.patch or ""
 
-    def apply(self, tree, patch: str | bytes) -> dict[str, Entry]:
+    def apply(self, tree: Tree, patch: str | bytes) -> dict[str, Entry]:
         """Apply a git patch to a tree; returns the whole postimage.
 
         Every path the patch touches must already be in the tree, and
@@ -318,7 +339,7 @@ class MemoryRepo:
             for entry in result
         }
 
-    def _as(self, kind, obj):
+    def _as(self, kind: str, obj: Any) -> Any:
         return self._ffi.cast(kind, int.from_bytes(obj._pointer, sys.byteorder))
 
     def _check(self, code: int, doing: str = "") -> None:
@@ -334,7 +355,7 @@ class MemoryRepo:
         raise MemGitError(f"libgit2 {where}{message} (code {code})")
 
 
-def apply_to_files(files, patch: str | bytes) -> dict[str, Entry]:
+def apply_to_files(files: Mapping[str, Blob], patch: str | bytes) -> dict[str, Entry]:
     """Apply a git patch to {path: content}; returns the postimage."""
     repo = MemoryRepo()
     return repo.apply(repo.tree(files), patch)

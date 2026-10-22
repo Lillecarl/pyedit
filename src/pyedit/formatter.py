@@ -17,9 +17,14 @@ not supported yet.
 from __future__ import annotations
 
 import subprocess
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pyedit.session import EditSession, Symlink
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from pyedit.config import Config
 
 __all__ = ["FormatterError", "format_staged"]
 
@@ -33,7 +38,7 @@ def format_staged(
     session: EditSession,
     staged: dict[Path, str | bytes | None],
     formatters: dict[str, list[str]],
-    config=None,
+    config: Config | None = None,
 ) -> list[Path]:
     """Format staged text in place; return the paths whose content
     changed. Bytes, symlinks, deletions and `exclude`d paths are

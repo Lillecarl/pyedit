@@ -16,10 +16,12 @@ changes only when one separates them.
 """
 
 import builtins
+import contextlib
 import os
 import shutil
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, override
 
 import pytest
 from hypothesis import settings
@@ -30,6 +32,9 @@ import pyedit
 from pyedit import vfs as vfs_module
 from pyedit.merge import VFS, Collision
 from pyedit.session import EditSession, Symlink, _disk_is_link, _disk_readlink
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 FILES = ["a.txt", "b.txt", "dir/c.txt"]
 BIN = "img.bin"
@@ -59,7 +64,7 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
     """
 
     @initialize()
-    def seed(self):
+    def seed(self) -> None:
         self.a_root = Path(tempfile.mkdtemp())
         self.b_root = Path(tempfile.mkdtemp())
         for tree in (self.a_root, self.b_root):
@@ -71,7 +76,7 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
                 (tree / rel).write_bytes(blob)
         # capture the raw functions BEFORE the patch: the oracle side
         # must do real filesystem work while the overlay is installed
-        self._raw = {
+        self._raw: dict[str, Callable[..., Any]] = {
             "open": builtins.open,
             "rename": os.rename,
             "unlink": os.unlink,
@@ -87,25 +92,23 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
         self.session = EditSession(root=self.a_root)
         self.restore = vfs_module.install(self.session)
 
-    def raw_makedirs(self, path):
+    def raw_makedirs(self, path: Path) -> None:
         # os.makedirs re-looks-up os.mkdir at call time, which the
         # patch has replaced: build the tree from raw mkdir
         if self._raw["isdir"](path):
             return
         self.raw_makedirs(path.parent)
-        try:
+        with contextlib.suppress(FileExistsError):
             self._raw["mkdir"](path)
-        except FileExistsError:
-            pass
 
-    def raw_copyfile(self, src, dst):
+    def raw_copyfile(self, src: Path, dst: Path) -> None:
         with self._raw["open"](src, "rb") as fh:
             data = fh.read()
         self.raw_makedirs(Path(dst).parent)
         with self._raw["open"](dst, "wb") as fh:
             fh.write(data)
 
-    def oracle_read(self, rel):
+    def oracle_read(self, rel: str) -> bytes | None:
         # bytes everywhere; OSError of any kind reads as absent, which
         # covers missing files, deleted-in-session paths and directories
         try:
@@ -114,34 +117,35 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
         except OSError:
             return None
 
-    def every_rel(self):
+    def _relative_to_a(self, path: Path) -> str | None:
+        # the patch stages everything the process writes, the test
+        # framework's bookkeeping included; out-of-tree paths map to None
+        try:
+            return str(path.relative_to(self.a_root))
+        except ValueError:
+            return None
+
+    def every_rel(self) -> list[str]:
         rels = set(FILES) | set(MOVE_TARGETS) | {BIN}
         for path in self.session.staged():
-            try:
-                rels.add(str(path.relative_to(self.a_root)))
-            except ValueError:
-                # the patch stages everything the process writes,
-                # the test framework's bookkeeping included
-                continue
+            name = self._relative_to_a(path)
+            if name is not None:
+                rels.add(name)
         for base, _dirs, names in self._raw["walk"](self.b_root):
             for name in names:
                 rels.add(str(Path(base).relative_to(self.b_root) / name))
         return sorted(rels)
 
-    def view_equals_oracle(self):
+    def view_equals_oracle(self) -> None:
         # the oracle tree is the view: the view-equality invariant
         # makes a path's existence agree on both sides, so reads
         # raise or agree per path
         staged = self.session.staged()
-        staged_names = set()
+        staged_names: set[str] = set()
         for path in staged:
-            try:
-                staged_names.add(str(path.relative_to(self.a_root)))
-            except ValueError:
-                # the process-global patch stages everything the
-                # process writes, framework bookkeeping included;
-                # every_rel() skips the same out-of-tree paths
-                continue
+            name = self._relative_to_a(path)
+            if name is not None:
+                staged_names.add(name)
         for rel in self.every_rel():
             if isinstance(staged.get(self.session.canon(rel)), Symlink):
                 # a staged link cannot be followed; the apply
@@ -165,14 +169,14 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
                 assert content == oracle
 
     @rule(path=st.sampled_from(FILES), text=texts)
-    def write(self, path, text):
+    def write(self, path: str, text: str) -> None:
         self.session.write(path, text)
         self.raw_makedirs((self.b_root / path).parent)
         with self._raw["open"](self.b_root / path, "w") as fh:
             fh.write(text)
 
     @rule(data=st.data())
-    def write_bytes(self, data):
+    def write_bytes(self, data: st.DataObject) -> None:
         blob = data.draw(
             st.sampled_from([b"\x00\x01\n", b"raw bytes", b"", b"nul\x00end"])
         )
@@ -181,8 +185,8 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
             fh.write(blob)
 
     @rule(data=st.data())
-    def open_for_write_or_append(self, data):
-        path = data.draw(st.sampled_from(FILES + [BIN]))
+    def open_for_write_or_append(self, data: st.DataObject) -> None:
+        path = data.draw(st.sampled_from([*FILES, BIN]))
         mode = data.draw(st.sampled_from(["w", "a"]))
         try:
             with open(self.a_root / path, mode) as fh:
@@ -193,16 +197,18 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
         if failed:
             # the view refuses what the filesystem refuses: the
             # parent dir is gone on both sides after rmtree
-            with pytest.raises(OSError):
-                with self._raw["open"](self.b_root / path, mode) as fh:
-                    fh.write("opened\n")
+            with (
+                pytest.raises(OSError),
+                self._raw["open"](self.b_root / path, mode) as fh,
+            ):
+                fh.write("opened\n")
             return
         self.raw_makedirs((self.b_root / path).parent)
         with self._raw["open"](self.b_root / path, mode) as fh:
             fh.write("opened\n")
 
     @rule(path=st.sampled_from(FILES), frag=parent_fragments, repl=replacements)
-    def edit(self, path, frag, repl):
+    def edit(self, path: str, frag: str, repl: str) -> None:
         oracle = self.oracle_read(path)
         if oracle is None:
             with pytest.raises(FileNotFoundError):
@@ -218,7 +224,7 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
                 self.session.edit(path, frag, repl)
 
     @rule(path=st.sampled_from(FILES))
-    def delete(self, path):
+    def delete(self, path: str) -> None:
         # the session's own world decides the error contract:
         # a staged deletion is an idempotent no-op, an untracked
         # absent file is an error, anything else deletes for real
@@ -238,7 +244,7 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
             self._raw["unlink"](self.b_root / path)
 
     @rule(data=st.data())
-    def rename(self, data):
+    def rename(self, data: st.DataObject) -> None:
         src = data.draw(st.sampled_from(FILES + MOVE_TARGETS))
         dst = data.draw(st.sampled_from(FILES + MOVE_TARGETS))
         if src == dst:
@@ -254,8 +260,8 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
         self._raw["rename"](self.b_root / src, self.b_root / dst)
 
     @rule(data=st.data())
-    def copy_file(self, data):
-        src = data.draw(st.sampled_from(FILES + [BIN]))
+    def copy_file(self, data: st.DataObject) -> None:
+        src = data.draw(st.sampled_from([*FILES, BIN]))
         dst = data.draw(st.sampled_from(["copy.txt", "dir/copy.txt"]))
         if not (self.b_root / src).is_file():
             with pytest.raises(OSError):
@@ -265,7 +271,7 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
         self.raw_copyfile(self.b_root / src, self.b_root / dst)
 
     @rule(data=st.data())
-    def move_file(self, data):
+    def move_file(self, data: st.DataObject) -> None:
         src = data.draw(st.sampled_from(FILES + MOVE_TARGETS))
         dst = data.draw(st.sampled_from(["moved.txt", "dir/moved.txt"]))
         if not (self.b_root / src).is_file():
@@ -275,7 +281,7 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
         self._raw["rename"](self.b_root / src, self.b_root / dst)
 
     @rule(data=st.data())
-    def link(self, data):
+    def link(self, data: st.DataObject) -> None:
         target = data.draw(st.sampled_from(["a.txt", "missing.txt"]))
         dst = data.draw(st.sampled_from(["link.txt", "dir/link.txt"]))
         if (self.b_root / dst).is_file() or (self.b_root / dst).is_symlink():
@@ -285,7 +291,7 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
         self._raw["symlink"](target, self.b_root / dst)
 
     @rule()
-    def apply(self):
+    def apply(self) -> None:
         self.session.apply()
         a_files = self.tree(self.a_root)
         b_files = self.tree(self.b_root)
@@ -293,8 +299,8 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
         assert a_files == b_files
         self.view_equals_oracle()
 
-    def tree(self, root):
-        out = {}
+    def tree(self, root: Path) -> dict[str, bytes]:
+        out: dict[str, bytes] = {}
         for base, _dirs, names in self._raw["walk"](root):
             for name in names:
                 path = Path(base) / name
@@ -308,16 +314,16 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
         return out
 
     @rule()
-    def prune(self):
+    def prune(self) -> None:
         self.session.prune_unchanged()
         self.view_equals_oracle()
 
     @invariant()
-    def view_matches_oracle(self):
+    def view_matches_oracle(self) -> None:
         self.view_equals_oracle()
 
     @invariant()
-    def diff_is_empty_exactly_when_nothing_pending(self):
+    def diff_is_empty_exactly_when_nothing_pending(self) -> None:
         # the session's own staged map is the claim under test: the
         # diff must hide nothing and invent nothing
         pending = False
@@ -341,7 +347,7 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
         assert bool(self.session.diff_git().strip()) == pending
 
     @rule()
-    def rmtree_the_dir(self):
+    def rmtree_the_dir(self) -> None:
         # rmtree stages every file under the tree as deleted;
         # directories are untracked on the session side, so the
         # oracle tolerates the tree already being gone
@@ -350,7 +356,7 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
             self._raw["rmtree"](self.b_root / "dir")
 
     @rule(data=st.data())
-    def bounded_edit(self, data):
+    def bounded_edit(self, data: st.DataObject) -> None:
         path = data.draw(st.sampled_from(FILES))
         start = data.draw(st.integers(min_value=1, max_value=3))
         stop = data.draw(st.integers(min_value=1, max_value=3))
@@ -376,7 +382,8 @@ class SessionAgainstRealDisk(RuleBasedStateMachine):
         with self._raw["open"](self.b_root / path, "w") as fh:
             fh.write("\n".join(new_lines))
 
-    def teardown(self):
+    @override
+    def teardown(self) -> None:
         # the patch is process-global: leaking it would stage
         # the next machine's seed writes
         self.restore()
@@ -391,10 +398,10 @@ TestSessionAgainstRealDisk = SessionAgainstRealDisk.TestCase
 
 class ScopeMachine(RuleBasedStateMachine):
     @initialize()
-    def seed(self):
+    def seed(self) -> None:
         self.root = Path(tempfile.mkdtemp())
-        self.disk = dict(SEED)
-        self.overlay = {}
+        self.disk: dict[str, str | None] = dict(SEED)
+        self.overlay: dict[str, str | None] = {}
         for rel, text in SEED.items():
             path = self.root / rel
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -415,20 +422,20 @@ class ScopeMachine(RuleBasedStateMachine):
         # scope rules operate through the router: a scope only
         # receives what pyedit.* routes, never direct method calls
         self._prior_session = pyedit.__dict__.get("session")
-        pyedit.session = self.session
+        pyedit.__dict__["session"] = self.session
 
-    def view(self, rel):
+    def view(self, rel: str) -> str | None:
         if rel in self.overlay:
             return self.overlay[rel]
         return self.disk.get(rel)
 
     @rule(path=st.sampled_from(FILES), text=texts)
-    def write(self, path, text):
+    def write(self, path: str, text: str) -> None:
         pyedit.write(path, text)
         self.overlay[path] = text
 
     @rule(path=st.sampled_from(FILES), frag=parent_fragments, repl=replacements)
-    def edit(self, path, frag, repl):
+    def edit(self, path: str, frag: str, repl: str) -> None:
         view = self.view(path)
         if view is None:
             with pytest.raises(FileNotFoundError):
@@ -441,7 +448,7 @@ class ScopeMachine(RuleBasedStateMachine):
                 pyedit.edit(path, frag, repl)
 
     @rule(path=st.sampled_from(FILES))
-    def delete(self, path):
+    def delete(self, path: str) -> None:
         if self.view(path) is not None:
             pyedit.delete(path)
             self.overlay[path] = None
@@ -451,7 +458,7 @@ class ScopeMachine(RuleBasedStateMachine):
         # deleting an already-deleted path is an idempotent no-op
 
     @rule(data=st.data())
-    def rename(self, data):
+    def rename(self, data: st.DataObject) -> None:
         src = data.draw(st.sampled_from(FILES))
         dst = data.draw(st.sampled_from(MOVE_TARGETS))
         view = self.view(src)
@@ -465,21 +472,21 @@ class ScopeMachine(RuleBasedStateMachine):
         self.known.add(dst)
 
     @rule()
-    def apply(self):
+    def apply(self) -> None:
         self.session.apply()
         for rel in self.known:
             self.disk[rel] = self.view(rel)
         # apply writes disk; the staged entries persist until pruned
 
     @rule()
-    def prune(self):
+    def prune(self) -> None:
         self.session.prune_unchanged()
         for rel in self.known:
             if rel in self.overlay and self.overlay[rel] == self.disk.get(rel):
                 del self.overlay[rel]
 
     @rule(path=st.sampled_from(FILES), repl=scope_replacements)
-    def scope_edits_the_last_region(self, path, repl):
+    def scope_edits_the_last_region(self, path: str, repl: str) -> None:
         view = self.view(path)
         last = LAST[path]
         if self.disk[path] is None:
@@ -507,11 +514,12 @@ class ScopeMachine(RuleBasedStateMachine):
         with VFS():
             pyedit.edit(path, last, repl)
         merged = pyedit.read(path)
+        assert isinstance(merged, str)
         assert merged == view.replace(last, repl)
         self.overlay[path] = merged
 
     @rule(path=st.sampled_from(FILES), repl=scope_replacements)
-    def scope_edits_the_region_the_parent_changed(self, path, repl):
+    def scope_edits_the_region_the_parent_changed(self, path: str, repl: str) -> None:
         first = FIRST[path]
         if self.disk[path] is None:
             return
@@ -550,7 +558,7 @@ class ScopeMachine(RuleBasedStateMachine):
                     self.overlay[path] = view.replace(first, repl)
         else:
             view = self.view(path)
-            if first not in view:
+            if view is None or first not in view:
                 return
             with VFS():
                 pyedit.edit(path, first, repl)
@@ -558,7 +566,7 @@ class ScopeMachine(RuleBasedStateMachine):
             self.overlay[path] = view.replace(first, repl)
 
     @rule(path=st.sampled_from(FILES))
-    def scope_that_raises_discards_whole(self, path):
+    def scope_that_raises_discards_whole(self, path: str) -> None:
         view = self.view(path)
         if view is None:
             return
@@ -578,7 +586,7 @@ class ScopeMachine(RuleBasedStateMachine):
         assert pyedit.read(path) == view
 
     @invariant()
-    def staged_matches_model(self):
+    def staged_matches_model(self) -> None:
         expect = {self.root / rel: content for rel, content in self.overlay.items()}
         staged = {
             path: content
@@ -588,7 +596,7 @@ class ScopeMachine(RuleBasedStateMachine):
         assert staged == expect
 
     @invariant()
-    def reads_match_model(self):
+    def reads_match_model(self) -> None:
         for rel in FILES:
             view = self.view(rel)
             if view is None:
@@ -601,7 +609,7 @@ class ScopeMachine(RuleBasedStateMachine):
                 self.overlay.setdefault(rel, view)
 
     @invariant()
-    def diff_is_empty_exactly_when_nothing_changed(self):
+    def diff_is_empty_exactly_when_nothing_changed(self) -> None:
         changed = any(
             rel in self.overlay and self.overlay[rel] != self.disk.get(rel)
             for rel in self.known
@@ -628,12 +636,13 @@ class ScopeMachine(RuleBasedStateMachine):
                     break
         assert bool(self.session.diff_git().strip()) == changed
 
-    def teardown(self):
+    @override
+    def teardown(self) -> None:
         self.restore()
         if self._prior_session is None:
             pyedit.__dict__.pop("session", None)
         else:
-            pyedit.session = self._prior_session
+            pyedit.__dict__["session"] = self._prior_session
 
 
 ScopeMachine.TestCase.settings = settings(

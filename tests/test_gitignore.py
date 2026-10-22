@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pathlib import Path
 
 import pytest
@@ -7,7 +9,7 @@ from pyedit.session import EditSession
 
 
 @pytest.fixture
-def repo(project):
+def repo(project: Path) -> Path:
     (project / ".gitignore").write_text("*.log\nbuild/\n!keep.log\n")
     (project / "src" / "a.py").write_text("alpha = 1\n")
     (project / "src" / "b.log").write_text("log\n")
@@ -17,30 +19,30 @@ def repo(project):
     return project
 
 
-def test_session_glob_excludes_ignored(repo):
+def test_session_glob_excludes_ignored(repo: Path) -> None:
     session = EditSession()
     names = {p.name for p in session.glob("**/*")}
     assert names == {"a.py", "b.py", "keep.log", "note.txt"}
 
 
-def test_gitignore_honors_session_root(repo):
+def test_gitignore_honors_session_root(repo: Path) -> None:
     # the cwd is deliberately elsewhere; rules must come from the root
     session = EditSession(root=repo)
     names = {p.name for p in session.glob("**/*")}
     assert names == {"a.py", "b.py", "keep.log", "note.txt"}
 
 
-def test_negation_keeps_explicit(repo):
+def test_negation_keeps_explicit(repo: Path) -> None:
     session = EditSession()
     assert (repo / "src" / "keep.log") in session.glob("**/keep.log")
 
 
-def test_dir_only_rule_excludes_contents(repo):
+def test_dir_only_rule_excludes_contents(repo: Path) -> None:
     session = EditSession()
     assert session.glob("src/build/*") == []
 
 
-def test_nested_gitignore(repo):
+def test_nested_gitignore(repo: Path) -> None:
     (repo / "src" / ".gitignore").write_text("c.py\n")
     (repo / "src" / "c.py").write_text("c\n")
     session = EditSession()
@@ -48,7 +50,7 @@ def test_nested_gitignore(repo):
     assert names == {"a.py", "b.py"}
 
 
-def test_rules_apply_through_a_symlinked_dir(repo):
+def test_rules_apply_through_a_symlinked_dir(repo: Path) -> None:
     # a candidate reached through a symlinked directory keeps the
     # name its rules give: resolve() must not walk past the link
     (repo / ".gitignore").write_text("link\n")
@@ -58,7 +60,7 @@ def test_rules_apply_through_a_symlinked_dir(repo):
     assert session.glob("link/*") == []
 
 
-def test_staged_new_files_are_filtered_too(repo):
+def test_staged_new_files_are_filtered_too(repo: Path) -> None:
     session = EditSession()
     session.write("src/new.log", "x\n")
     assert "new.log" not in {p.name for p in session.glob("src/*")}
@@ -66,13 +68,13 @@ def test_staged_new_files_are_filtered_too(repo):
     assert "new.py" in {p.name for p in session.glob("src/*")}
 
 
-def test_explicit_writes_to_ignored_paths_still_work(repo):
+def test_explicit_writes_to_ignored_paths_still_work(repo: Path) -> None:
     session = EditSession()
     session.write("src/b.log", "rewritten\n")
     assert session.staged()[repo / "src" / "b.log"] == "rewritten\n"
 
 
-def test_pathlib_glob_filtered(repo):
+def test_pathlib_glob_filtered(repo: Path) -> None:
     session = EditSession()
     restore = vfs.install(session)
     try:
@@ -82,7 +84,9 @@ def test_pathlib_glob_filtered(repo):
     assert names == {"a.py", "b.py", "keep.log"}
 
 
-def test_no_gitignore_flag_disables(repo, capsys):
+def test_no_gitignore_flag_disables(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     script = repo / "edit.py"
     script.write_text(
         "import pyedit\nprint(sorted(p.name for p in pyedit.glob('**/*')))\n"

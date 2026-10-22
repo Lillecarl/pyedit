@@ -6,8 +6,13 @@ grammar for span accuracy.
 
 from __future__ import annotations
 
-from pyedit.syntax.nodes import SyntaxProblem
+from typing import TYPE_CHECKING
+
+from pyedit.syntax.nodes import SyntaxProblem, override
 from pyedit.syntax.rules import LanguageRules
+
+if TYPE_CHECKING:
+    from tree_sitter import Tree
 
 
 class Python(LanguageRules):
@@ -20,7 +25,8 @@ class Python(LanguageRules):
         "import_from_statement",
     )
 
-    def problems(self, text: str, tree) -> list[SyntaxProblem]:
+    @override
+    def problems(self, text: str, tree: Tree | None) -> list[SyntaxProblem]:
         del tree  # compile() alone; the grammar would only duplicate it
         try:
             compile(text, "<staged>", "exec")

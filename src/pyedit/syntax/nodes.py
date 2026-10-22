@@ -8,7 +8,21 @@ the per-language rules can import this freely.
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, TypeVar
+
+if TYPE_CHECKING:
+    from tree_sitter import Node
+
+_F = TypeVar("_F")
+
+if sys.version_info >= (3, 12):
+    from typing import override as override
+else:
+
+    def override(method: _F) -> _F:
+        return method
 
 
 @dataclass
@@ -57,3 +71,9 @@ def byte_offset(lines: list[str], line: int, column: int) -> int:
         )
     offset = sum(len(part.encode("utf-8")) + 1 for part in lines[: line - 1])
     return offset + len(line_text[:column].encode("utf-8"))
+
+
+def node_text(node: Node) -> str:
+    text = node.text
+    assert text is not None, "node.text is None: the tree was not parsed from bytes"
+    return text.decode("utf-8", errors="replace")

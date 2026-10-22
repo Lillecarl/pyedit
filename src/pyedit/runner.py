@@ -10,12 +10,20 @@ caller's job. Nothing here prints.
 
 from __future__ import annotations
 
+import contextlib
 import fnmatch
 import sys
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pyedit.session import EditSession, Symlink, display_path
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from pyedit.fdin import Payloads
+    from pyedit.session import HistoryRecord
 
 DEFAULT_CONTEXT = 3
 DEFAULT_MAX_BYTES = 256 * 1024 * 1024
@@ -57,7 +65,7 @@ class Result:
     meta: dict[str, tuple[str | None, str | None]] = field(default_factory=dict)
     # commits a scope wrote past the session (pyedit.commit):
     # id, subject, op, cleanup op and conflicts per commit
-    history: list[dict] = field(default_factory=list)
+    history: list[HistoryRecord] = field(default_factory=list)
 
 
 class MetaWithoutTarget(Exception):
@@ -69,9 +77,7 @@ class MetaWithoutTarget(Exception):
 def allowed(rel: str, include: list[str] | None, exclude: list[str] | None) -> bool:
     if include and not any(fnmatch.fnmatch(rel, pat) for pat in include):
         return False
-    if exclude and any(fnmatch.fnmatch(rel, pat) for pat in exclude):
-        return False
-    return True
+    return not (exclude and any(fnmatch.fnmatch(rel, pat) for pat in exclude))
 
 
 def new_session(opts: Options) -> EditSession:
@@ -84,7 +90,9 @@ def new_session(opts: Options) -> EditSession:
     )
 
 
-def execute_script(session: EditSession, text: str, filename: str, fds=None) -> None:
+def execute_script(
+    session: EditSession, text: str, filename: str, fds: Payloads | None = None
+) -> None:
     """Run an edit script against the session's overlay.
 
     Exceptions propagate to the caller, which reports them; nothing
@@ -97,7 +105,7 @@ def execute_script(session: EditSession, text: str, filename: str, fds=None) -> 
 
     missing = object()
     previous = vars(pyedit).get("session", missing)
-    pyedit.session = session
+    vars(pyedit)["session"] = session
     previous_dont_write = sys.dont_write_bytecode
     sys.dont_write_bytecode = True
     try:
@@ -113,10 +121,8 @@ def execute_script(session: EditSession, text: str, filename: str, fds=None) -> 
     finally:
         sys.dont_write_bytecode = previous_dont_write
         if previous is missing:
-            try:
+            with contextlib.suppress(AttributeError):
                 del pyedit.session
-            except AttributeError:
-                pass
         else:
             pyedit.session = previous
 
@@ -178,7 +184,7 @@ def finish(
         if actions:
             session.prune_unchanged()
             staged = selected()
-        touched = (
+        touched: list[Path] = (
             formatter.format_staged(session, staged, conf.formatters, conf)
             if conf.formatters and staged
             else []
@@ -195,12 +201,12 @@ def finish(
         value = staged[path]
         if not isinstance(value, str) or isinstance(value, Symlink):
             continue
-        for problem in session.check(path):
-            problems.append(
-                f"{display_path(path)}:"
-                f"{problem.line}:{problem.column}: {problem.message}\n"
-                f"{render(problem, staged[path])}"
-            )
+        problems.extend(
+            f"{display_path(path)}:"
+            f"{problem.line}:{problem.column}: {problem.message}\n"
+            f"{render(problem, value)}"
+            for problem in session.check(path)
+        )
 
     diff_text = "".join(diff for _, diff in unified_diffs(staged, context=opts.context))
 
@@ -259,7 +265,9 @@ def _prepare_undo(staged: dict[Path, str | bytes | None], context: int) -> str |
     return store.save(undo_text)
 
 
-def run_revision(opts: Options, revision: str, stage) -> Result:
+def run_revision(
+    opts: Options, revision: str, stage: Callable[[EditSession], None]
+) -> Result:
     """Run stage against REV's tree, amending it back on apply.
 
     Reads come from the revision (exported to a scratch tree), so the
@@ -310,7 +318,10 @@ def run_revision(opts: Options, revision: str, stage) -> Result:
             stage(session)
             inner = replace(opts, apply=False)
             result = finish(
-                session, inner, config_root=inv_root, store_ids=False,
+                session,
+                inner,
+                config_root=inv_root,
+                store_ids=False,
                 allow_meta=True,
             )
         finally:
@@ -324,7 +335,7 @@ def run_revision(opts: Options, revision: str, stage) -> Result:
                 new = _prune_meta(session.meta, old)
                 result.meta = {k: (old[k], v) for k, v in new.items()}
             return result
-        repo_changes = {}
+        repo_changes: dict[str, bytes | str | None] = {}
         for p, content in session.staged().items():
             rel = p.relative_to(session.root) if p.is_absolute() else p
             key = f"{sub}/{rel.as_posix()}" if sub else rel.as_posix()

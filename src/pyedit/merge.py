@@ -21,8 +21,13 @@ discarded whole: nothing of it merges, the parent is untouched.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pyedit.session import EditSession
+
+if TYPE_CHECKING:
+    from tempfile import TemporaryDirectory
+    from types import TracebackType
 
 
 class Collision(ValueError):
@@ -42,8 +47,8 @@ class VFS:
     """
 
     def __init__(self) -> None:
-        self._session = None
-        self._parent = None
+        self._session: EditSession | None = None
+        self._parent: EditSession | None = None
 
     def __enter__(self) -> EditSession:
         import pyedit
@@ -69,18 +74,23 @@ class VFS:
         push(self._session)
         return self._session
 
-    def __exit__(self, exc_type, exc, tb) -> bool:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> bool:
         from pyedit.active import pop
 
         scope = pop()
         if exc_type is None and self._parent is not None:
-            self._merge(scope)
+            self._merge(self._parent, scope)
         return False
 
-    def _merge(self, child: EditSession) -> None:
+    def _merge(self, parent: EditSession, child: EditSession) -> None:
         from pyedit import gitmerge
 
-        gitmerge.merge(self._parent, child)
+        gitmerge.merge(parent, child)
 
 
 def commit(message: str, *, after: str = "@-"):
@@ -113,11 +123,11 @@ class CommitScope:
             raise TypeError(f"commit() revision needs str, got {type(after).__name__}")
         self._message = message
         self._after = after
-        self._session = None
-        self._parent = None
-        self._repo_root = None
-        self._base_hex = None
-        self._tmp = None
+        self._session: EditSession | None = None
+        self._parent: EditSession | None = None
+        self._repo_root: Path | None = None
+        self._base_hex: str | None = None
+        self._tmp: TemporaryDirectory[str] | None = None
 
     def __enter__(self) -> EditSession:
         import tempfile
@@ -152,11 +162,18 @@ class CommitScope:
         push(self._session)
         return self._session
 
-    def __exit__(self, exc_type, exc, tb) -> bool:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> bool:
         from pyedit import jjrev, vfs
         from pyedit.active import pop
 
         scope = pop()
+        assert self._repo_root is not None and self._base_hex is not None
+        assert self._tmp is not None and self._parent is not None
         # prune reads the scratch tree, the amend borrows
         # working-copy files, cleanup removes the scratch dir: under
         # the installed overlay each would stage into the parent
@@ -172,7 +189,7 @@ class CommitScope:
                         "pyedit.commit(...)"
                     )
                 scope.prune_unchanged()
-                changes = {
+                changes: dict[str, bytes | str | None] = {
                     path.relative_to(scope.root).as_posix(): content
                     for path, content in scope.staged().items()
                 }

@@ -14,9 +14,10 @@ import io
 import os
 import shutil
 import stat
-from collections.abc import Callable
+import sys
 from contextlib import contextmanager
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from pyedit.session import (
     _MISSING,
@@ -26,9 +27,24 @@ from pyedit.session import (
     glob_re,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+_F = TypeVar("_F")
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+
+    def override(method: _F) -> _F:
+        return method
+
+
+_PathArg = str | Path
+
 # The live patch table: (owner, name, original, replacement) while a
 # script run holds the overlay, empty otherwise.
-_overlaid: list = []
+_overlaid: list[tuple[object, str, object, object]] = []
 _suspended_depth = 0
 
 
@@ -39,6 +55,7 @@ class _StagedTextIO(io.StringIO):
         self._path = path
         self.name = str(path)
 
+    @override
     def close(self) -> None:
         if not self.closed:
             self._session.write(self._path, self.getvalue())
@@ -52,6 +69,7 @@ class _StagedBytesIO(io.BytesIO):
         self._path = path
         self.name = str(path)
 
+    @override
     def close(self) -> None:
         if not self.closed:
             self._session.write(self._path, self.getvalue())
@@ -63,22 +81,22 @@ class _ReadOnlyIO:
         self._buf = buf
         self.name = name
 
-    def read(self, *args):
+    def read(self, *args: Any):
         return self._buf.read(*args)
 
-    def readline(self, *args):
+    def readline(self, *args: Any):
         return self._buf.readline(*args)
 
-    def readlines(self, *args):
+    def readlines(self, *args: Any):
         return self._buf.readlines(*args)
 
-    def seek(self, *args):
+    def seek(self, *args: Any):
         return self._buf.seek(*args)
 
     def tell(self):
         return self._buf.tell()
 
-    def write(self, *args):
+    def write(self, *args: Any):
         raise io.UnsupportedOperation("File not open for writing")
 
     def readable(self):
@@ -103,34 +121,20 @@ class _ReadOnlyIO:
     def __enter__(self):
         return self
 
-    def __exit__(self, *exc):
+    def __exit__(self, *exc: object):
         self.close()
 
 
 def install(session: EditSession) -> Callable[[], None]:
     real_open = builtins.open
-    path_open = Path.open
-    path_write_text = Path.write_text
-    path_write_bytes = Path.write_bytes
-    path_unlink = Path.unlink
     path_exists = Path.exists
     path_is_file = Path.is_file
     path_is_dir = Path.is_dir
-    path_iterdir = Path.iterdir
     path_glob = Path.glob
-    path_mkdir = Path.mkdir
-    path_rmdir = Path.rmdir
-    path_rename = Path.rename
-    path_replace = Path.replace
     os_remove = os.remove
     os_rename = os.rename
-    os_replace = os.replace
     os_mkdir = os.mkdir
     os_makedirs = os.makedirs
-    os_listdir = os.listdir
-    os_path_exists = os.path.exists
-    os_path_isfile = os.path.isfile
-    os_path_isdir = os.path.isdir
     os_path_getmtime = os.path.getmtime
     os_path_getsize = os.path.getsize
     os_path_getatime = os.path.getatime
@@ -139,14 +143,8 @@ def install(session: EditSession) -> Callable[[], None]:
     os_lstat = os.lstat
     os_readlink = os.readlink
     os_path_islink = os.path.islink
-    sh_copyfile = shutil.copyfile
-    sh_copy = shutil.copy
-    sh_copy2 = shutil.copy2
-    sh_copytree = shutil.copytree
-    sh_move = shutil.move
-    sh_rmtree = shutil.rmtree
 
-    def resolve(path) -> Path:
+    def resolve(path: _PathArg) -> Path:
         # syscall-free: pathlib.resolve() would recurse into the patched
         # os.lstat, so everything goes through the session's lexical canon
         return current().canon(path)
@@ -158,12 +156,12 @@ def install(session: EditSession) -> Callable[[], None]:
 
         return active_session() or session
 
-    def staged(path):
+    def staged(path: _PathArg):
         return current().staged_content(resolve(path))
 
     _ = session  # the bound root, used only through current()
 
-    def coerce(content, binary: bool):
+    def coerce(content: str | bytes, binary: bool) -> str | bytes:
         if isinstance(content, Symlink):
             raise ValueError("this path is a staged symlink; a handle cannot follow it")
         if isinstance(content, bytes):
@@ -180,7 +178,7 @@ def install(session: EditSession) -> Callable[[], None]:
                 ) from None
         return content.encode("utf-8") if binary else content
 
-    def seed(path: Path, binary: bool, truncate: bool):
+    def seed(path: Path, binary: bool, truncate: bool) -> str | bytes:
         if truncate:
             return b"" if binary else ""
         content = staged(path)
@@ -194,7 +192,7 @@ def install(session: EditSession) -> Callable[[], None]:
                 return b"" if binary else ""
         return coerce(content, binary)
 
-    def _open(file, mode="r", *args, **kwargs):
+    def _open(file: _PathArg | int, mode: str = "r", *args: Any, **kwargs: Any):
         if isinstance(file, int):
             return real_open(file, mode, *args, **kwargs)
         p = resolve(file)
@@ -203,12 +201,16 @@ def install(session: EditSession) -> Callable[[], None]:
         writing = bool(flags & {"w", "a", "x", "+"})
         if not writing:
             content = coerce(current().read(p), binary)
-            buf = io.BytesIO(content) if binary else io.StringIO(content)
+            buf: io.BytesIO | io.StringIO
+            if isinstance(content, bytes):
+                buf = io.BytesIO(content)
+            else:
+                buf = io.StringIO(content)
             return _ReadOnlyIO(buf, str(p))
         if "x" in flags and current().exists(p):
             raise FileExistsError(str(p))
         seed_data = seed(p, binary, truncate="w" in flags or "x" in flags)
-        if binary:
+        if isinstance(seed_data, bytes):
             stream = _StagedBytesIO(session, p, seed_data)
         else:
             stream = _StagedTextIO(session, p, seed_data)
@@ -241,17 +243,22 @@ def install(session: EditSession) -> Callable[[], None]:
                 current().write(dest / entry.name, current().read(entry))
 
     def _open_path(
-        self, mode="r", buffering=-1, encoding=None, errors=None, newline=None
+        self: Path,
+        mode: str = "r",
+        buffering: int = -1,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
     ):
         return _open(self, mode, buffering, encoding, errors, newline)
 
-    def _write_text(self, data, *args, **kwargs):
+    def _write_text(self: Path, data: object, *args: Any, **kwargs: Any):
         if not isinstance(data, str):
             raise TypeError(f"data must be str, not {type(data).__name__}")
         current().write(resolve(self), data)
         return len(data)
 
-    def _write_bytes(self, data):
+    def _write_bytes(self: Path, data: object):
         if not isinstance(data, (bytes, bytearray, memoryview)):
             raise TypeError(
                 f"a bytes-like object is required, not {type(data).__name__}"
@@ -259,38 +266,49 @@ def install(session: EditSession) -> Callable[[], None]:
         current().write(resolve(self), bytes(data))
         return len(data)
 
-    def _unlink(self, missing_ok=False):
+    def _unlink(self: Path, missing_ok: bool = False):
         try:
             current().delete(resolve(self))
         except FileNotFoundError:
             if not missing_ok:
                 raise
 
-    def _exists(self, *args, **kwargs):
+    def _exists(self: Path, *args: Any, **kwargs: Any):
         content = staged(self)
         if content is not _MISSING:
             return content is not None
         return path_exists(self, *args, **kwargs)
 
-    def _is_file(self, *args, **kwargs):
+    def _is_file(self: Path, *args: Any, **kwargs: Any):
         content = staged(self)
         if content is not _MISSING:
             return content is not None
         return path_is_file(self, *args, **kwargs)
 
-    def _is_dir(self, *args, **kwargs):
+    def _is_dir(self: Path, *args: Any, **kwargs: Any):
         return path_is_dir(self, *args, **kwargs)
 
-    def _read_text(self, encoding=None, errors=None, newline=None):
+    def _read_text(
+        self: Path,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
+    ):
         return coerce(current().read(self), False)
 
-    def _read_bytes(self):
+    def _read_bytes(self: Path):
         return coerce(current().read(self), True)
 
-    def _iterdir(self):
+    def _iterdir(self: Path):
         return iter(current().entries(self))
 
-    def _glob(self, pattern, *, case_sensitive=None, recurse_symlinks=False):
+    def _glob(
+        self: Path,
+        pattern: str,
+        *,
+        case_sensitive: bool | None = None,
+        recurse_symlinks: bool = False,
+    ):
         base = resolve(self)
         rx = glob_re(pattern)
         out: dict[Path, Path] = {}
@@ -315,7 +333,9 @@ def install(session: EditSession) -> Callable[[], None]:
                 out.setdefault(path, path)
         return iter(current().filter_ignored([out[key] for key in sorted(out)]))
 
-    def _mkdir(self, mode=0o777, parents=False, exist_ok=False):
+    def _mkdir(
+        self: Path, mode: int = 0o777, parents: bool = False, exist_ok: bool = False
+    ):
         p = resolve(self)
         if p.is_dir():
             if exist_ok:
@@ -325,7 +345,7 @@ def install(session: EditSession) -> Callable[[], None]:
             raise FileNotFoundError(str(p))
         # dirs are untracked: created on apply when a staged file needs one
 
-    def _rmdir(self):
+    def _rmdir(self: Path):
         p = resolve(self)
         if not p.exists():
             raise FileNotFoundError(str(p))
@@ -335,11 +355,11 @@ def install(session: EditSession) -> Callable[[], None]:
             raise OSError(f"Directory not empty: {p}")
         # dirs are untracked: an empty dir survives apply
 
-    def _path_rename(self, target):
+    def _path_rename(self: Path, target: _PathArg):
         _move(resolve(self), resolve(target))
         return Path(target)
 
-    def _os_remove(path, /, *args, **kwargs):
+    def _os_remove(path: _PathArg, /, *args: Any, **kwargs: Any):
         if kwargs:
             # fd-relative and flag-carrying calls cannot be
             # staged: shutil.rmtree passes dir_fd; the real
@@ -347,12 +367,14 @@ def install(session: EditSession) -> Callable[[], None]:
             return os_remove(path, *args, **kwargs)
         current().delete(resolve(path))
 
-    def _os_mkdir(path, mode=0o777, **kwargs):
+    def _os_mkdir(path: _PathArg, mode: int = 0o777, **kwargs: Any):
         if kwargs:
             return os_mkdir(path, mode, **kwargs)
         return _mkdir(Path(path))
 
-    def _os_makedirs(name, mode=0o777, exist_ok=False, **kwargs):
+    def _os_makedirs(
+        name: _PathArg, mode: int = 0o777, exist_ok: bool = False, **kwargs: Any
+    ):
         if kwargs:
             return os_makedirs(name, mode=mode, exist_ok=exist_ok, **kwargs)
         p = resolve(name)
@@ -362,10 +384,15 @@ def install(session: EditSession) -> Callable[[], None]:
             raise FileExistsError(str(p))
         # dirs are untracked: created on apply when a staged file needs one
 
-    def _os_listdir(path="."):
+    def _os_listdir(path: _PathArg = "."):
         return [entry.name for entry in current().entries(resolve(path))]
 
-    def _os_walk(top, topdown=True, onerror=None, followlinks=False):
+    def _os_walk(
+        top: _PathArg,
+        topdown: bool = True,
+        onerror: Callable[[OSError], object] | None = None,
+        followlinks: bool = False,
+    ):
         top_path = resolve(top)
         try:
             listing = current().entries(top_path)
@@ -384,30 +411,30 @@ def install(session: EditSession) -> Callable[[], None]:
         if not topdown:
             yield str(top_path), [d.name for d in dirs], [f.name for f in files]
 
-    def _os_path_exists(path):
+    def _os_path_exists(path: _PathArg):
         return current().exists(path)
 
-    def _os_path_isfile(path):
+    def _os_path_isfile(path: _PathArg):
         return current().is_file(path)
 
-    def _os_path_isdir(path):
+    def _os_path_isdir(path: _PathArg):
         return current().is_dir(path)
 
-    def _os_path_islink(path):
+    def _os_path_islink(path: _PathArg):
         content = _staged_state(path)
         if content is _MISSING:
             return os_path_islink(path)
         return isinstance(content, Symlink)
 
-    def _staged_state(path):
+    def _staged_state(path: _PathArg):
         """MISSING (never staged), None (staged deletion) or content."""
         return current().staged_content(current().canon(path))
 
-    def _fake_stat(content):
+    def _fake_stat(content: str | bytes):
         mode = stat.S_IFLNK | 0o777 if isinstance(content, Symlink) else 0o100644
         return os.stat_result((mode, 0, 0, 1, 0, 0, _content_size(content), 0, 0, 0))
 
-    def _os_stat(path, *args, **kwargs):
+    def _os_stat(path: _PathArg, *args: Any, **kwargs: Any):
         content = _staged_state(path)
         if content is _MISSING:
             return os_stat(path, *args, **kwargs)
@@ -415,7 +442,7 @@ def install(session: EditSession) -> Callable[[], None]:
             raise FileNotFoundError(str(resolve(path)))
         return _fake_stat(content)
 
-    def _os_readlink(path, *args, **kwargs):
+    def _os_readlink(path: _PathArg, *args: Any, **kwargs: Any):
         content = _staged_state(path)
         if content is _MISSING:
             return os_readlink(path, *args, **kwargs)
@@ -423,7 +450,7 @@ def install(session: EditSession) -> Callable[[], None]:
             raise FileNotFoundError(str(resolve(path)))
         return str(content)
 
-    def _os_lstat(path, *args, **kwargs):
+    def _os_lstat(path: _PathArg, *args: Any, **kwargs: Any):
         content = _staged_state(path)
         if content is _MISSING:
             return os_lstat(path, *args, **kwargs)
@@ -431,7 +458,7 @@ def install(session: EditSession) -> Callable[[], None]:
             raise FileNotFoundError(str(resolve(path)))
         return _fake_stat(content)
 
-    def _os_path_getsize(path):
+    def _os_path_getsize(path: _PathArg):
         content = _staged_state(path)
         if content is _MISSING:
             return os_path_getsize(path)
@@ -439,7 +466,7 @@ def install(session: EditSession) -> Callable[[], None]:
             raise FileNotFoundError(str(resolve(path)))
         return _content_size(content)
 
-    def _os_path_getmtime(path):
+    def _os_path_getmtime(path: _PathArg):
         # rope's resource observer validates staged-only files through this;
         # report a fixed mtime for anything that only exists in the overlay
         content = _staged_state(path)
@@ -449,7 +476,7 @@ def install(session: EditSession) -> Callable[[], None]:
             raise FileNotFoundError(str(resolve(path)))
         return 0.0
 
-    def _os_path_getatime(path):
+    def _os_path_getatime(path: _PathArg):
         content = _staged_state(path)
         if content is _MISSING:
             return os_path_getatime(path)
@@ -457,7 +484,7 @@ def install(session: EditSession) -> Callable[[], None]:
             raise FileNotFoundError(str(resolve(path)))
         return 0.0
 
-    def _os_path_getctime(path):
+    def _os_path_getctime(path: _PathArg):
         content = _staged_state(path)
         if content is _MISSING:
             return os_path_getctime(path)
@@ -465,26 +492,28 @@ def install(session: EditSession) -> Callable[[], None]:
             raise FileNotFoundError(str(resolve(path)))
         return 0.0
 
-    def _os_rename(src, dst, /, *args, **kwargs):
+    def _os_rename(src: _PathArg, dst: _PathArg, /, *args: Any, **kwargs: Any):
         if kwargs:
             # src_dir_fd/dst_dir_fd calls go to the real fs
             return os_rename(src, dst, *args, **kwargs)
         _move(resolve(src), resolve(dst))
 
-    def _shutil_copyfile(src, dst, *, follow_symlinks=True):
+    def _shutil_copyfile(src: _PathArg, dst: _PathArg, *, follow_symlinks: bool = True):
         return str(_copyfile(resolve(src), resolve(dst)))
 
-    def _shutil_copy(src, dst, **kwargs):
+    def _shutil_copy(src: _PathArg, dst: _PathArg, **kwargs: Any):
         dest = resolve(dst)
         if dest.is_dir():
             dest = dest / resolve(src).name
         _copyfile(resolve(src), dest)
         return str(dest)
 
-    def _shutil_copy2(src, dst, **kwargs):
+    def _shutil_copy2(src: _PathArg, dst: _PathArg, **kwargs: Any):
         return _shutil_copy(src, dst)
 
-    def _shutil_copytree(src, dst, *, dirs_exist_ok=False, **kwargs):
+    def _shutil_copytree(
+        src: _PathArg, dst: _PathArg, *, dirs_exist_ok: bool = False, **kwargs: Any
+    ):
         if kwargs:
             raise NotImplementedError(
                 "copytree: only (src, dst, dirs_exist_ok) are supported"
@@ -498,7 +527,7 @@ def install(session: EditSession) -> Callable[[], None]:
         _stage_tree(source, dest)
         return dest
 
-    def _shutil_move(src, dst):
+    def _shutil_move(src: _PathArg, dst: _PathArg):
         source = resolve(src)
         dest = resolve(dst)
         if dest.is_dir():
@@ -508,7 +537,7 @@ def install(session: EditSession) -> Callable[[], None]:
             current().delete(source)
         return str(dest)
 
-    def _shutil_rmtree(path, ignore_errors=False, **kwargs):
+    def _shutil_rmtree(path: _PathArg, ignore_errors: bool = False, **kwargs: Any):
         try:
             p = resolve(path)
             if p.is_dir():
@@ -578,7 +607,9 @@ def install(session: EditSession) -> Callable[[], None]:
     global _overlaid
     _overlaid = [
         (owner, name, original, replacement)
-        for (owner, name, original), (_, _, replacement) in zip(originals, patches)
+        for (owner, name, original), (_, _, replacement) in zip(
+            originals, patches, strict=True
+        )
     ]
 
     def restore() -> None:

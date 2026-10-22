@@ -13,19 +13,24 @@ obeys. The store is reset per call, so nothing accumulates.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
 from pyedit.memgit import MemoryRepo
+
+if TYPE_CHECKING:
+    import pygit2
 
 
 class DiffRenderer:
     def __init__(self) -> None:
-        self._repo = None
+        self._repo: MemoryRepo | None = None
 
     def hunks(self, a_text: str, b_text: str, context: int = 3) -> str:
         repo = self._repository()
         repo.reset()
-        body = (
-            repo.blob(a_text).diff(repo.blob(b_text), context_lines=context).text or ""
-        )
+        a = cast("pygit2.Blob", repo.blob(a_text))
+        b = cast("pygit2.Blob", repo.blob(b_text))
+        body = a.diff(b, context_lines=context).text or ""  # pyrefly: ignore[unexpected-keyword] pygit2 stub omits context_lines
         lines = body.splitlines(keepends=True)
         index = 0
         while index < len(lines) and not lines[index].startswith("@@"):

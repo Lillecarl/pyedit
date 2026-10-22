@@ -6,11 +6,14 @@ server answers initialize/rename/references through the same pygls
 machinery a real server uses. No subprocesses anywhere.
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import shutil
 import threading
 import time
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from lsprotocol import types
@@ -26,6 +29,12 @@ from pyedit.lsp_client import (
 )
 from pyedit.session import EditSession
 
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
+    from pathlib import Path
+
+    from pyedit.lsp_client import _FeedWriter
+
 _logger = logging.getLogger("pyedit-test-stub")
 
 _pyright = shutil.which("pyright-langserver")
@@ -35,7 +44,7 @@ _ruff = shutil.which("ruff")
 requires_ruff = pytest.mark.skipif(_ruff is None, reason="ruff is not on PATH")
 
 
-def rng(line0, char0, line1, char1):
+def rng(line0: int, char0: int, line1: int, char1: int) -> types.Range:
     return types.Range(
         start=types.Position(line=line0, character=char0),
         end=types.Position(line=line1, character=char1),
@@ -52,24 +61,26 @@ class Stub:
     """
 
     def __init__(self) -> None:
-        self.answers: dict = {}
+        self.answers: dict[tuple[object, ...], object] = {}
         # ranged answers win over answers: (method, uri, only, range)
         # lets a test script different replies per request range
-        self.ranged: dict = {}
+        self.ranged: dict[tuple[object, ...], object] = {}
         # every codeAction request the stub saw, in order
-        self.code_actions_seen: list = []
+        self.code_actions_seen: list[tuple[object, ...]] = []
         self.documents: dict[str, str] = {}
         self.closed: list[str] = []
-        self.settings = None
-        self.resolved: list = []
+        self.settings: object = None
+        self.resolved: list[str] = []
         # hook(server, uri) the stub calls on didOpen, so a test can
         # push server-to-client notifications mid-run
-        self.on_open = None
+        self.on_open: Callable[[LanguageServer, str], None] | None = None
 
-    async def run(self, to_server: asyncio.StreamReader, to_client) -> None:
+    async def run(
+        self, to_server: asyncio.StreamReader, to_client: _FeedWriter
+    ) -> None:
         server = LanguageServer("stub", "0.1")
 
-        def rename(params):
+        def rename(params: types.RenameParams):
             key = (
                 "rename",
                 params.text_document.uri,
@@ -78,7 +89,7 @@ class Stub:
             )
             return self.answers.get(key)
 
-        def references(params):
+        def references(params: types.ReferenceParams):
             key = (
                 "references",
                 params.text_document.uri,
@@ -87,7 +98,7 @@ class Stub:
             )
             return self.answers.get(key)
 
-        def code_action(params):
+        def code_action(params: types.CodeActionParams):
             uri = params.text_document.uri
             only = tuple(params.context.only or ())
             extent = (
@@ -104,26 +115,26 @@ class Stub:
                 raise answer
             return answer
 
-        def resolve(params):
+        def resolve(params: types.CodeAction):
             self.resolved.append(params.title)
             answer = self.answers.get(("resolve", params.title))
             if isinstance(answer, Exception):
                 raise answer
             return answer
 
-        def did_open(params):
+        def did_open(params: types.DidOpenTextDocumentParams):
             self.documents[params.text_document.uri] = params.text_document.text
             if self.on_open is not None:
                 self.on_open(server, params.text_document.uri)
 
-        def did_change(params):
+        def did_change(params: types.DidChangeTextDocumentParams):
             self.documents[params.text_document.uri] = params.content_changes[-1].text
 
-        def did_close(params):
+        def did_close(params: types.DidCloseTextDocumentParams):
             self.closed.append(params.text_document.uri)
             self.documents.pop(params.text_document.uri, None)
 
-        def did_change_configuration(params):
+        def did_change_configuration(params: types.DidChangeConfigurationParams):
             self.settings = params.settings
 
         server.feature(types.TEXT_DOCUMENT_RENAME)(rename)
@@ -146,35 +157,38 @@ class Stub:
         )
 
 
+LspFixture = tuple[LspSession, EditSession, Stub]
+
+
 @pytest.fixture
-def stub_project(tmp_path):
+def stub_project(tmp_path: Path) -> EditSession:
     (tmp_path / "a.txt").write_text("alpha beta\n")
     (tmp_path / "b.txt").write_text("gamma delta\n")
     return EditSession(respect_gitignore=False, root=tmp_path)
 
 
 @pytest.fixture
-def lsp(stub_project):
+def lsp(stub_project: EditSession) -> Iterator[LspFixture]:
     stub = Stub()
     with LspSession(stub_project, [], in_memory=stub.run) as handle:
         yield handle, stub_project, stub
 
 
-def test_python_path_reaches_the_server(stub_project):
+def test_python_path_reaches_the_server(stub_project: EditSession) -> None:
     stub = Stub()
     with LspSession(stub_project, [], in_memory=stub.run, python_path="/opt/py"):
         pass
     assert stub.settings == {"python": {"pythonPath": "/opt/py"}}
 
 
-def test_no_python_path_sends_no_configuration(stub_project):
+def test_no_python_path_sends_no_configuration(stub_project: EditSession) -> None:
     stub = Stub()
     with LspSession(stub_project, [], in_memory=stub.run):
         pass
     assert stub.settings is None
 
 
-def test_rename_stages_server_edits_across_files(lsp):
+def test_rename_stages_server_edits_across_files(lsp: LspFixture) -> None:
     handle, session, stub = lsp
     # stage both files so the server sees the overlay, not disk
     session.write("a.txt", "alpha beta\n")
@@ -194,7 +208,7 @@ def test_rename_stages_server_edits_across_files(lsp):
     assert stub.documents[uri_b] == "staged gamma\n"
 
 
-def test_rename_pushes_updates_after_first_operation(lsp):
+def test_rename_pushes_updates_after_first_operation(lsp: LspFixture) -> None:
     handle, session, stub = lsp
     uri_a = (session.root / "a.txt").as_uri()
     session.write("a.txt", "alpha beta\n")
@@ -206,19 +220,19 @@ def test_rename_pushes_updates_after_first_operation(lsp):
     assert stub.documents[uri_a] == "alpha rewrote\n"
 
 
-def test_rename_without_server_answer_fails_loudly(lsp):
-    handle, session, _stub = lsp
+def test_rename_without_server_answer_fails_loudly(lsp: LspFixture) -> None:
+    handle, _session, _stub = lsp
     with pytest.raises(ValueError, match="cannot rename"):
         handle.rename_symbol("a.txt", 1, 0, "alpha", "ALPHA")
 
 
-def test_wrong_old_name_fails(lsp):
-    handle, session, _stub = lsp
+def test_wrong_old_name_fails(lsp: LspFixture) -> None:
+    handle, _session, _stub = lsp
     with pytest.raises(ValueError, match="is 'beta', not 'wrong'"):
         handle.rename_symbol("a.txt", 1, 6, "wrong", "BETA")
 
 
-def test_references_map_back_to_pyedit_positions(lsp):
+def test_references_map_back_to_pyedit_positions(lsp: LspFixture) -> None:
     handle, session, stub = lsp
     uri_a = (session.root / "a.txt").as_uri()
     uri_b = (session.root / "b.txt").as_uri()
@@ -234,7 +248,7 @@ def test_references_map_back_to_pyedit_positions(lsp):
     ]
 
 
-def test_resource_operations_are_rejected(lsp):
+def test_resource_operations_are_rejected(lsp: LspFixture) -> None:
     handle, session, stub = lsp
     uri_a = (session.root / "a.txt").as_uri()
     session.write("a.txt", "alpha beta\n")
@@ -247,14 +261,15 @@ def test_resource_operations_are_rejected(lsp):
         handle.rename_symbol("a.txt", 1, 0, "alpha", "ALPHA")
 
 
-def test_document_changes_shape_is_staged(lsp):
+def test_document_changes_shape_is_staged(lsp: LspFixture) -> None:
     handle, session, stub = lsp
     uri_a = (session.root / "a.txt").as_uri()
     session.write("a.txt", "alpha beta\n")
     stub.answers[("rename", uri_a, 0, 0)] = types.WorkspaceEdit(
         document_changes=[
             types.TextDocumentEdit(
-                text_document=types.VersionedTextDocumentIdentifier(
+                # lsprotocol types text_document as the Optional form; the wire shape matches
+                text_document=types.VersionedTextDocumentIdentifier(  # pyrefly: ignore[bad-argument-type]
                     uri=uri_a, version=1
                 ),
                 edits=[types.TextEdit(range=rng(0, 0, 0, 5), new_text="ALPHA")],
@@ -267,7 +282,7 @@ def test_document_changes_shape_is_staged(lsp):
     assert session.read("a.txt") == "ALPHA beta\n"
 
 
-def test_close_notification_on_delete(lsp):
+def test_close_notification_on_delete(lsp: LspFixture) -> None:
     handle, session, stub = lsp
     uri_a = (session.root / "a.txt").as_uri()
     uri_b = (session.root / "b.txt").as_uri()
@@ -282,9 +297,9 @@ def test_close_notification_on_delete(lsp):
     assert uri_b not in stub.documents
 
 
-def test_utf16_columns_convert_round_trip():
+def test_utf16_columns_convert_round_trip() -> None:
     # astral chars take two utf-16 units; BMP and ascii take one
-    line = "𝐀xα y"
+    line = "𝐀xα y"  # noqa: RUF001
     assert _column_to_units(line, 1, "utf-16") == 2
     assert _column_to_units(line, 1, "utf-8") == 4
     assert _units_to_column(line, 2, "utf-16") == 1
@@ -293,7 +308,7 @@ def test_utf16_columns_convert_round_trip():
     assert _units_to_column(line, 3, "utf-32") == 3
 
 
-def test_overlapping_server_edits_are_rejected(lsp):
+def test_overlapping_server_edits_are_rejected(lsp: LspFixture) -> None:
     handle, session, stub = lsp
     uri_a = (session.root / "a.txt").as_uri()
     session.write("a.txt", "alpha beta\n")
@@ -309,14 +324,23 @@ def test_overlapping_server_edits_are_rejected(lsp):
         handle.rename_symbol("a.txt", 1, 0, "alpha", "ALPHA")
 
 
-def test_lsp_binds_the_live_session(stub_project, monkeypatch):
-    opened = []
-    pyedit.session = stub_project
+def test_lsp_binds_the_live_session(
+    stub_project: EditSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    opened: list[tuple[EditSession, list[str]]] = []
+
+    def fake_session(
+        session: EditSession, command: list[str], **_kwargs: object
+    ) -> None:
+        opened.append((session, command))
+
+    # pyedit.session is the live session; pyrefly reads the submodule of that name
+    pyedit.session = stub_project  # pyrefly: ignore[bad-assignment]
     try:
         monkeypatch.setattr(
             pyedit,
             "LspSession",
-            lambda session, command, **kwargs: opened.append((session, command)),
+            fake_session,
         )
         pyedit.lsp(["rust-analyzer"])
         assert opened == [(stub_project, ["rust-analyzer"])]
@@ -326,15 +350,16 @@ def test_lsp_binds_the_live_session(stub_project, monkeypatch):
         pyedit.lsp(["rust-analyzer"])
 
 
-def _pyright_project(tmp_path):
+def _pyright_project(tmp_path: Path) -> EditSession:
     (tmp_path / "alpha.py").write_text("def alpha():\n    return 1\n")
     (tmp_path / "beta.py").write_text("import alpha\n\nvalue = alpha.alpha()\n")
     return EditSession(respect_gitignore=False, root=tmp_path)
 
 
 @requires_pyright
-def test_pyright_rename_stages_across_files(tmp_path):
+def test_pyright_rename_stages_across_files(tmp_path: Path) -> None:
     session = _pyright_project(tmp_path)
+    assert _pyright is not None
     with LspSession(session, [_pyright, "--stdio"]) as handle:
         staged = handle.rename_symbol("alpha.py", 1, 5, "alpha", "omega")
     assert set(staged) == {tmp_path / "alpha.py", tmp_path / "beta.py"}
@@ -343,8 +368,9 @@ def test_pyright_rename_stages_across_files(tmp_path):
 
 
 @requires_pyright
-def test_pyright_references_find_all_occurrences(tmp_path):
+def test_pyright_references_find_all_occurrences(tmp_path: Path) -> None:
     session = _pyright_project(tmp_path)
+    assert _pyright is not None
     with LspSession(session, [_pyright, "--stdio"]) as handle:
         refs = handle.references("alpha.py", 1, 5, "alpha")
     found = {(r.path.name, r.line, r.column) for r in refs}
@@ -354,7 +380,7 @@ def test_pyright_references_find_all_occurrences(tmp_path):
     }
 
 
-def _action_edit(uri, text="ALPHA"):
+def _action_edit(uri: str, text: str = "ALPHA") -> list[types.CodeAction]:
     return [
         types.CodeAction(
             title="Fix it",
@@ -366,7 +392,7 @@ def _action_edit(uri, text="ALPHA"):
     ]
 
 
-def test_code_action_stages_edits(lsp):
+def test_code_action_stages_edits(lsp: LspFixture) -> None:
     handle, session, stub = lsp
     uri_a = (session.root / "a.txt").as_uri()
     session.write("a.txt", "alpha beta\n")
@@ -376,7 +402,7 @@ def test_code_action_stages_edits(lsp):
     assert session.read("a.txt") == "ALPHA beta\n"
 
 
-def test_code_action_kinds_pass_verbatim(lsp):
+def test_code_action_kinds_pass_verbatim(lsp: LspFixture) -> None:
     handle, session, stub = lsp
     uri_a = (session.root / "a.txt").as_uri()
     session.write("a.txt", "alpha beta\n")
@@ -390,7 +416,7 @@ def test_code_action_kinds_pass_verbatim(lsp):
         handle.code_action_all("*.txt", "source.fix", on_error="loud")
 
 
-def test_code_action_resolves_deferred_edits(lsp):
+def test_code_action_resolves_deferred_edits(lsp: LspFixture) -> None:
     handle, session, stub = lsp
     uri_a = (session.root / "a.txt").as_uri()
     session.write("a.txt", "alpha beta\n")
@@ -403,7 +429,7 @@ def test_code_action_resolves_deferred_edits(lsp):
     assert session.read("a.txt") == "ALPHA beta\n"
 
 
-def test_code_action_command_raises(lsp):
+def test_code_action_command_raises(lsp: LspFixture) -> None:
     handle, session, stub = lsp
     uri_a = (session.root / "a.txt").as_uri()
     session.write("a.txt", "alpha beta\n")
@@ -415,10 +441,9 @@ def test_code_action_command_raises(lsp):
     assert session.read("a.txt") == "alpha beta\n"
 
 
-def test_code_action_all_runs_scopes_and_reports(lsp):
+def test_code_action_all_runs_scopes_and_reports(lsp: LspFixture) -> None:
     handle, session, stub = lsp
     uri_a = (session.root / "a.txt").as_uri()
-    uri_b = (session.root / "b.txt").as_uri()
     session.write("a.txt", "alpha beta\n")
     stub.answers[("codeAction", uri_a, ("source.fix",))] = _action_edit(uri_a)
     report = handle.code_action_all("*.txt", "source.fix")
@@ -429,7 +454,7 @@ def test_code_action_all_runs_scopes_and_reports(lsp):
     assert session.read("b.txt") == "gamma delta\n"
 
 
-def test_code_action_all_skip_collects_errors(lsp):
+def test_code_action_all_skip_collects_errors(lsp: LspFixture) -> None:
     handle, session, stub = lsp
     uri_a = (session.root / "a.txt").as_uri()
     uri_b = (session.root / "b.txt").as_uri()
@@ -444,7 +469,7 @@ def test_code_action_all_skip_collects_errors(lsp):
     assert session.read("b.txt") == "gamma delta\n"
 
 
-def test_code_action_all_raise_keeps_earlier_files(lsp):
+def test_code_action_all_raise_keeps_earlier_files(lsp: LspFixture) -> None:
     handle, session, stub = lsp
     uri_a = (session.root / "a.txt").as_uri()
     uri_b = (session.root / "b.txt").as_uri()
@@ -458,7 +483,7 @@ def test_code_action_all_raise_keeps_earlier_files(lsp):
     assert session.read("b.txt") == "gamma delta\n"
 
 
-def test_code_action_all_discards_the_failing_scope(lsp):
+def test_code_action_all_discards_the_failing_scope(lsp: LspFixture) -> None:
     # no staged write here: the scope stages ALPHA, the second kind
     # raises, and the discard must leave the session empty
     handle, session, stub = lsp
@@ -475,14 +500,16 @@ def test_code_action_all_discards_the_failing_scope(lsp):
     assert session.staged() == {}
 
 
-def test_format_file_refuses_without_capability(lsp):
+def test_format_file_refuses_without_capability(lsp: LspFixture) -> None:
     handle, session, _stub = lsp
     session.write("a.txt", "alpha  beta\n")
     with pytest.raises(ValueError, match="formatting"):
         handle.format_file("a.txt")
 
 
-def test_publish_diagnostics_are_tracked_without_warnings(stub_project, caplog):
+def test_publish_diagnostics_are_tracked_without_warnings(
+    stub_project: EditSession, caplog: pytest.LogCaptureFixture
+) -> None:
     # issue #23: every push logged "Ignoring notification", hundreds
     # of lines per run into stderr and agent context captures
     stub = Stub()
@@ -492,7 +519,7 @@ def test_publish_diagnostics_are_tracked_without_warnings(stub_project, caplog):
         severity=types.DiagnosticSeverity.Error,
     )
 
-    def on_open(server, uri):
+    def on_open(server: LanguageServer, uri: str) -> None:
         server.protocol.notify(
             types.TEXT_DOCUMENT_PUBLISH_DIAGNOSTICS,
             types.PublishDiagnosticsParams(uri=uri, diagnostics=[diag]),
@@ -518,12 +545,14 @@ def test_publish_diagnostics_are_tracked_without_warnings(stub_project, caplog):
     assert "Ignoring notification" not in caplog.text
 
 
-def test_server_pushes_are_logged_not_warned(stub_project, caplog):
+def test_server_pushes_are_logged_not_warned(
+    stub_project: EditSession, caplog: pytest.LogCaptureFixture
+) -> None:
     # every other server→client push took the same "Ignoring
     # notification" path as diagnostics did (issue #23)
     stub = Stub()
 
-    def on_open(server, uri):
+    def on_open(server: LanguageServer, uri: str) -> None:
         notify = server.protocol.notify
         notify(
             types.WINDOW_SHOW_MESSAGE,
@@ -574,15 +603,16 @@ def test_server_pushes_are_logged_not_warned(stub_project, caplog):
     assert by_message.get("language server: just-info") == logging.INFO
 
 
-def test_server_requests_get_headless_answers(stub_project):
+def test_server_requests_get_headless_answers(stub_project: EditSession) -> None:
     # a server may ask at any time (pyright asks workspace/
     # configuration); every answer is pinned against the stub so a
     # missing handler fails loudly instead of warning per message
     stub = Stub()
     target = (stub_project.root / "a.py").as_uri()
-    answers: dict = {}
+    answers: dict[str, Any] = {}
+    background: list[asyncio.Future[None]] = []
 
-    def on_open(server, uri):
+    def on_open(server: LanguageServer, uri: str) -> None:
         if uri != target:
             return
 
@@ -649,7 +679,7 @@ def test_server_requests_get_headless_answers(stub_project):
                     method, params
                 )
 
-        asyncio.ensure_future(ask_all())
+        background.append(asyncio.ensure_future(ask_all()))
 
     stub.on_open = on_open
     (stub_project.root / "a.py").write_text("x = 1\n")
@@ -676,7 +706,7 @@ def test_server_requests_get_headless_answers(stub_project):
     ]
 
 
-def _push_unknown_name(stub):
+def _push_unknown_name(stub: Stub) -> None:
     """Push one unknown-name diagnostic per didOpen; the pyrefly shape:
     file-wide requests see nothing, the diagnostic's own range fixes it."""
     diag = types.Diagnostic(
@@ -685,7 +715,7 @@ def _push_unknown_name(stub):
         severity=types.DiagnosticSeverity.Error,
     )
 
-    def on_open(server, uri):
+    def on_open(server: LanguageServer, uri: str) -> None:
         server.protocol.notify(
             types.TEXT_DOCUMENT_PUBLISH_DIAGNOSTICS,
             types.PublishDiagnosticsParams(uri=uri, diagnostics=[diag]),
@@ -694,7 +724,7 @@ def _push_unknown_name(stub):
     stub.on_open = on_open
 
 
-def test_quickfix_expands_to_diagnostic_ranges(stub_project):
+def test_quickfix_expands_to_diagnostic_ranges(stub_project: EditSession) -> None:
     stub = Stub()
     body = 'print(json.dumps({"a": 1}))\n'
     (stub_project.root / "a.py").write_text(body)
@@ -723,7 +753,7 @@ def test_quickfix_expands_to_diagnostic_ranges(stub_project):
     assert stub_project.read("a.py") == "import json\n\n" + body
 
 
-def test_quickfix_dedupes_identical_edits(stub_project):
+def test_quickfix_dedupes_identical_edits(stub_project: EditSession) -> None:
     # the same fix comes back file-wide and per-range; staging it
     # twice must be a silent no-op, not a doubled insertion
     stub = Stub()
@@ -750,7 +780,7 @@ def test_quickfix_dedupes_identical_edits(stub_project):
     assert stub_project.read("a.py") == "# fixed\n" + body
 
 
-def test_disabled_actions_are_skipped(stub_project):
+def test_disabled_actions_are_skipped(stub_project: EditSession) -> None:
     # a disabled action is unusable by construction; skipping comes
     # before resolve, so no round trip goes out for it
     stub = Stub()
@@ -773,7 +803,7 @@ def test_disabled_actions_are_skipped(stub_project):
     assert stub.resolved == []
 
 
-def test_only_titles_selects_among_alternatives(stub_project):
+def test_only_titles_selects_among_alternatives(stub_project: EditSession) -> None:
     # the pyrefly unknown-name shape: several alternatives for one
     # diagnostic, only the selected prefix stages
     stub = Stub()
@@ -809,7 +839,7 @@ def test_only_titles_selects_among_alternatives(stub_project):
     assert stub_project.read("a.py") == "import json\n" + body
 
 
-def test_source_kinds_skip_diagnostic_expansion(stub_project):
+def test_source_kinds_skip_diagnostic_expansion(stub_project: EditSession) -> None:
     # source.* actions are file-wide by convention; diagnostics are
     # tracked but no per-range requests go out for them
     stub = Stub()
@@ -823,7 +853,7 @@ def test_source_kinds_skip_diagnostic_expansion(stub_project):
     assert [seen[1] for seen in stub.code_actions_seen] == [("source.fixAll",)]
 
 
-def _ruff_project(tmp_path):
+def _ruff_project(tmp_path: Path) -> EditSession:
     (tmp_path / "fix.py").write_text("import os\nimport sys\n\nprint(sys.argv)\n")
     (tmp_path / "order.py").write_text(
         "import sys\nimport os\n\nprint(os.name, sys.argv)\n"
@@ -834,7 +864,7 @@ def _ruff_project(tmp_path):
 
 
 @requires_ruff
-def test_ruff_fix_all_removes_unused_import(tmp_path):
+def test_ruff_fix_all_removes_unused_import(tmp_path: Path) -> None:
     session = _ruff_project(tmp_path)
     with LspSession(session, ["ruff", "server"]) as handle:
         staged = handle.code_action("fix.py", "source.fixAll.ruff")
@@ -846,7 +876,7 @@ def test_ruff_fix_all_removes_unused_import(tmp_path):
 
 
 @requires_ruff
-def test_ruff_organize_imports(tmp_path):
+def test_ruff_organize_imports(tmp_path: Path) -> None:
     session = _ruff_project(tmp_path)
     with LspSession(session, ["ruff", "server"]) as handle:
         staged = handle.code_action("order.py", "source.organizeImports.ruff")
@@ -858,7 +888,7 @@ def test_ruff_organize_imports(tmp_path):
 
 
 @requires_ruff
-def test_ruff_tree_fixes_only_dirty_files(tmp_path):
+def test_ruff_tree_fixes_only_dirty_files(tmp_path: Path) -> None:
     session = _ruff_project(tmp_path)
     with LspSession(session, ["ruff", "server"]) as handle:
         report = handle.code_action_all(
@@ -871,7 +901,7 @@ def test_ruff_tree_fixes_only_dirty_files(tmp_path):
 
 
 @requires_ruff
-def test_ruff_format_file(tmp_path):
+def test_ruff_format_file(tmp_path: Path) -> None:
     session = _ruff_project(tmp_path)
     with LspSession(session, ["ruff", "server"]) as handle:
         assert handle.format_file("messy.py") == [tmp_path / "messy.py"]
@@ -880,7 +910,7 @@ def test_ruff_format_file(tmp_path):
 
 
 @requires_ruff
-def test_ruff_syntax_error_is_empty_not_an_error(tmp_path):
+def test_ruff_syntax_error_is_empty_not_an_error(tmp_path: Path) -> None:
     (tmp_path / "broken.py").write_text("def f(:\n")
     session = EditSession(respect_gitignore=False, root=tmp_path)
     with LspSession(session, ["ruff", "server"]) as handle:
@@ -888,12 +918,13 @@ def test_ruff_syntax_error_is_empty_not_an_error(tmp_path):
 
 
 @requires_pyright
-def test_pyright_sees_staged_content_not_disk(tmp_path):
+def test_pyright_sees_staged_content_not_disk(tmp_path: Path) -> None:
     # disk holds alpha; the session has renamed it to gamma already --
     # the server must compute over the didOpen'd overlay
     (tmp_path / "alpha.py").write_text("def alpha():\n    return 1\n")
     session = EditSession(respect_gitignore=False, root=tmp_path)
     session.write("alpha.py", "def gamma():\n    return 2\n")
+    assert _pyright is not None
     with LspSession(session, [_pyright, "--stdio"]) as handle:
         refs = handle.references("alpha.py", 1, 5, "gamma")
     assert [(r.path, r.line, r.column) for r in refs] == [(tmp_path / "alpha.py", 1, 4)]

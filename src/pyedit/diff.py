@@ -17,10 +17,11 @@ use, because only it writes binary payloads and 120000 modes.
 from __future__ import annotations
 
 import difflib
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pyedit.render import DiffRenderer
 from pyedit.session import (
+    Staged,
     Symlink,
     _disk_is_file,
     _disk_is_link,
@@ -29,12 +30,18 @@ from pyedit.session import (
     display_path,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
+
+    from pyedit.memgit import MemValue
+
 # one process-wide renderer; it imports pygit2 lazily, so module import
 # stays cheap and cert-less environments fail at render time only
 _RENDERER = DiffRenderer()
 
 
-def _encoded(value):
+def _encoded(value: Staged) -> bytes | None:
     return value.encode() if isinstance(value, str) else value
 
 
@@ -79,11 +86,11 @@ def difflib_hunks(old: str, new: str, context: int = 3) -> str:
 
 
 def unified_diffs(
-    staged: dict[Path, str | bytes | None],
+    staged: dict[Path, Staged],
     context: int = 3,
-    base: dict[Path, str | bytes | None] | None = None,
+    base: dict[Path, Staged] | None = None,
     replayable: bool = False,
-    render=None,
+    render: Callable[[str, str, int], str] | None = None,
 ) -> list[tuple[str, str]]:
     """Return (display path, diff text) for every staged change.
 
@@ -103,7 +110,7 @@ def unified_diffs(
     `replayable` output is always git's.
     """
     hunks_of = render or _RENDERER.hunks
-    entries = []
+    entries: list[tuple[Path, Staged, Staged]] = []
     for path, new in sorted(staged.items()):
         old = base.get(path) if base is not None else original(path)
         if new is None and old is None:
@@ -187,7 +194,7 @@ def unified_diffs(
 NOTE_PREFIXES = ("Symlink ", "Binary file ")
 
 
-def symlink_note(rel: str, old, new) -> str:
+def symlink_note(rel: str, old: Staged, new: Staged) -> str:
     if isinstance(new, Symlink) and old is None:
         return f"Symlink {rel} -> {new} created\n"
     if isinstance(old, Symlink) and new is None:
@@ -199,7 +206,11 @@ def symlink_note(rel: str, old, new) -> str:
     return f"Symlink {rel} -> {old} replaced by a regular file\n"
 
 
-def replayable_patch(staged, context: int = 3, base=None) -> str:
+def replayable_patch(
+    staged: dict[Path, Staged],
+    context: int = 3,
+    base: dict[Path, Staged] | None = None,
+) -> str:
     """The whole change set as one git-canonical patch.
 
     This is pyedit's internal representation: libgit2 writes it and
@@ -207,7 +218,8 @@ def replayable_patch(staged, context: int = 3, base=None) -> str:
     diff. Unlike `unified_diffs` it is not for reading -- it carries
     base85 payloads and 120000 modes.
     """
-    before, after = {}, {}
+    before: dict[str, MemValue] = {}
+    after: dict[str, MemValue] = {}
     for path, new in sorted(staged.items()):
         old = base.get(path) if base is not None else original(path)
         rel = display_path(path)
@@ -220,7 +232,7 @@ def replayable_patch(staged, context: int = 3, base=None) -> str:
     return MemoryRepo().patch(before, after, context)
 
 
-def file_patch(rel: str, old, new, context: int = 3) -> str:
+def file_patch(rel: str, old: Staged, new: Staged, context: int = 3) -> str:
     """A git patch section for one file, written by libgit2.
 
     This is what a binary or symlink change needs to replay: git's own
@@ -234,7 +246,7 @@ def file_patch(rel: str, old, new, context: int = 3) -> str:
     return repo.patch(_git_side(rel, old), _git_side(rel, new), context)
 
 
-def _git_side(rel: str, value) -> dict:
+def _git_side(rel: str, value: Staged) -> dict[str, MemValue]:
     """One side of a change as memgit's {path: (content, mode)} map."""
     import pygit2
 
@@ -247,6 +259,7 @@ def _git_side(rel: str, value) -> dict:
 
 def binary_note(rel: str, old: str | bytes | None, new: str | bytes | None) -> str:
     if new is None:
+        assert old is not None
         return f"Binary file {rel} deleted ({len(old)} bytes)\n"
     if old is None:
         return f"Binary file {rel} created ({len(new)} bytes)\n"

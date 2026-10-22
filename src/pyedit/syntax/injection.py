@@ -13,7 +13,12 @@ coordinates.
 
 from __future__ import annotations
 
-from pyedit.syntax.nodes import SyntaxProblem
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from tree_sitter import Language, Node, Tree
+
+    from pyedit.syntax.nodes import SyntaxProblem
 
 # injection language name -> a suffix whose rules and grammar parse it
 _SUFFIX = {
@@ -25,7 +30,7 @@ _SUFFIX = {
 
 
 def injected_problems(
-    text: str, tree, language, query_text: str
+    text: str, tree: Tree, language: Language, query_text: str
 ) -> list[SyntaxProblem]:
     """Problems inside every region `query_text` injects, parsed by the
     injected language. A language with no grammar installed is skipped."""
@@ -35,7 +40,7 @@ def injected_problems(
     from pyedit.syntax.rules import rules_for
 
     query = Query(language, query_text)
-    regions: dict[tuple[int, int], tuple[int, object, str]] = {}
+    regions: dict[tuple[int, int], tuple[int, Node, str | None]] = {}
     for index, captures in QueryCursor(query).matches(tree.root_node):
         name = query.pattern_settings(index).get("injection.language")
         for node in captures.get("injection.content", []):
@@ -46,14 +51,15 @@ def injected_problems(
     source = text.encode("utf-8")
     found: list[SyntaxProblem] = []
     for _, node, name in regions.values():
-        suffix = _SUFFIX.get(name)
+        suffix = _SUFFIX.get(name) if name is not None else None
         injected = _language_for(suffix) if suffix else None
-        if injected is None:
+        rules = rules_for(suffix) if suffix else None
+        if injected is None or rules is None:
             continue
         parser = Parser(injected)
         parser.included_ranges = [
             Range(node.start_point, node.end_point, node.start_byte, node.end_byte)
         ]
-        found.extend(rules_for(suffix).problems(text, parser.parse(source)))
+        found.extend(rules.problems(text, parser.parse(source)))
     found.sort(key=lambda problem: (problem.line, problem.column))
     return found

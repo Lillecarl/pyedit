@@ -1,22 +1,29 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import pytest
 
 from pyedit.session import BudgetExceeded, EditSession
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-def test_write_budget_trips_on_growth(project):
+
+def test_write_budget_trips_on_growth(project: Path) -> None:
     session = EditSession(max_bytes=10)
     session.write("src/a.py", "12345")  # 5 bytes, within budget
     with pytest.raises(BudgetExceeded, match="memory budget"):
         session.write("src/b.py", "12345678901")  # 11 bytes -> 16 > 10
 
 
-def test_budget_counts_utf8_bytes(project):
+def test_budget_counts_utf8_bytes(project: Path) -> None:
     session = EditSession(max_bytes=1)
     with pytest.raises(BudgetExceeded):
         session.write("src/x.py", "é")  # 2 utf-8 bytes
 
 
-def test_replacement_counts_only_growth(project):
+def test_replacement_counts_only_growth(project: Path) -> None:
     session = EditSession(max_bytes=6)
     session.write("src/a.py", "123456")
     session.write("src/a.py", "123")  # shrink: fine
@@ -25,7 +32,7 @@ def test_replacement_counts_only_growth(project):
         session.write("src/a.py", "1234567")
 
 
-def test_delete_frees_budget(project):
+def test_delete_frees_budget(project: Path) -> None:
     session = EditSession(max_bytes=10)
     session.write("src/a.py", "1234567890")
     session.delete("src/a.py")
@@ -33,7 +40,7 @@ def test_delete_frees_budget(project):
     assert session.staged()[project / "src" / "b.py"] == "1234567890"
 
 
-def test_file_budget_trips_on_third_file(project):
+def test_file_budget_trips_on_third_file(project: Path) -> None:
     session = EditSession(max_files=2)
     session.write("src/1.py", "x")
     session.write("src/2.py", "x")
@@ -43,14 +50,14 @@ def test_file_budget_trips_on_third_file(project):
     session.write("src/3.py", "x")  # slot freed
 
 
-def test_materializing_read_is_budgeted(project):
+def test_materializing_read_is_budgeted(project: Path) -> None:
     (project / "src" / "big.bin").write_bytes(b"x" * 100)
     session = EditSession(max_bytes=50)
     with pytest.raises(BudgetExceeded, match="memory budget"):
         session.read("src/big.bin")
 
 
-def test_prune_unchanged_releases_budget(project):
+def test_prune_unchanged_releases_budget(project: Path) -> None:
     session = EditSession(max_files=1)
     session.read("src/a.py")  # materialized: 1 file used
     with pytest.raises(BudgetExceeded):
@@ -61,7 +68,7 @@ def test_prune_unchanged_releases_budget(project):
     session.write("src/brand_new.py", "x\n")
 
 
-def test_none_disables_budgets(project):
+def test_none_disables_budgets(project: Path) -> None:
     session = EditSession()
     session.write("src/a.py", "x" * 100000)
     session.write("src/b.py", "x" * 100000)

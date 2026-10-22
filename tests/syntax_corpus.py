@@ -4,7 +4,9 @@ name, suffix, correct sample, broken sample, expected outline names.
 Add a language by adding a row; every consumer below picks it up.
 """
 
-LANGUAGES = [
+LanguageRow = tuple[str, str, str, str, set[str]]
+
+LANGUAGES: list[LanguageRow] = [
     (
         "python",
         ".py",

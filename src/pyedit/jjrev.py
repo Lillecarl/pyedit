@@ -22,13 +22,19 @@ from __future__ import annotations
 import os
 import stat
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from pyedit.session import Symlink, _parse_author
 
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
 try:
-    import pyjj
+    import pyjj  # pyrefly: ignore[missing-import] soft dependency, absent from the dev venv
 except ImportError:
     pyjj = None
+
+_WcState = tuple[str, bytes | str | None, int | None]
 
 
 class JjRevError(Exception):
@@ -56,7 +62,7 @@ def find_repo_root(start: Path) -> Path:
     """The workspace root containing `start`; loud when there is none."""
     require_pyjj()
     try:
-        return Path(pyjj.open(str(start)).root).resolve()
+        return Path(require_pyjj().open(str(start)).root).resolve()
     except Exception as err:
         raise JjRevError(f"no jj repository contains {start}: {err}") from err
 
@@ -69,7 +75,7 @@ def resolve_ids(repo_root: Path, rev: str) -> tuple[str, str]:
     """
     require_pyjj()
     try:
-        repo = pyjj.open(str(repo_root))
+        repo = require_pyjj().open(str(repo_root))
         return _hex(repo.resolve(rev)), _hex(repo.resolve("@"))
     except JjRevError:
         raise
@@ -77,7 +83,7 @@ def resolve_ids(repo_root: Path, rev: str) -> tuple[str, str]:
         raise JjRevError(f"cannot resolve {rev!r}: {err}") from err
 
 
-def _hex(commit) -> str:
+def _hex(commit: Any) -> str:
     return commit.id.hex()
 
 
@@ -91,7 +97,7 @@ def export_tree(repo_root: Path, rev: str, dest: Path) -> list[str]:
     """
     require_pyjj()
     try:
-        repo = pyjj.open(str(repo_root))
+        repo = require_pyjj().open(str(repo_root))
         target = repo.resolve(rev)
         names = target.list_files(None)
     except JjRevError:
@@ -124,7 +130,7 @@ def export_tree(repo_root: Path, rev: str, dest: Path) -> list[str]:
     return exported
 
 
-def _tree_state_opt(commit, rel: str) -> tuple:
+def _tree_state_opt(commit: Any, rel: str) -> tuple[str, bytes | str | None]:
     """_tree_state, with absence as a value instead of a refusal."""
     try:
         return _tree_state(commit, rel)
@@ -132,7 +138,7 @@ def _tree_state_opt(commit, rel: str) -> tuple:
         return ("absent", None)
 
 
-def _matches_saved(commit, saved: dict[str, tuple]) -> bool:
+def _matches_saved(commit: Any, saved: dict[str, _WcState]) -> bool:
     """Every touched path in the commit holds its pre-run content."""
     for rel, (kind, payload, _mode) in saved.items():
         if _tree_state_opt(commit, rel) != (kind, payload):
@@ -140,7 +146,7 @@ def _matches_saved(commit, saved: dict[str, tuple]) -> bool:
     return True
 
 
-def _matches_staged(commit, changes: dict[str, object]) -> bool:
+def _matches_staged(commit: Any, changes: Mapping[str, bytes | str | None]) -> bool:
     """Every touched path in the commit holds the staged bytes."""
     for rel, new in changes.items():
         if isinstance(new, Symlink):
@@ -150,14 +156,14 @@ def _matches_staged(commit, changes: dict[str, object]) -> bool:
         else:
             want = (
                 "file",
-                new.encode("utf-8") if isinstance(new, str) else bytes(new),
+                new.encode("utf-8") if isinstance(new, str) else new,
             )
         if _tree_state_opt(commit, rel) != want:
             return False
     return True
 
 
-def _conflict_names(repo) -> list[str]:
+def _conflict_names(repo: Any) -> list[str]:
     """Short id plus subject for every commit carrying markers."""
     names = []
     for commit in repo.conflicts():
@@ -171,7 +177,7 @@ def _conflict_names(repo) -> list[str]:
 def amend_commit(
     repo_root: Path,
     rev: str,
-    changes: dict[str, object],
+    changes: Mapping[str, bytes | str | None],
     meta: dict[str, str] | None = None,
 ) -> tuple[str, str, str | None, list[str]]:
     """Rewrite REV with new contents; return (new id, op, cleanup, conflicts).
@@ -204,7 +210,7 @@ def amend_commit(
     if not changes and not meta:
         raise JjRevError("nothing to amend")
     try:
-        repo = pyjj.open(str(repo_root))
+        repo = require_pyjj().open(str(repo_root))
         target = repo.resolve(rev)
         at = repo.resolve("@")
         target_files = set(target.list_files(None))
@@ -242,7 +248,7 @@ def amend_commit(
 
 
 def create_after(
-    repo_root: Path, rev: str, message: str, changes: dict[str, object]
+    repo_root: Path, rev: str, message: str, changes: Mapping[str, bytes | str | None]
 ) -> tuple[str, str, str | None, list[str]]:
     """A new commit after REV carrying `changes`; return (id, op, cleanup,
     conflicts). REV's children reparent onto it, so the stack keeps its
@@ -263,7 +269,7 @@ def create_after(
     if not changes:
         raise JjRevError("nothing to commit: the scope staged no changes")
     try:
-        repo = pyjj.open(str(repo_root))
+        repo = require_pyjj().open(str(repo_root))
         base = repo.resolve(rev)
         at = repo.resolve("@")
     except JjRevError:
@@ -322,7 +328,9 @@ def create_after(
     return _hex(new), op, cleanup, _conflict_names(repo)
 
 
-def _check_clean(repo_root: Path, at, changes: dict[str, object]) -> dict[str, tuple]:
+def _check_clean(
+    repo_root: Path, at: Any, changes: Mapping[str, bytes | str | None]
+) -> dict[str, _WcState]:
     """The working copy holds no uncommitted state on touched paths.
 
     Returns what each path held, for the reconcile to put back. The
@@ -330,7 +338,7 @@ def _check_clean(repo_root: Path, at, changes: dict[str, object]) -> dict[str, t
     naming the paths; nothing was written.
     """
     at_files = set(at.list_files(None))
-    saved: dict[str, tuple] = {}
+    saved: dict[str, _WcState] = {}
     dirty: list[str] = []
     for rel in changes:
         old = _wc_state(repo_root / rel)
@@ -358,12 +366,12 @@ def _check_clean(repo_root: Path, at, changes: dict[str, object]) -> dict[str, t
 
 def _reconcile_wc(
     repo_root: Path,
-    repo,
+    repo: Any,
     rev: str,
     op: str,
     wc_hex: str,
-    saved: dict[str, tuple],
-    changes: dict[str, object],
+    saved: dict[str, _WcState],
+    changes: Mapping[str, bytes | str | None],
     reparented: bool = False,
 ) -> str | None:
     """The working copy after the transaction; return the cleanup op.
@@ -403,7 +411,7 @@ def _reconcile_wc(
     return None
 
 
-def _reparent(tx, repo, base_hex: str, new, kids) -> None:
+def _reparent(tx: Any, repo: Any, base_hex: str, new: Any, kids: Any) -> None:
     """Move REV's children onto the inserted commit, in the open block.
 
     Each child keeps every parent but REV, which the new commit
@@ -464,7 +472,7 @@ def retitle(repo_root: Path, rev: str, meta: dict[str, str]) -> str:
         raise JjRevError(f"setting metadata at {rev!r} failed: {err}") from err
 
 
-def _apply_meta(repo, tx, commit, meta: dict[str, str]):
+def _apply_meta(repo: Any, tx: Any, commit: Any, meta: dict[str, str]) -> Any:
     """Description then author onto `commit`, inside the open block.
 
     `describe` takes the commit object itself rather than a revset:
@@ -480,7 +488,7 @@ def _apply_meta(repo, tx, commit, meta: dict[str, str]):
     return commit
 
 
-def _rewrite_author(repo, tx, commit, who: str):
+def _rewrite_author(repo: Any, tx: Any, commit: Any, who: str) -> Any:
     """A new "Name <email>" on `commit`, keeping its timestamp."""
     module = require_pyjj()
     name, email = _split_author(_parse_author(who))
@@ -505,7 +513,7 @@ def _rewrite_author(repo, tx, commit, who: str):
         raise JjRevError(f"cannot set author: {err}") from err
 
 
-def _format_author(sig) -> str:
+def _format_author(sig: Any) -> str:
     """A signature as the "Name <email>" that stages it back."""
     return f"{sig.name} <{sig.email}>"
 
@@ -516,7 +524,7 @@ def _split_author(who: str) -> tuple[str, str]:
     return name.strip(), email[:-1].strip()
 
 
-def _wc_state(path: Path) -> tuple:
+def _wc_state(path: Path) -> _WcState:
     """(kind, payload, mode) of a working-copy path: kind is file,
     link or absent; payload is bytes or a link target; mode holds the
     permission bits for restore."""
@@ -530,7 +538,7 @@ def _wc_state(path: Path) -> tuple:
     return ("file", path.read_bytes(), stat.S_IMODE(st.st_mode))
 
 
-def _tree_state(commit, rel: str) -> tuple:
+def _tree_state(commit: Any, rel: str) -> tuple[str, bytes | str]:
     """(kind, payload) of a committed path: file bytes or a link
     target. Anything else is unreadable, said loudly."""
     try:
@@ -542,7 +550,13 @@ def _tree_state(commit, rel: str) -> tuple:
     return ("file", data)
 
 
-def _refuse_flip(target_files: set, target, rel, old, new) -> str | None:
+def _refuse_flip(
+    target_files: set[str],
+    target: Any,
+    rel: str,
+    old: _WcState,
+    new: bytes | str | None,
+) -> str | None:
     """Why a change touching a symlink cannot amend, or None when the
     kinds line up: files, additions, deletions and link retargets."""
     new_kind = (
@@ -565,7 +579,7 @@ def _refuse_flip(target_files: set, target, rel, old, new) -> str | None:
     )
 
 
-def _write_wc(repo_root, target, rel, new) -> None:
+def _write_wc(repo_root: Path, target: Any, rel: str, new: bytes | str | None) -> None:
     """Lay new content into the working copy, matching REV's modes."""
     path = repo_root / rel
     if new is None:
@@ -583,7 +597,7 @@ def _write_wc(repo_root, target, rel, new) -> None:
                 path.unlink()
         os.symlink(str(new), path)
         return
-    data = new.encode("utf-8") if isinstance(new, str) else bytes(new)
+    data = new.encode("utf-8") if isinstance(new, str) else new
     path.write_bytes(data)
     if target.is_executable(rel):
         path.chmod(0o755)
@@ -591,7 +605,7 @@ def _write_wc(repo_root, target, rel, new) -> None:
         path.chmod(0o644)
 
 
-def _restore_wc(repo_root: Path, saved: dict[str, tuple]) -> None:
+def _restore_wc(repo_root: Path, saved: dict[str, _WcState]) -> None:
     """Put the working copy back byte- and mode-identical."""
     for rel, (kind, payload, mode) in saved.items():
         path = repo_root / rel
@@ -607,15 +621,23 @@ def _restore_wc(repo_root: Path, saved: dict[str, tuple]) -> None:
                 else:
                     path.unlink()
             path.parent.mkdir(parents=True, exist_ok=True)
+            assert isinstance(payload, str)
             os.symlink(payload, path)
         else:
             path.parent.mkdir(parents=True, exist_ok=True)
+            assert isinstance(payload, bytes)
             path.write_bytes(payload)
             if mode is not None:
                 os.chmod(path, mode)
 
 
-def _verify_rebased(repo_root, at_commit, saved, rev, op) -> None:
+def _verify_rebased(
+    repo_root: Path,
+    at_commit: Any,
+    saved: dict[str, _WcState],
+    rev: str,
+    op: str,
+) -> None:
     """The working copy after jj checked out the rebased descendants.
 
     Our squash moved @, so jj wrote its new tree out itself: every
@@ -646,7 +668,7 @@ def _verify_rebased(repo_root, at_commit, saved, rev, op) -> None:
             )
 
 
-def _verify_wc(repo_root: Path, saved: dict[str, tuple]) -> None:
+def _verify_wc(repo_root: Path, saved: dict[str, _WcState]) -> None:
     """The restore really landed; a crash or concurrent edit in the
     window names itself instead of passing silently."""
     for rel, (kind, payload, mode) in saved.items():

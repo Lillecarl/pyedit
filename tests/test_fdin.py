@@ -2,6 +2,7 @@ import os
 import subprocess
 import sys
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -32,7 +33,8 @@ def test_reads_past_the_first_chunk():
 
 
 def test_injected_payloads_serve_read_fd_without_fds():
-    with injected({"3": "old", 4: "new"}):
+    # mixed key types on purpose: injected() must accept both key kinds
+    with injected({"3": "old", 4: "new"}):  # pyrefly: ignore[bad-assignment]
         assert read_fd(3) == "old"
         assert read_fd(4) == "new"
         with injected({"4": "inner"}):
@@ -43,7 +45,8 @@ def test_injected_payloads_serve_read_fd_without_fds():
 def test_injected_rejects_bad_keys_and_values():
     with pytest.raises(ValueError), injected({"old": "y"}):
         pass
-    with pytest.raises(TypeError), injected({"3": 4}):
+    # int value on purpose: TypeError is the rejection under test
+    with pytest.raises(TypeError), injected({"3": 4}):  # pyrefly: ignore[bad-assignment]
         pass
 
 
@@ -57,7 +60,7 @@ def test_a_closed_fd_is_named_in_the_error():
     assert "N<<'EOF'" in str(raised.value)
 
 
-def test_heredocs_pair_with_redirections_in_order(project):
+def test_heredocs_pair_with_redirections_in_order(project: Path):
     old = "def greet():\n    '''Say hi.'''\n    print(\"Hi\")\n"
     new = "def greet(name=\"world\"):\n    '''Say hi.'''\n    print(f\"Hi, {name}\")\n"
     (project / "greet.py").write_text(old)

@@ -12,9 +12,12 @@ the fakes pin our half: exact bytes into the target, metadata in the
 same block, the working copy put back, conflicts reported.
 """
 
+from __future__ import annotations
+
 import os
 import types
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -22,9 +25,12 @@ from pyedit import jjrev
 from pyedit.jjrev import JjRevError
 from pyedit.session import EditSession
 
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Mapping
+
 
 class FakeId:
-    def __init__(self, value):
+    def __init__(self, value: str):
         self.value = value
 
     def hex(self):
@@ -34,14 +40,14 @@ class FakeId:
 class FakeCommit:
     def __init__(
         self,
-        files=None,
-        execs=(),
-        links=(),
-        cid="aaaa",
-        description="",
-        author=None,
-        parents=(),
-        conflicted=False,
+        files: Mapping[str, bytes | Exception] | None = None,
+        execs: Iterable[str] = (),
+        links: Iterable[str] = (),
+        cid: str = "aaaa",
+        description: str = "",
+        author: FakeSignature | None = None,
+        parents: Iterable[FakeId] = (),
+        conflicted: bool = False,
     ):
         self._files = dict(files or {})
         self._execs = set(execs)
@@ -60,13 +66,13 @@ class FakeCommit:
     def parent_ids(self):
         return list(self._parents)
 
-    def list_files(self, paths):
+    def list_files(self, paths: Iterable[str]):
         names = sorted(self._files)
         if not paths:
             return names
         return [n for n in names if any(n == p or n.startswith(p + "/") for p in paths)]
 
-    def read_file(self, path):
+    def read_file(self, path: str):
         if path not in self._files:
             raise FakeError(f"`{path}` does not exist")
         payload = self._files[path]
@@ -74,7 +80,7 @@ class FakeCommit:
             raise payload
         return payload
 
-    def is_executable(self, path):
+    def is_executable(self, path: str):
         if path not in self._files or path in self._links:
             return None
         return path in self._execs
@@ -85,40 +91,44 @@ class FakeError(Exception):
 
 
 class FakeTimestamp:
-    def __init__(self, millis=0, tz=0):
+    def __init__(self, millis: int = 0, tz: int = 0):
         self.millis_since_epoch = millis
         self.tz_offset_minutes = tz
 
 
 class FakeSignature:
-    def __init__(self, name, email, timestamp=None):
+    def __init__(self, name: str, email: str, timestamp: FakeTimestamp | None = None):
         self.name = name
         self.email = email
         self.timestamp = timestamp or FakeTimestamp()
 
 
-def fake_module(repo):
+def fake_module(repo: FakeRepo):
     """A pyjj stand-in with the constructors jjrev reaches for."""
-    module = types.ModuleType("pyjj")
-    module.open = lambda path: repo
+    module = types.SimpleNamespace()
+
+    def fake_open(path: str) -> FakeRepo:
+        return repo
+
+    module.open = fake_open
     module.Signature = FakeSignature
     module.Timestamp = FakeTimestamp
     return module
 
 
 class FakeBuilder:
-    def __init__(self, commit):
+    def __init__(self, commit: FakeCommit):
         self.commit = commit
 
-    def set_description(self, message):
+    def set_description(self, message: str):
         self.commit.description = message
         return self
 
-    def set_author(self, sig):
+    def set_author(self, sig: FakeSignature):
         self.commit.author = sig
         return self
 
-    def set_parents(self, parents):
+    def set_parents(self, parents: Iterable[FakeId]):
         self.commit._parents = list(parents)
         return self
 
@@ -130,15 +140,15 @@ class FakeRawTx:
     """The escape hatch jjrev rewrites the author through: the
     public builder, since the wrapper has no author verb."""
 
-    def __init__(self, repo):
+    def __init__(self, repo: FakeRepo):
         self.repo = repo
         self.rewrites = []
 
-    def rewrite_commit(self, _settings, commit):
+    def rewrite_commit(self, _settings, commit: FakeCommit):
         self.rewrites.append(commit.id.hex())
         return FakeBuilder(commit)
 
-    def check_rewritable(self, _settings, ids):
+    def check_rewritable(self, _settings, ids: Iterable[FakeId]):
         self.repo.checked.extend(commit_id.hex() for commit_id in ids)
         blocked = self.repo.unrewritable & {commit_id.hex() for commit_id in ids}
         if blocked:
@@ -146,7 +156,7 @@ class FakeRawTx:
 
 
 class FakeTx:
-    def __init__(self, repo):
+    def __init__(self, repo: FakeRepo):
         self.repo = repo
         self.restored = []
         self.described = []
@@ -157,7 +167,7 @@ class FakeTx:
     def transaction(self):
         return self.raw
 
-    def describe(self, revision, message):
+    def describe(self, revision: str | FakeCommit, message: str):
         target = (
             revision if not isinstance(revision, str) else self.repo.resolve(revision)
         )
@@ -165,7 +175,12 @@ class FakeTx:
         target.description = message
         return target
 
-    def new(self, parents, message=None, edit=True):
+    def new(
+        self,
+        parents: str | Iterable[str],
+        message: str | None = None,
+        edit: bool = True,
+    ):
         """An empty child commit, detached: the block's own restores
         take its object directly, never a re-resolution."""
         if isinstance(parents, str):
@@ -176,7 +191,12 @@ class FakeTx:
         self.repo.by_cid[child.id.hex()] = child
         return child
 
-    def restore(self, paths, into="@", from_revision=None):
+    def restore(
+        self,
+        paths: Iterable[str] | None,
+        into: str | FakeCommit = "@",
+        from_revision: str | None = None,
+    ):
         if from_revision is None:
             raise FakeError("mirror: restore needs from_revision")
         # None paths carry the whole source tree, the way the
@@ -215,11 +235,11 @@ class FakeTx:
 
 
 class FakeAtomic:
-    def __init__(self, repo, description, allow_conflicts):
+    def __init__(self, repo: FakeRepo, description: str, allow_conflicts: bool):
         self.repo = repo
         self.description = description
         self.allow_conflicts = allow_conflicts
-        self.tx = None
+        self.tx: FakeTx | None = None
 
     def __enter__(self):
         self.repo.atomics.append(self)
@@ -227,7 +247,7 @@ class FakeAtomic:
         self.tx = FakeTx(self.repo)
         return self.tx
 
-    def __exit__(self, *exc):
+    def __exit__(self, *exc: object):
         if self.repo.checkout_bytes is not None:
             for rel in self.repo.last_paths or []:
                 (Path(self.repo.root) / rel).write_bytes(self.repo.checkout_bytes)
@@ -235,19 +255,19 @@ class FakeAtomic:
 
 
 class FakeRepo:
-    def __init__(self, commits, root):
+    def __init__(self, commits: dict[str, FakeCommit], root: str):
         self.commits = commits
         self._root = root
         self.atomics = []
         self.by_cid = {}
         self.moved = False
-        self.at_new = None
+        self.at_new: FakeCommit | None = None
         # commits carrying markers, for the conflicts report
         self.conflicted = []
         # bytes the fake checkout lays into the working copy on
         # atomic exit, standing in for jj writing out the moved @
-        self.checkout_bytes = None
-        self.last_paths = None
+        self.checkout_bytes: bytes | None = None
+        self.last_paths: list[str] | None = None
         # sentinels for the escape hatch (settings, readonly repo)
         self.settings = object()
         self._repo = object()
@@ -259,7 +279,7 @@ class FakeRepo:
     def root(self):
         return self._root
 
-    def resolve(self, rev):
+    def resolve(self, rev: str):
         if rev == "@" and self.moved and self.at_new is not None:
             return self.at_new
         try:
@@ -271,7 +291,7 @@ class FakeRepo:
                 return commit
         raise FakeError(f"revision {rev!r} names nothing")
 
-    def revset(self, rev):
+    def revset(self, rev: str):
         # children queries only ("HEX+"): the commits naming that
         # hex among their parents, in repo order
         if not rev.endswith("+"):
@@ -307,7 +327,7 @@ class FakeRepo:
     def conflicts(self):
         return list(self.conflicted)
 
-    def atomic(self, description, allow_conflicts=False):
+    def atomic(self, description: str, allow_conflicts: bool = False):
         return FakeAtomic(self, description, allow_conflicts)
 
     @property
@@ -315,7 +335,7 @@ class FakeRepo:
         return "op999"
 
 
-def fake_repo(root, monkeypatch):
+def fake_repo(root: Path, monkeypatch: pytest.MonkeyPatch):
     (root / "a.py").write_text("old\n")
     at = FakeCommit(files={"a.py": b"old\n"}, cid="at")
     target = FakeCommit(files={"a.py": b"older\n"}, cid="target")
@@ -324,7 +344,9 @@ def fake_repo(root, monkeypatch):
     return repo
 
 
-def fake_moving_repo(root, monkeypatch, old_bytes, rebased_bytes):
+def fake_moving_repo(
+    root: Path, monkeypatch: pytest.MonkeyPatch, old_bytes: bytes, rebased_bytes: bytes
+):
     """@ carries rebased content after the amend: the rebase moved it
     mid-run, so reconcile meets a new working-copy commit."""
     (root / "a.py").write_bytes(old_bytes)
@@ -337,15 +359,21 @@ def fake_moving_repo(root, monkeypatch, old_bytes, rebased_bytes):
     return repo
 
 
-def test_export_materializes_bytes_modes_and_links(tmp_path, monkeypatch):
+def test_export_materializes_bytes_modes_and_links(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     target = FakeCommit(
         files={"a.py": b"x\n", "bin/run": b"run\n", "doc": b"elsewhere"},
         execs={"bin/run"},
         links={"doc"},
     )
     repo = FakeRepo({"@-": target}, str(tmp_path))
-    module = types.ModuleType("pyjj")
-    module.open = lambda path: repo
+    module = types.SimpleNamespace()
+
+    def fake_open(path: str) -> FakeRepo:
+        return repo
+
+    module.open = fake_open
     monkeypatch.setattr(jjrev, "pyjj", module)
     names = jjrev.export_tree(tmp_path, "@-", tmp_path / "out")
     assert names == ["a.py", "bin/run", "doc"]
@@ -355,17 +383,25 @@ def test_export_materializes_bytes_modes_and_links(tmp_path, monkeypatch):
     assert os.readlink(tmp_path / "out" / "doc") == "elsewhere"
 
 
-def test_export_unreadable_entry_is_loud(tmp_path, monkeypatch):
+def test_export_unreadable_entry_is_loud(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     target = FakeCommit(files={"sub": FakeError("is a Git submodule")})
     repo = FakeRepo({"@-": target}, str(tmp_path))
-    module = types.ModuleType("pyjj")
-    module.open = lambda path: repo
+    module = types.SimpleNamespace()
+
+    def fake_open(path: str) -> FakeRepo:
+        return repo
+
+    module.open = fake_open
     monkeypatch.setattr(jjrev, "pyjj", module)
     with pytest.raises(JjRevError, match="sub"):
         jjrev.export_tree(tmp_path, "@-", tmp_path / "out")
 
 
-def test_amend_moves_changes_and_restores_wc(tmp_path, monkeypatch):
+def test_amend_moves_changes_and_restores_wc(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     repo = fake_repo(tmp_path, monkeypatch)
     new_id, op, cleanup, conflicts = jjrev.amend_commit(
         tmp_path, "@-", {"a.py": b"new\n"}
@@ -379,22 +415,24 @@ def test_amend_moves_changes_and_restores_wc(tmp_path, monkeypatch):
     assert (tmp_path / "a.py").read_bytes() == b"old\n"
 
 
-def test_amend_dirty_working_copy_refuses(tmp_path, monkeypatch):
+def test_amend_dirty_working_copy_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     repo = fake_repo(tmp_path, monkeypatch)
     (tmp_path / "a.py").write_bytes(b"mine\n")
-    with pytest.raises(JjRevError, match="uncommitted changes in a.py"):
+    with pytest.raises(JjRevError, match=r"uncommitted changes in a\.py"):
         jjrev.amend_commit(tmp_path, "@-", {"a.py": b"new\n"})
     assert repo.atomics == []
     assert (tmp_path / "a.py").read_bytes() == b"mine\n"
 
 
-def test_amend_adds_and_deletes(tmp_path, monkeypatch):
+def test_amend_adds_and_deletes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     repo = fake_repo(tmp_path, monkeypatch)
     (tmp_path / "gone.py").write_bytes(b"bye\n")
     repo.commits["@"] = FakeCommit(
         files={"a.py": b"old\n", "gone.py": b"bye\n"}, cid="at"
     )
-    new_id, op, cleanup, conflicts = jjrev.amend_commit(
+    _new_id, op, cleanup, conflicts = jjrev.amend_commit(
         tmp_path, "@-", {"fresh.py": b"hi\n", "gone.py": None}
     )
     assert (op, cleanup, conflicts) == ("op999", "op999", [])
@@ -407,26 +445,35 @@ def test_amend_adds_and_deletes(tmp_path, monkeypatch):
     assert (tmp_path / "gone.py").read_bytes() == b"bye\n"
 
 
-def test_amend_without_pyjj(monkeypatch):
+def test_amend_without_pyjj(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(jjrev, "pyjj", None)
     with pytest.raises(JjRevError, match="runtime closure"):
         jjrev.find_repo_root(Path("/tmp"))
 
 
-def test_revision_at_short_circuits_to_normal_flow(tmp_path, monkeypatch):
+def test_revision_at_short_circuits_to_normal_flow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     from pyedit import runner
 
-    monkeypatch.setattr(jjrev, "find_repo_root", lambda start: tmp_path)
-    monkeypatch.setattr(jjrev, "resolve_ids", lambda root, rev: ("x", "x"))
+    def find_root(start: Path) -> Path:
+        return tmp_path
 
-    def no_amend(*args, **kwargs):
+    monkeypatch.setattr(jjrev, "find_repo_root", find_root)
+
+    def resolve(root: Path, rev: str) -> tuple[str, str]:
+        return ("x", "x")
+
+    monkeypatch.setattr(jjrev, "resolve_ids", resolve)
+
+    def no_amend(*args: object, **kwargs: object):
         raise AssertionError("amend called on the -r @ short-circuit")
 
     monkeypatch.setattr(jjrev, "amend_commit", no_amend)
     (tmp_path / "a.py").write_text("a\n")
     opts = runner.Options(root=tmp_path)
 
-    def stage(session):
+    def stage(session: EditSession):
         session.write("a.py", "b\n")
 
     result = runner.run_revision(opts, "@", stage)
@@ -434,24 +481,42 @@ def test_revision_at_short_circuits_to_normal_flow(tmp_path, monkeypatch):
     assert result.files == [str(tmp_path / "a.py")]
 
 
-def test_revision_flow_exports_and_amends(tmp_path, monkeypatch):
+def test_revision_flow_exports_and_amends(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     from pyedit import runner
 
-    monkeypatch.setattr(jjrev, "find_repo_root", lambda start: tmp_path)
-    monkeypatch.setattr(jjrev, "resolve_ids", lambda root, rev: ("aaa", "bbb"))
-    monkeypatch.setattr(jjrev, "target_meta", lambda root, rev: {})
+    def find_root(start: Path) -> Path:
+        return tmp_path
+
+    monkeypatch.setattr(jjrev, "find_repo_root", find_root)
+
+    def resolve(root: Path, rev: str) -> tuple[str, str]:
+        return ("aaa", "bbb")
+
+    monkeypatch.setattr(jjrev, "resolve_ids", resolve)
+
+    def fake_target_meta(root: Path, rev: str) -> dict[str, str]:
+        return {}
+
+    monkeypatch.setattr(jjrev, "target_meta", fake_target_meta)
 
     exported = {}
 
-    def fake_export(repo_root, rev, dest):
+    def fake_export(repo_root: Path, rev: str, dest: Path):
         exported["dest"] = dest
         (dest / "a.py").write_bytes(b"old\n")
         return ["a.py"]
 
     monkeypatch.setattr(jjrev, "export_tree", fake_export)
-    amended = {}
+    amended: dict[str, object] = {}
 
-    def fake_amend(repo_root, rev, changes, meta=None):
+    def fake_amend(
+        repo_root: Path,
+        rev: str,
+        changes: dict[str, str | bytes | None],
+        meta: dict[str, str] | None = None,
+    ) -> tuple[str, str, None, list[str]]:
         amended.update(changes)
         amended["meta"] = meta
         return ("newid", "op1", None, [])
@@ -460,7 +525,7 @@ def test_revision_flow_exports_and_amends(tmp_path, monkeypatch):
     (tmp_path / "a.py").write_text("old\n")
     opts = runner.Options(root=tmp_path, apply=True)
 
-    def stage(session):
+    def stage(session: EditSession):
         assert session.root != tmp_path
         session.write("a.py", "new\n")
 
@@ -478,7 +543,7 @@ def test_cli_parses_revision():
     assert build_parser().parse_args(["-s", "x"]).revision is None
 
 
-def test_mcp_revision_needs_pyjj(tmp_path, monkeypatch):
+def test_mcp_revision_needs_pyjj(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(jjrev, "pyjj", None)
     from pyedit.mcp_server import run_edit
 
@@ -490,7 +555,7 @@ def test_mcp_revision_needs_pyjj(tmp_path, monkeypatch):
     assert out["ok"] is False and "runtime closure" in out["error"]
 
 
-def test_markers_resolve_in_place(tmp_path):
+def test_markers_resolve_in_place(tmp_path: Path):
     body = (
         "<<<<<<< conflict 1 of 1\n"
         "+++++++ merged\n"
@@ -509,14 +574,16 @@ def test_markers_resolve_in_place(tmp_path):
     assert session.staged() != {}
 
 
-def test_rebased_checkout_is_left_alone(tmp_path, monkeypatch):
+def test_rebased_checkout_is_left_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     # the rebase moved @ onto content that is neither the pre-run
     # state nor the staged bytes: checkout wrote it out, so reconcile
     # verifies and leaves files exactly as checkout wrote them, with
     # no cleanup transaction
     repo = fake_moving_repo(tmp_path, monkeypatch, b"old\n", b"rebased\n")
     repo.checkout_bytes = b"rebased\n"
-    new_id, op, cleanup, conflicts = jjrev.amend_commit(
+    _new_id, op, cleanup, conflicts = jjrev.amend_commit(
         tmp_path, "@-", {"a.py": b"new\n"}
     )
     assert (op, cleanup, conflicts) == ("op999", None, [])
@@ -524,7 +591,7 @@ def test_rebased_checkout_is_left_alone(tmp_path, monkeypatch):
     assert (tmp_path / "a.py").read_bytes() == b"rebased\n"
 
 
-def test_rebased_mismatch_is_loud(tmp_path, monkeypatch):
+def test_rebased_mismatch_is_loud(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # something else wrote the copy in the window: the amend stands,
     # and the mismatch names the op that holds it
     repo = fake_moving_repo(tmp_path, monkeypatch, b"old\n", b"rebased\n")
@@ -534,7 +601,9 @@ def test_rebased_mismatch_is_loud(tmp_path, monkeypatch):
     assert (tmp_path / "a.py").read_bytes() == b"someone-else\n"
 
 
-def test_divergent_tip_content_stays_out_of_target(tmp_path, monkeypatch):
+def test_divergent_tip_content_stays_out_of_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     # the tip changed the same file the amend rewrites: the target
     # takes the staged bytes exactly (restore copies, a squash would
     # merge), and @ goes back to the tip content it held
@@ -542,10 +611,14 @@ def test_divergent_tip_content_stays_out_of_target(tmp_path, monkeypatch):
     at = FakeCommit(files={"a.py": b"tip\n"}, cid="at")
     target = FakeCommit(files={"a.py": b"base\n"}, cid="target")
     repo = FakeRepo({"@": at, "@-": target}, str(tmp_path))
-    module = types.ModuleType("pyjj")
-    module.open = lambda path: repo
+    module = types.SimpleNamespace()
+
+    def fake_open(path: str) -> FakeRepo:
+        return repo
+
+    module.open = fake_open
     monkeypatch.setattr(jjrev, "pyjj", module)
-    new_id, op, cleanup, conflicts = jjrev.amend_commit(
+    _new_id, op, cleanup, conflicts = jjrev.amend_commit(
         tmp_path, "@-", {"a.py": b"mine\n"}
     )
     assert (op, cleanup, conflicts) == ("op999", "op999", [])
@@ -555,19 +628,23 @@ def test_divergent_tip_content_stays_out_of_target(tmp_path, monkeypatch):
     assert (tmp_path / "a.py").read_bytes() == b"tip\n"
 
 
-def test_conflicts_are_reported(tmp_path, monkeypatch):
+def test_conflicts_are_reported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     repo = fake_repo(tmp_path, monkeypatch)
     repo.conflicted = [FakeCommit(cid="cccc", description="C: line\nbody")]
     _, _, _, conflicts = jjrev.amend_commit(tmp_path, "@-", {"a.py": b"new\n"})
     assert conflicts == ["cccc C: line"]
 
 
-def test_rev_naming_wc_refuses(tmp_path, monkeypatch):
+def test_rev_naming_wc_refuses(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     (tmp_path / "a.py").write_bytes(b"old\n")
     at = FakeCommit(files={"a.py": b"old\n"}, cid="at")
     repo = FakeRepo({"@": at}, str(tmp_path))
-    module = types.ModuleType("pyjj")
-    module.open = lambda path: repo
+    module = types.SimpleNamespace()
+
+    def fake_open(path: str) -> FakeRepo:
+        return repo
+
+    module.open = fake_open
     monkeypatch.setattr(jjrev, "pyjj", module)
     with pytest.raises(JjRevError, match="working copy itself"):
         jjrev.amend_commit(tmp_path, "@", {"a.py": b"new\n"})
@@ -575,7 +652,9 @@ def test_rev_naming_wc_refuses(tmp_path, monkeypatch):
     assert (tmp_path / "a.py").read_bytes() == b"old\n"
 
 
-def test_amend_applies_tree_and_meta_in_one_block(tmp_path, monkeypatch):
+def test_amend_applies_tree_and_meta_in_one_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     # description and author land in the same transaction as the
     # tree restore: one op holds the whole amend (the second atomic
     # is the pre-existing working-copy cleanup, not a second amend)
@@ -583,7 +662,7 @@ def test_amend_applies_tree_and_meta_in_one_block(tmp_path, monkeypatch):
     target = repo.resolve("@-")
     target.description = "old subject"
     meta = {"description": "new subject", "author": "New Name <new@example.com>"}
-    new_id, op, cleanup, conflicts = jjrev.amend_commit(
+    _new_id, op, cleanup, conflicts = jjrev.amend_commit(
         tmp_path, "@-", {"a.py": b"new\n"}, meta
     )
     assert (op, cleanup, conflicts) == ("op999", "op999", [])
@@ -598,9 +677,11 @@ def test_amend_applies_tree_and_meta_in_one_block(tmp_path, monkeypatch):
     assert (tmp_path / "a.py").read_bytes() == b"old\n"
 
 
-def test_amend_meta_only_skips_the_tree_restore(tmp_path, monkeypatch):
+def test_amend_meta_only_skips_the_tree_restore(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     repo = fake_repo(tmp_path, monkeypatch)
-    new_id, op, cleanup, conflicts = jjrev.amend_commit(
+    _new_id, op, cleanup, conflicts = jjrev.amend_commit(
         tmp_path, "@-", {}, {"description": "reworded"}
     )
     assert (op, cleanup, conflicts) == ("op999", None, [])
@@ -610,7 +691,7 @@ def test_amend_meta_only_skips_the_tree_restore(tmp_path, monkeypatch):
     assert repo.resolve("@-").read_file("a.py") == b"older\n"
 
 
-def test_amend_empty_is_loud(tmp_path, monkeypatch):
+def test_amend_empty_is_loud(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     fake_repo(tmp_path, monkeypatch)
     with pytest.raises(JjRevError, match="nothing to amend"):
         jjrev.amend_commit(tmp_path, "@-", {}, None)
@@ -618,7 +699,9 @@ def test_amend_empty_is_loud(tmp_path, monkeypatch):
         jjrev.amend_commit(tmp_path, "@-", {}, {})
 
 
-def test_retitle_sets_metadata_without_tree_changes(tmp_path, monkeypatch):
+def test_retitle_sets_metadata_without_tree_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     repo = fake_repo(tmp_path, monkeypatch)
     op = jjrev.retitle(
         tmp_path,
@@ -632,7 +715,7 @@ def test_retitle_sets_metadata_without_tree_changes(tmp_path, monkeypatch):
     assert (tmp_path / "a.py").read_bytes() == b"old\n"
 
 
-def test_target_meta_reads_old_values(tmp_path, monkeypatch):
+def test_target_meta_reads_old_values(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     repo = fake_repo(tmp_path, monkeypatch)
     repo.resolve("@-").description = "base subject"
     assert jjrev.target_meta(tmp_path, "@-") == {
@@ -641,30 +724,44 @@ def test_target_meta_reads_old_values(tmp_path, monkeypatch):
     }
 
 
-def test_run_revision_applies_and_prunes_meta(tmp_path, monkeypatch):
+def test_run_revision_applies_and_prunes_meta(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     # a reword to the same message rewrites nothing: the amend gets
     # only what changed
     from pyedit import runner
 
-    monkeypatch.setattr(jjrev, "find_repo_root", lambda start: tmp_path)
-    monkeypatch.setattr(jjrev, "resolve_ids", lambda root, rev: ("aaa", "bbb"))
-    monkeypatch.setattr(
-        jjrev,
-        "target_meta",
-        lambda root, rev: {
+    def find_root(start: Path) -> Path:
+        return tmp_path
+
+    monkeypatch.setattr(jjrev, "find_repo_root", find_root)
+
+    def resolve(root: Path, rev: str) -> tuple[str, str]:
+        return ("aaa", "bbb")
+
+    monkeypatch.setattr(jjrev, "resolve_ids", resolve)
+
+    def fake_target_meta(root: Path, rev: str) -> dict[str, str]:
+        return {
             "description": "same",
             "author": "A U Thor <author@example.com>",
-        },
-    )
+        }
 
-    def fake_export(repo_root, rev, dest):
+    monkeypatch.setattr(jjrev, "target_meta", fake_target_meta)
+
+    def fake_export(repo_root: Path, rev: str, dest: Path):
         (dest / "a.py").write_bytes(b"old\n")
         return ["a.py"]
 
     monkeypatch.setattr(jjrev, "export_tree", fake_export)
-    amended = {}
+    amended: dict[str, object] = {}
 
-    def fake_amend(repo_root, rev, changes, meta=None):
+    def fake_amend(
+        repo_root: Path,
+        rev: str,
+        changes: dict[str, str | bytes | None],
+        meta: dict[str, str] | None = None,
+    ) -> tuple[str, str, None, list[str]]:
         amended["changes"] = changes
         amended["meta"] = meta
         return ("newid", "op1", None, [])
@@ -673,7 +770,7 @@ def test_run_revision_applies_and_prunes_meta(tmp_path, monkeypatch):
     (tmp_path / "a.py").write_text("old\n")
     opts = runner.Options(root=tmp_path, apply=True)
 
-    def stage(session):
+    def stage(session: EditSession):
         session.write("a.py", "new\n")
         session.describe("same")
         session.author("New Name <new@example.com>")
@@ -686,31 +783,40 @@ def test_run_revision_applies_and_prunes_meta(tmp_path, monkeypatch):
     }
 
 
-def test_run_revision_dry_run_shows_meta_and_writes_nothing(tmp_path, monkeypatch):
+def test_run_revision_dry_run_shows_meta_and_writes_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     from pyedit import runner
 
-    monkeypatch.setattr(jjrev, "find_repo_root", lambda start: tmp_path)
-    monkeypatch.setattr(jjrev, "resolve_ids", lambda root, rev: ("aaa", "bbb"))
-    monkeypatch.setattr(
-        jjrev,
-        "target_meta",
-        lambda root, rev: {"description": "old", "author": "A <a@x>"},
-    )
+    def find_root(start: Path) -> Path:
+        return tmp_path
 
-    def fake_export(repo_root, rev, dest):
+    monkeypatch.setattr(jjrev, "find_repo_root", find_root)
+
+    def resolve(root: Path, rev: str) -> tuple[str, str]:
+        return ("aaa", "bbb")
+
+    monkeypatch.setattr(jjrev, "resolve_ids", resolve)
+
+    def fake_target_meta(root: Path, rev: str) -> dict[str, str]:
+        return {"description": "old", "author": "A <a@x>"}
+
+    monkeypatch.setattr(jjrev, "target_meta", fake_target_meta)
+
+    def fake_export(repo_root: Path, rev: str, dest: Path):
         (dest / "a.py").write_bytes(b"old\n")
         return ["a.py"]
 
     monkeypatch.setattr(jjrev, "export_tree", fake_export)
 
-    def no_amend(*args, **kwargs):
+    def no_amend(*args: object, **kwargs: object):
         raise AssertionError("amend called on a dry-run")
 
     monkeypatch.setattr(jjrev, "amend_commit", no_amend)
     (tmp_path / "a.py").write_text("old\n")
     opts = runner.Options(root=tmp_path)
 
-    def stage(session):
+    def stage(session: EditSession):
         session.describe("new")
 
     result = runner.run_revision(opts, "@-", stage)
@@ -720,7 +826,7 @@ def test_run_revision_dry_run_shows_meta_and_writes_nothing(tmp_path, monkeypatc
 
 
 # A below B below @, plus a merge M off B: the insert reparenting shape
-def _commit_stack(root, monkeypatch):
+def _commit_stack(root: Path, monkeypatch: pytest.MonkeyPatch):
     (root / "a.py").write_bytes(b"b1\n")
     (root / "keep.py").write_bytes(b"keep\n")
     (root / "b.py").write_bytes(b"b\n")
@@ -746,7 +852,9 @@ def _commit_stack(root, monkeypatch):
     return repo
 
 
-def test_create_after_inserts_with_full_tree_and_reparents(tmp_path, monkeypatch):
+def test_create_after_inserts_with_full_tree_and_reparents(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     # the new commit holds REV's whole tree with the staged values
     # over it, and every child of REV moves onto it keeping its
     # other parents: merges stay merges
@@ -780,7 +888,9 @@ def test_create_after_inserts_with_full_tree_and_reparents(tmp_path, monkeypatch
     assert (tmp_path / "a.py").read_bytes() == b"a2\n"
 
 
-def test_create_after_without_children_skips_surgery(tmp_path, monkeypatch):
+def test_create_after_without_children_skips_surgery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     repo = fake_repo(tmp_path, monkeypatch)
     new_hex, op, cleanup, conflicts = jjrev.create_after(
         tmp_path, "@-", "inserted", {"a.py": b"x\n"}
@@ -792,7 +902,9 @@ def test_create_after_without_children_skips_surgery(tmp_path, monkeypatch):
     assert (tmp_path / "a.py").read_bytes() == b"old\n"
 
 
-def test_create_after_working_copy_itself_refuses(tmp_path, monkeypatch):
+def test_create_after_working_copy_itself_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     # whichever spelling names @, the half-snapshotted vehicle has
     # nothing sound to build on: describe it and advance instead
     repo = fake_repo(tmp_path, monkeypatch)
@@ -804,14 +916,18 @@ def test_create_after_working_copy_itself_refuses(tmp_path, monkeypatch):
     assert (tmp_path / "a.py").read_bytes() == b"old\n"
 
 
-def test_create_after_empty_scope_refuses(tmp_path, monkeypatch):
+def test_create_after_empty_scope_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     repo = fake_repo(tmp_path, monkeypatch)
     with pytest.raises(JjRevError, match="nothing to commit"):
         jjrev.create_after(tmp_path, "@-", "msg", {})
     assert repo.atomics == []
 
 
-def test_create_after_conflicted_base_refuses(tmp_path, monkeypatch):
+def test_create_after_conflicted_base_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     repo = fake_repo(tmp_path, monkeypatch)
     repo.resolve("@-").has_conflict = True
     with pytest.raises(JjRevError, match="carries conflicts"):
@@ -819,15 +935,24 @@ def test_create_after_conflicted_base_refuses(tmp_path, monkeypatch):
     assert repo.atomics == []
 
 
-def test_create_after_immutable_child_refuses(tmp_path, monkeypatch):
+def test_create_after_immutable_child_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     repo = _commit_stack(tmp_path, monkeypatch)
     repo.unrewritable = {"mmmm"}
     with pytest.raises(JjRevError, match="committing after"):
         jjrev.create_after(tmp_path, "B", "msg", {"a.py": b"a2\n"})
 
 
-def test_create_after_message_needs_str(tmp_path, monkeypatch):
+def test_create_after_message_needs_str(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     repo = fake_repo(tmp_path, monkeypatch)
     with pytest.raises(JjRevError, match="needs str"):
-        jjrev.create_after(tmp_path, "@-", None, {"a.py": b"x\n"})
+        jjrev.create_after(
+            tmp_path,
+            "@-",
+            None,  # pyrefly: ignore[bad-argument-type] None on purpose: must be refused
+            {"a.py": b"x\n"},
+        )
     assert repo.atomics == []

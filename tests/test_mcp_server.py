@@ -1,13 +1,14 @@
 import json
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
 from pyedit.mcp_server import run_edit
 
 
-def edit(project):
+def edit(project: Path):
     return run_edit(
         script='pyedit.edit("src/a.py", "alpha", "ALPHA")',
         workdir=str(project),
@@ -15,7 +16,7 @@ def edit(project):
     )
 
 
-def test_dry_run_then_apply_id(project):
+def test_dry_run_then_apply_id(project: Path):
     before = (project / "src" / "a.py").read_text()
     out = edit(project)
     assert out["ok"] is True, out
@@ -31,7 +32,7 @@ def test_dry_run_then_apply_id(project):
     assert "ALPHA = 1" in (project / "src" / "a.py").read_text()
 
 
-def test_fds_replace_heredocs(project):
+def test_fds_replace_heredocs(project: Path):
     (project / "esc.py").write_text('rx = "\\d+"\n')
     out = run_edit(
         script='pyedit.edit("esc.py", pyedit.read_fd(3), pyedit.read_fd(4))',
@@ -44,7 +45,7 @@ def test_fds_replace_heredocs(project):
     assert (project / "esc.py").read_text() == 'rx = r"\\d+"\n'
 
 
-def test_script_file_relative_and_missing(project):
+def test_script_file_relative_and_missing(project: Path):
     (project / "refactor.py").write_text('pyedit.edit("src/a.py", "alpha", "ALPHA")\n')
     out = run_edit(script_file="refactor.py", workdir=str(project), timeout=0)
     assert out["ok"] is True, out
@@ -55,14 +56,14 @@ def test_script_file_relative_and_missing(project):
     assert "nope.py" in missing["error"]
 
 
-def test_exactly_one_source(project):
+def test_exactly_one_source(project: Path):
     assert run_edit(timeout=0)["ok"] is False
     both = run_edit(script="x", script_file="y", workdir=str(project), timeout=0)
     assert both["ok"] is False
     assert "exactly one" in both["error"]
 
 
-def test_rejections(project):
+def test_rejections(project: Path):
     assert "no stored dry-run" in run_edit(apply_id="deadbeef")["error"]
     assert (
         "not a directory"
@@ -76,12 +77,17 @@ def test_rejections(project):
     )
     assert (
         "must be str"
-        in run_edit(script="x", fds={"3": 4}, workdir=str(project), timeout=0)["error"]
+        in run_edit(
+            script="x",
+            fds={"3": 4},  # pyrefly: ignore[bad-assignment] int value on purpose
+            workdir=str(project),
+            timeout=0,
+        )["error"]
     )
     assert "lines" in run_edit(script="x", context=-1, timeout=0)["error"]
 
 
-def test_syntax_problems_are_structured(project):
+def test_syntax_problems_are_structured(project: Path):
     out = run_edit(
         script='pyedit.write("broken.py", "def f(:\\n")',
         workdir=str(project),
@@ -93,7 +99,7 @@ def test_syntax_problems_are_structured(project):
     assert not (project / "broken.py").exists()
 
 
-def test_apply_with_syntax_problems_refuses(project):
+def test_apply_with_syntax_problems_refuses(project: Path):
     out = run_edit(
         script='pyedit.write("broken.py", "def f(:\\n")',
         workdir=str(project),
@@ -106,7 +112,7 @@ def test_apply_with_syntax_problems_refuses(project):
     assert not (project / "broken.py").exists()
 
 
-def test_script_errors_carry_a_traceback(project):
+def test_script_errors_carry_a_traceback(project: Path):
     out = run_edit(script="raise ValueError('boom')", workdir=str(project), timeout=0)
     assert out["ok"] is False
     assert "ValueError: boom" in out["error"]
@@ -120,14 +126,14 @@ def test_skill_documents_mcp():
     assert "apply_id" in text
 
 
-def _request(line_id, method, params=None):
-    message: dict = {"jsonrpc": "2.0", "id": line_id, "method": method}
+def _request(line_id: int, method: str, params: dict[str, object] | None = None):
+    message: dict[str, object] = {"jsonrpc": "2.0", "id": line_id, "method": method}
     if params is not None:
         message["params"] = params
     return json.dumps(message) + "\n"
 
 
-def test_stdio_serves_a_single_run_tool(project):
+def test_stdio_serves_a_single_run_tool(project: Path):
     pytest.importorskip("mcp")
     proc = subprocess.Popen(
         [sys.executable, "-m", "pyedit", "mcp"],

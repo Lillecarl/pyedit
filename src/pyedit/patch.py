@@ -10,8 +10,12 @@ so a patch is a dry-run diff like any other input.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from pyedit.vendor.apply_diff import apply_diff
+
+if TYPE_CHECKING:
+    from pyedit.session import EditSession
 
 BEGIN_PATCH = "*** Begin Patch"
 END_PATCH = "*** End Patch"
@@ -57,7 +61,7 @@ def parse_patch(text: str) -> list[PatchOperation]:
 
 
 def apply_patch(
-    session, text: str, strict: bool = True
+    session: EditSession, text: str, strict: bool = True
 ) -> tuple[list[PatchOperation], list[str]]:
     """Parse a patch envelope and stage every operation on the session.
 
@@ -89,7 +93,7 @@ def apply_patch(
     return operations, failures
 
 
-def _stage_update(session, operation: PatchOperation) -> None:
+def _stage_update(session: EditSession, operation: PatchOperation) -> None:
     content = session.read(operation.path)
     if isinstance(content, bytes):
         raise ValueError(f"{operation.path} is binary; V4A patches apply to text only")

@@ -5,8 +5,17 @@ find on the module. A submodule of this package is found, so any
 session method sharing a submodule name is unreachable from a script.
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import pyedit
 from pyedit.session import EditSession
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    import pytest
 
 # every submodule name is a word a session method may not use
 SHADOWED = {
@@ -35,7 +44,9 @@ SHADOWED = {
 }
 
 
-def test_no_session_method_is_shadowed_by_a_submodule(project, monkeypatch):
+def test_no_session_method_is_shadowed_by_a_submodule(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     session = EditSession()
     monkeypatch.setattr(pyedit, "session", session, raising=False)
     public = {
@@ -51,14 +62,16 @@ def test_no_session_method_is_shadowed_by_a_submodule(project, monkeypatch):
     )
 
 
-def test_diff_git_is_callable_through_the_router(project, monkeypatch):
+def test_diff_git_is_callable_through_the_router(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     session = EditSession()
     monkeypatch.setattr(pyedit, "session", session, raising=False)
     pyedit.write("src/a.py", "changed\n")
     assert "+changed" in pyedit.diff_git()
 
 
-def test_diff_still_names_the_module(project):
+def test_diff_still_names_the_module(project: Path) -> None:
     """Not a wart to fix: the module is the thing worth having here."""
     import types
 

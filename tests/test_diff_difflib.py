@@ -4,13 +4,22 @@ What it must keep from the libgit2 renderer, and the one thing that
 differs.
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import pyedit
 from pyedit.diff import difflib_hunks
 from pyedit.render import DiffRenderer
 from pyedit.session import EditSession
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-def test_a_text_change_renders(project, monkeypatch):
+    import pytest
+
+
+def test_a_text_change_renders(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     session = EditSession()
     monkeypatch.setattr(pyedit, "session", session, raising=False)
     pyedit.edit("src/a.py", "alpha", "ALPHA")
@@ -21,7 +30,9 @@ def test_a_text_change_renders(project, monkeypatch):
     assert "+ALPHA = 1" in text
 
 
-def test_bytes_and_links_still_render_as_notes(project, monkeypatch):
+def test_bytes_and_links_still_render_as_notes(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Only libgit2 writes payloads and 120000 modes, so the notes are
     the same whichever renderer draws the hunks."""
     (project / "d.bin").write_bytes(b"\x00\x01")
@@ -43,7 +54,7 @@ def _without_section_heading(hunks: str) -> str:
     )
 
 
-def test_the_hunks_match_libgit2(project):
+def test_the_hunks_match_libgit2(project: Path) -> None:
     """Bodies and boundaries agree; only the `@@` heading differs."""
     old = "".join(f"l{i}\n" for i in range(12))
     new = old.replace("l5\n", "L5\n")
@@ -52,7 +63,7 @@ def test_the_hunks_match_libgit2(project):
     assert _without_section_heading(git) == difflib_hunks(old, new, 3)
 
 
-def test_git_names_the_enclosing_context_and_difflib_does_not(project):
+def test_git_names_the_enclosing_context_and_difflib_does_not(project: Path) -> None:
     """The one measured difference between the two renderers."""
     old = "".join(f"l{i}\n" for i in range(20))
     new = "".join(("X\n" if i in (1, 18) else f"l{i}\n") for i in range(20))
@@ -60,11 +71,11 @@ def test_git_names_the_enclosing_context_and_difflib_does_not(project):
     assert "@@ -16,5 +16,5 @@\n" in difflib_hunks(old, new, 3)
 
 
-def test_no_newline_at_end_of_file_is_marked(project):
+def test_no_newline_at_end_of_file_is_marked(project: Path) -> None:
     assert difflib_hunks("a\n", "a\nb", 3).endswith(
         "+b\n\\ No newline at end of file\n"
     )
 
 
-def test_identical_text_renders_nothing(project):
+def test_identical_text_renders_nothing(project: Path) -> None:
     assert difflib_hunks("a\n", "a\n", 3) == ""

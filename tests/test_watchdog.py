@@ -4,10 +4,13 @@ The kill path needs a real process, so one test runs the CLI in a
 subprocess; the rest exercise the dump machinery directly.
 """
 
+from __future__ import annotations
+
 import subprocess
 import sys
 import threading
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -15,21 +18,23 @@ from pyedit import cli, watchdog
 
 
 @pytest.fixture
-def state(tmp_path, monkeypatch):
+def state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     target = tmp_path / "state"
     monkeypatch.setattr(watchdog, "state_dir", lambda: target)
     return target
 
 
-def test_disabled_watchdog_starts_nothing(state):
+def test_disabled_watchdog_starts_nothing(state: Path) -> None:
     assert watchdog.start(0) is None
     assert not state.exists()
 
 
-def test_dump_writes_all_thread_stacks(state, monkeypatch):
-    seen = {}
+def test_dump_writes_all_thread_stacks(
+    state: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: dict[str, Any] = {}
 
-    def fake_exit(code):
+    def fake_exit(code: int) -> None:
         seen["code"] = code
         seen["dumps"] = sorted((state / "dumps").glob("timeout-*.log"))
 
@@ -39,10 +44,9 @@ def test_dump_writes_all_thread_stacks(state, monkeypatch):
     assert len(seen["dumps"]) == 1
     content = seen["dumps"][0].read_text()
     assert "Current thread" in content  # faulthandler's stack format
-    assert "pyedit-watchdog" not in content or True
 
 
-def test_arming_a_new_watchdog_disarms_the_previous(state):
+def test_arming_a_new_watchdog_disarms_the_previous(state: Path) -> None:
     first = watchdog.start(30)
     second = watchdog.start(30)
     assert first is not None and first.is_set()
@@ -51,7 +55,9 @@ def test_arming_a_new_watchdog_disarms_the_previous(state):
     assert len(alive) == 1
 
 
-def test_repeated_cli_runs_do_not_leak_watchdog_threads(project, capsys):
+def test_repeated_cli_runs_do_not_leak_watchdog_threads(
+    project: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     script = project / "edit.py"
     script.write_text('pyedit.write("ok.txt", "done\\n")\n')
     for _ in range(10):
@@ -60,8 +66,11 @@ def test_repeated_cli_runs_do_not_leak_watchdog_threads(project, capsys):
     assert len(alive) == 1
 
 
-def test_dump_prunes_old_files(state, monkeypatch):
-    monkeypatch.setattr(watchdog.os, "_exit", lambda code: None)
+def test_dump_prunes_old_files(state: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def discard_exit(code: int) -> None:
+        pass
+
+    monkeypatch.setattr(watchdog.os, "_exit", discard_exit)
     dumps = state / "dumps"
     dumps.mkdir(parents=True)
     for index in range(watchdog.KEEP + 3):
@@ -74,7 +83,7 @@ def test_dump_prunes_old_files(state, monkeypatch):
     assert all("old\n" in p.read_text() for p in leftovers[:-1])
 
 
-def test_stuck_run_is_killed_and_dumps_stacks(tmp_path):
+def test_stuck_run_is_killed_and_dumps_stacks(tmp_path: Path) -> None:
     """Real subprocess: a stuck script hits the watchdog."""
     stuck = tmp_path / "stuck.py"
     stuck.write_text("import time\ntime.sleep(1000)\n")
@@ -105,7 +114,7 @@ def test_stuck_run_is_killed_and_dumps_stacks(tmp_path):
     assert "stuck.py" in content and "pyedit-watchdog" in content
 
 
-def test_real_run_under_watchdog_finishes_normally(tmp_path):
+def test_real_run_under_watchdog_finishes_normally(tmp_path: Path) -> None:
     """A run that finishes well inside the timeout is unaffected."""
     result = subprocess.run(
         [

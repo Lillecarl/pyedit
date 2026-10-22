@@ -17,22 +17,23 @@ diff --git a/pkg/mod.py b/pkg/mod.py
 """
 
 
-def test_tree_writes_into_memory():
+def test_tree_writes_into_memory() -> None:
     # the pin for the GIL rule in memgit's docstring: Index.write_tree
     # runs through cffi, which drops the GIL, so a Python OdbBackend
     # here segfaults the whole test run instead of failing this test
     repo = MemoryRepo()
     tree = repo.tree({"pkg/mod.py": "one\n"})
+    # MemoryRepo.tree has no return annotation, so pyrefly sees a bare pygit2 Object.
     assert repo.read(tree["pkg/mod.py"].id) == b"one\n"
 
 
-def test_applies_a_context_hunk():
+def test_applies_a_context_hunk() -> None:
     assert apply_to_files(BEFORE, HUNK) == {
         "pkg/mod.py": Entry("pkg/mod.py", b"one\ntwo\nTHREE\nfour\nfive\n", 0o100644)
     }
 
 
-def test_creates_a_file():
+def test_creates_a_file() -> None:
     result = apply_to_files(
         BEFORE,
         "diff --git a/pkg/new.py b/pkg/new.py\n"
@@ -44,7 +45,7 @@ def test_creates_a_file():
     assert result["pkg/mod.py"].data == BEFORE["pkg/mod.py"].encode()
 
 
-def test_deletes_a_file():
+def test_deletes_a_file() -> None:
     result = apply_to_files(
         BEFORE,
         "diff --git a/pkg/mod.py b/pkg/mod.py\n"
@@ -55,7 +56,7 @@ def test_deletes_a_file():
     assert result == {}
 
 
-def test_renames_a_file():
+def test_renames_a_file() -> None:
     result = apply_to_files(
         BEFORE,
         "diff --git a/pkg/mod.py b/pkg/renamed.py\n"
@@ -66,7 +67,7 @@ def test_renames_a_file():
     assert result["pkg/renamed.py"].data == BEFORE["pkg/mod.py"].encode()
 
 
-def test_changes_the_file_mode():
+def test_changes_the_file_mode() -> None:
     result = apply_to_files(
         BEFORE,
         "diff --git a/pkg/mod.py b/pkg/mod.py\nold mode 100644\nnew mode 100755\n",
@@ -74,7 +75,7 @@ def test_changes_the_file_mode():
     assert result["pkg/mod.py"].mode == 0o100755
 
 
-def test_keeps_a_missing_newline_at_eof():
+def test_keeps_a_missing_newline_at_eof() -> None:
     result = apply_to_files(
         {"pkg/mod.py": "one\ntwo\nthree"},
         "diff --git a/pkg/mod.py b/pkg/mod.py\n"
@@ -86,7 +87,7 @@ def test_keeps_a_missing_newline_at_eof():
     assert result["pkg/mod.py"].data == b"one\ntwo\nTHREE"
 
 
-def test_applies_a_binary_patch():
+def test_applies_a_binary_patch() -> None:
     # the payload comes from libgit2 too, so this round-trips pyedit's
     # only in-memory source of binary patches
     import pygit2
@@ -94,6 +95,7 @@ def test_applies_a_binary_patch():
     repo = MemoryRepo()
     old = repo.blob(b"\x00\x01\x02\x03")
     new = repo.blob(b"\x00\x01\x02\x03\x04\x05")
+    # MemoryRepo.blob has no return annotation, so pyrefly sees a bare pygit2 Object.
     patch = old.diff(new, flags=pygit2.enums.DiffOption.SHOW_BINARY).text
     patch = patch.replace("a/file b/file", "a/x.bin b/x.bin")
 
@@ -101,14 +103,14 @@ def test_applies_a_binary_patch():
     assert result["x.bin"].data == b"\x00\x01\x02\x03\x04\x05"
 
 
-def test_hunk_that_does_not_anchor_raises():
+def test_hunk_that_does_not_anchor_raises() -> None:
     # libgit2 checks one line position and does not search around it
     shifted = HUNK.replace("@@ -2,3 +2,3 @@", "@@ -1,3 +1,3 @@")
     with pytest.raises(MemGitError, match="did not apply"):
         apply_to_files(BEFORE, shifted)
 
 
-def test_path_outside_the_tree_raises():
+def test_path_outside_the_tree_raises() -> None:
     with pytest.raises(MemGitError, match="does not exist"):
         apply_to_files(
             BEFORE,
@@ -118,7 +120,7 @@ def test_path_outside_the_tree_raises():
         )
 
 
-def test_unparseable_patch_raises():
+def test_unparseable_patch_raises() -> None:
     with pytest.raises(MemGitError, match="parse"):
         apply_to_files(BEFORE, "not a patch at all\n")
 
@@ -144,17 +146,20 @@ class _FakePygit2:
         ),
     ],
 )
-def test_the_library_name_follows_the_platform(platform, name, mapped, wrong):
+def test_the_library_name_follows_the_platform(
+    platform: str, name: str, mapped: str, wrong: str
+) -> None:
     """macOS has no /proc and puts the patch level before the
     extension, so a Linux soname reaches nothing there."""
-    found, matches = memgit._library_candidates(_FakePygit2, platform)
+    # _FakePygit2 stands in for the module: _library_candidates reads only LIBGIT2_VER.
+    found, matches = memgit._library_candidates(_FakePygit2, platform)  # pyrefly: ignore[bad-argument-type]
     assert found == name
     assert matches(mapped)
     assert not matches(wrong)
     assert not matches("/nix/store/aaa-libgit2-1.9.4-lib/lib/libgit2.dylib")
 
 
-def test_the_loaded_libgit2_resolves_to_a_path():
+def test_the_loaded_libgit2_resolves_to_a_path() -> None:
     """The exact-path lookup must work on whatever platform runs this.
     Falling back to a bare name means dlopen searches, and can find a
     libgit2 that is not the one pygit2 holds."""

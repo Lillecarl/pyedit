@@ -17,8 +17,13 @@ from __future__ import annotations
 import threading
 import traceback
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from pyedit import runner
+
+if TYPE_CHECKING:
+    from pyedit.fdin import Payloads
+    from pyedit.session import EditSession
 
 _LOCK = threading.Lock()
 
@@ -26,7 +31,7 @@ _LOCK = threading.Lock()
 def run_edit(
     script: str | None = None,
     script_file: str | None = None,
-    fds: dict[str, str] | None = None,
+    fds: Payloads | None = None,
     apply: bool = False,
     apply_id: str | None = None,
     include: list[str] | None = None,
@@ -36,7 +41,7 @@ def run_edit(
     revision: str | None = None,
     force: bool = False,
     timeout: float = 300.0,
-) -> dict:
+) -> dict[str, Any]:
     """The single tool's core, without any MCP surface, so tests can
     call it directly. Always returns a dict; failures are `ok: False`
     with an `error`, never raised."""
@@ -132,7 +137,7 @@ def run_edit(
                 revision=revision,
             )
 
-            def stage(session):
+            def stage(session: EditSession) -> None:
                 if mode == "stored":
                     runner.replay_stored(session, text)
                 else:
@@ -189,7 +194,9 @@ def create_server():
     """Build the MCP server. Imported lazily: only `pyedit mcp`
     needs the `mcp` package installed."""
     try:
-        from mcp.server.mcpserver import MCPServer as Server
+        from mcp.server.mcpserver import (  # pyrefly: ignore[missing-import] mcp v2 only; v1 is the fallback
+            MCPServer as Server,
+        )
     except ImportError:
         from mcp.server.fastmcp import FastMCP as Server
 
@@ -209,7 +216,7 @@ def create_server():
         revision: str | None = None,
         force: bool = False,
         timeout: float = 300.0,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Run a pyedit edit script. See `pyedit skill` for the session API."""
         return run_edit(
             script=script,

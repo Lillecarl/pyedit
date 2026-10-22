@@ -42,10 +42,12 @@ def generated_path() -> Path:
 
 
 def _str_arg(call: ast.Call, index: int) -> str | None:
-    if len(call.args) > index and isinstance(call.args[index], ast.Constant):
-        value = call.args[index].value
-        if isinstance(value, str):
-            return value
+    if len(call.args) > index:
+        arg = call.args[index]
+        if isinstance(arg, ast.Constant):
+            value = arg.value
+            if isinstance(value, str):
+                return value
     return None
 
 

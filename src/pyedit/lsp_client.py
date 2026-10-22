@@ -17,11 +17,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
-from collections.abc import Sequence
+from collections.abc import Callable, Coroutine
+from contextlib import suppress
 from dataclasses import dataclass, field
 from importlib import metadata
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, TypeVar
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
@@ -32,9 +33,19 @@ from pygls.lsp.client import LanguageClient as _LanguageClient
 from pyedit.active import current, pop, push
 from pyedit.merge import VFS
 from pyedit.rope import Reference, _require_token
-from pyedit.session import EditSession
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from pyedit.session import EditSession
 
 logger = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
+_Fingerprint = tuple[str, int, int, int, int, str]
+_ServerMessage = (
+    types.ShowMessageParams | types.LogMessageParams | types.ShowMessageRequestParams
+)
 
 _MESSAGE_LEVELS = {
     types.MessageType.Error: logging.ERROR,
@@ -111,7 +122,7 @@ def _kinds(kind: str | list[str]) -> list[str]:
     return kinds
 
 
-def _edit_fingerprint(uri: str, edit) -> tuple:
+def _edit_fingerprint(uri: str, edit: types.TextEdit) -> _Fingerprint:
     """Identity of one TextEdit: same range and text means the same
     fix, even when two requests (file-wide and per-diagnostic, or a
     lagging server analysis) report it twice."""
@@ -125,10 +136,10 @@ def _edit_fingerprint(uri: str, edit) -> tuple:
     )
 
 
-def _edit_documents(edit: types.WorkspaceEdit) -> dict[Path, list]:
+def _edit_documents(edit: types.WorkspaceEdit) -> dict[Path, list[types.TextEdit]]:
     """Group a WorkspaceEdit's text edits by file; resource
     operations raise, naming themselves: pyedit stages text only."""
-    documents: dict[Path, list] = {}
+    documents: dict[Path, list[types.TextEdit]] = {}
     if edit.document_changes:
         for change in edit.document_changes:
             if not isinstance(change, types.TextDocumentEdit):
@@ -137,9 +148,14 @@ def _edit_documents(edit: types.WorkspaceEdit) -> dict[Path, list]:
                     f"the language server requested a {kind!r} resource "
                     "operation; pyedit stages text edits only"
                 )
-            documents.setdefault(_path(change.text_document.uri), []).extend(
-                change.edits
-            )
+            edits = documents.setdefault(_path(change.text_document.uri), [])
+            for text_edit in change.edits:
+                if not isinstance(text_edit, types.TextEdit):
+                    raise ValueError(
+                        f"the language server sent a {type(text_edit).__name__}; "
+                        "pyedit stages plain text edits only"
+                    )
+                edits.append(text_edit)
     elif edit.changes:
         for uri, edits in edit.changes.items():
             documents.setdefault(_path(uri), []).extend(edits)
@@ -192,6 +208,11 @@ class _FeedWriter:
         self._target.feed_eof()
 
 
+_InMemoryServer = Callable[
+    [asyncio.StreamReader, _FeedWriter], Coroutine[Any, Any, None]
+]
+
+
 def _offset_at(content: str, position: types.Position, encoding: str) -> int:
     lines = content.split("\n")
     if position.line >= len(lines):
@@ -205,7 +226,9 @@ def _offset_at(content: str, position: types.Position, encoding: str) -> int:
     return sum(len(part) + 1 for part in lines[: position.line]) + column
 
 
-def _apply_edits(content: str, edits: list, encoding: str, path: Path) -> str:
+def _apply_edits(
+    content: str, edits: list[types.TextEdit], encoding: str, path: Path
+) -> str:
     """Splice TextEdits into one new string, bottom-up so earlier
     offsets stay valid while later ones apply."""
     spans = []
@@ -244,7 +267,7 @@ class LspSession:
         session: EditSession,
         command: list[str],
         timeout: float = 120.0,
-        in_memory=None,
+        in_memory: _InMemoryServer | None = None,
         python_path: str | Path | None = None,
     ) -> None:
         self._session = session
@@ -256,7 +279,7 @@ class LspSession:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._client: _LanguageClient | None = None
-        self._tasks: list[asyncio.Task] = []
+        self._tasks: list[asyncio.Task[None]] = []
         self._encoding = "utf-16"
         self._pushed: dict[Path, str] = {}
         self._versions: dict[Path, int] = {}
@@ -284,7 +307,7 @@ class LspSession:
             raise self._connect_error
         return self
 
-    def __exit__(self, *exc) -> None:
+    def __exit__(self, *exc: object) -> None:
         if self._loop is None:
             return
         try:
@@ -420,12 +443,12 @@ class LspSession:
         know). Runs once per connection, before any traffic.
         """
 
-        def _on(method_name: str, func):
+        def _on(method_name: str, func: Callable[..., object]) -> None:
             # pygls pins registration attributes on the handler, which
             # bound methods do not accept: register a plain wrapper
             # delegating to the method holding the logic
             @client.feature(method_name)
-            def _handle(*args, **kwargs):
+            def _handle(*args: Any, **kwargs: Any) -> Any:
                 return func(*args, **kwargs)
 
         _on(types.TEXT_DOCUMENT_PUBLISH_DIAGNOSTICS, self._track_diagnostics)
@@ -448,9 +471,7 @@ class LspSession:
     def _track_diagnostics(self, params: types.PublishDiagnosticsParams) -> None:
         self._diagnostics[params.uri] = list(params.diagnostics)
 
-    def _log_server_message(
-        self, params: types.ShowMessageParams | types.LogMessageParams
-    ) -> None:
+    def _log_server_message(self, params: _ServerMessage) -> None:
         """Server messages go to logging at their own level: errors
         and warnings stay visible on stderr, the rest does not."""
         level = _MESSAGE_LEVELS.get(params.type, logging.DEBUG)
@@ -504,19 +525,28 @@ class LspSession:
         """Report the session root, mirroring initialize."""
         return [types.WorkspaceFolder(uri=self._session.root.as_uri(), name="pyedit")]
 
-    def _call(self, coro):
+    @property
+    def _lsp_client(self) -> _LanguageClient:
+        if self._client is None:
+            raise RuntimeError("the language server is not connected")
+        return self._client
+
+    def _call(self, coro: Coroutine[Any, Any, _T]) -> _T:
+        assert self._loop is not None
         return asyncio.run_coroutine_threadsafe(coro, self._loop).result(self._timeout)
 
     def _thread_main(self) -> None:
-        asyncio.set_event_loop(self._loop)
+        loop, ready = self._loop, self._ready
+        assert loop is not None and ready is not None
+        asyncio.set_event_loop(loop)
         try:
-            self._loop.run_until_complete(self._connect())
+            loop.run_until_complete(self._connect())
         except BaseException as err:  # surfaced through the ready event
             self._connect_error = err
-            self._ready.set()
+            ready.set()
             return
-        self._ready.set()
-        self._loop.run_forever()
+        ready.set()
+        loop.run_forever()
 
     async def _connect(self) -> None:
         client = _LanguageClient("pyedit", metadata.version("pyedit"))
@@ -534,7 +564,7 @@ class LspSession:
             self._tasks.append(
                 asyncio.create_task(
                     run_async(
-                        stop_event=asyncio.Event(),
+                        stop_event=asyncio.Event(),  # pyrefly: ignore[bad-argument-type]
                         reader=to_client,
                         protocol=client.protocol,
                         logger=logger,
@@ -579,24 +609,22 @@ class LspSession:
         await self._sync_documents()
 
     async def _shutdown(self) -> None:
-        try:
+        with suppress(Exception):
             await asyncio.wait_for(
-                self._client.protocol.send_request_async("shutdown", None), 5.0
+                self._lsp_client.protocol.send_request_async("shutdown", None), 5.0
             )
-        except Exception:
-            pass
         if self._in_memory is None:
-            self._client.protocol.notify("exit", None)
+            self._lsp_client.protocol.notify("exit", None)
         else:
             # memory mode: there is no process to exit; eof ends the stub
+            assert self._to_server is not None and self._to_client is not None
             self._to_server.close()
             self._to_client.close()
-        await self._client.stop()
+        await self._lsp_client.stop()
         for task in self._tasks:
-            try:
+            # a dying stub must not wedge teardown
+            with suppress(BaseException):
                 await task
-            except BaseException:  # a dying stub must not wedge teardown
-                pass
 
     async def _sync_documents(self, session: EditSession | None = None) -> None:
         """Push the session tree so the server computes over the overlay.
@@ -614,14 +642,16 @@ class LspSession:
         for path in sorted(paths):
             await self._sync_one(session, path, staged.get(path))
 
-    async def _sync_one(self, session: EditSession, path: Path, staged_content) -> None:
+    async def _sync_one(
+        self, session: EditSession, path: Path, staged_content: str | bytes | None
+    ) -> None:
         content = staged_content
         if content is None:
             try:
                 content = session.read(path)
             except OSError:
                 content = None
-        protocol = self._client.protocol
+        protocol = self._lsp_client.protocol
         uri = _uri(path)
         if not isinstance(content, str):
             if path in self._pushed:
@@ -666,7 +696,9 @@ class LspSession:
             )
             self._pushed[path] = content
 
-    async def _rename_symbol(self, path, line, column, old_name, new_name):
+    async def _rename_symbol(
+        self, path: Path, line: int, column: int, old_name: str, new_name: str
+    ) -> list[Path]:
         content = self._require_text(path, line, column, old_name)
         await self._sync_documents()
         edit = await self._request(
@@ -682,12 +714,12 @@ class LspSession:
         return self._stage_workspace_edit(edit)
 
     async def _code_action(
-        self, path: str | Path, kinds: list[str], only_titles: tuple = ()
+        self, path: str | Path, kinds: list[str], only_titles: tuple[str, ...] = ()
     ) -> list[Path]:
         session = _bound(self._session)
         path = session.canon(path)
         changed: list[Path] = []
-        applied: set[tuple] = set()
+        applied: set[_Fingerprint] = set()
         for kind in kinds:
             content = session.read(path)
             if not isinstance(content, str):
@@ -721,9 +753,9 @@ class LspSession:
     async def _stage_actions(
         self,
         session: EditSession,
-        actions,
-        applied: set[tuple],
-        only_titles: tuple = (),
+        actions: Sequence[types.CodeAction | types.Command] | None,
+        applied: set[_Fingerprint],
+        only_titles: tuple[str, ...] = (),
     ) -> list[Path]:
         """Resolve and stage code actions, skipping edits already
         staged: file-wide and per-diagnostic rounds (and lagging
@@ -759,8 +791,8 @@ class LspSession:
         self,
         session: EditSession,
         path: Path,
-        applied: set[tuple],
-        only_titles: tuple = (),
+        applied: set[_Fingerprint],
+        only_titles: tuple[str, ...] = (),
     ) -> list[Path]:
         """Ask quickfix at each tracked diagnostic's own range.
 
@@ -806,7 +838,7 @@ class LspSession:
         pattern: str,
         kinds: list[str],
         on_error: str,
-        only_titles: tuple = (),
+        only_titles: tuple[str, ...] = (),
     ) -> CodeActionResult:
         session = _bound(self._session)
         # VFS scopes parent onto the active session; with no ambient
@@ -819,19 +851,32 @@ class LspSession:
         try:
             result = CodeActionResult()
             for path in session.glob(pattern):
-                try:
-                    with VFS():
-                        for staged in await self._code_action(path, kinds, only_titles):
-                            if staged not in result.staged:
-                                result.staged.append(staged)
-                except Exception as err:
-                    if on_error != "skip":
-                        raise
-                    result.skipped[session.relpath(path)] = str(err)
+                await self._code_action_file(
+                    session, path, kinds, only_titles, on_error, result
+                )
             return result
         finally:
             if pushed:
                 pop()
+
+    async def _code_action_file(
+        self,
+        session: EditSession,
+        path: Path,
+        kinds: list[str],
+        only_titles: tuple[str, ...],
+        on_error: str,
+        result: CodeActionResult,
+    ) -> None:
+        try:
+            with VFS():
+                for staged in await self._code_action(path, kinds, only_titles):
+                    if staged not in result.staged:
+                        result.staged.append(staged)
+        except Exception as err:
+            if on_error != "skip":
+                raise
+            result.skipped[session.relpath(path)] = str(err)
 
     async def _format_file(self, path: str | Path) -> list[Path]:
         session = _bound(self._session)
@@ -855,7 +900,9 @@ class LspSession:
             session, types.WorkspaceEdit(changes={_uri(path): edits})
         )
 
-    async def _resolve_action(self, action):
+    async def _resolve_action(
+        self, action: types.CodeAction | types.Command
+    ) -> types.WorkspaceEdit:
         """The WorkspaceEdit behind one code action.
 
         Deferred edits (edit None, data set) follow with
@@ -881,7 +928,9 @@ class LspSession:
             raise ValueError(f"code action {title!r} did not resolve to edits")
         return resolved.edit
 
-    def _stage_changed(self, session: EditSession, edit) -> list[Path]:
+    def _stage_changed(
+        self, session: EditSession, edit: types.WorkspaceEdit
+    ) -> list[Path]:
         """Stage a WorkspaceEdit, returning only files whose content
         actually changed; identical hunks are skipped, not staged."""
         changed = []
@@ -897,7 +946,9 @@ class LspSession:
                 changed.append(path)
         return changed
 
-    async def _references(self, path, line, column, name):
+    async def _references(
+        self, path: Path, line: int, column: int, name: str
+    ) -> list[Reference]:
         content = self._require_text(path, line, column, name)
         await self._sync_documents()
         locations = await self._request(
@@ -910,7 +961,7 @@ class LspSession:
         )
         return self._map_locations(locations or [])
 
-    def _require_text(self, path, line, column, name) -> str:
+    def _require_text(self, path: Path, line: int, column: int, name: str) -> str:
         content = self._session.read(path)
         if not isinstance(content, str):
             raise ValueError(f"{path} is binary; the language server works on text")
@@ -927,9 +978,9 @@ class LspSession:
         _require_token(content, line, column, name)
         return content
 
-    async def _request(self, method: str, params):
+    async def _request(self, method: str, params: object) -> Any:
         try:
-            return await self._client.protocol.send_request_async(method, params)
+            return await self._lsp_client.protocol.send_request_async(method, params)
         except Exception as err:
             raise ValueError(f"the language server rejected {method}: {err}") from err
 
@@ -954,7 +1005,7 @@ class LspSession:
             staged.append(path)
         return staged
 
-    def _map_locations(self, locations) -> list[Reference]:
+    def _map_locations(self, locations: Sequence[types.Location]) -> list[Reference]:
         refs = []
         lines_by_path: dict[Path, list[str]] = {}
         for location in locations:

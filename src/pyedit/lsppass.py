@@ -15,10 +15,14 @@ nothing is written.
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
-from pyedit.config import Config
 from pyedit.session import EditSession, Symlink, display_path
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from pyedit.config import Config
 
 
 class LspPassError(Exception):
@@ -62,7 +66,11 @@ def apply(
 
 
 def _eligible(
-    session, content, path: Path, suffixes: list[str], config: Config
+    session: EditSession,
+    content: str | bytes | None,
+    path: Path,
+    suffixes: list[str],
+    config: Config,
 ) -> bool:
     if not isinstance(content, str) or isinstance(content, Symlink):
         return False

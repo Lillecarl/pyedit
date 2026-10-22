@@ -1,17 +1,24 @@
+from __future__ import annotations
+
 import io
+from typing import TYPE_CHECKING
 
 import pytest
 
 from pyedit import store
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
+
 _real_open = io.open
 
 
 @pytest.fixture
-def disk_text():
+def disk_text() -> Callable[[str | Path], str]:
     """Read the real file on disk, bypassing any VFS patches."""
 
-    def _read(path) -> str:
+    def _read(path: str | Path) -> str:
         with _real_open(path) as f:
             return f.read()
 
@@ -19,7 +26,7 @@ def disk_text():
 
 
 @pytest.fixture
-def project(tmp_path, monkeypatch):
+def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.chdir(tmp_path)
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "a.py").write_text("alpha = 1\nbeta = 2\n")
@@ -30,7 +37,7 @@ def project(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def dryrun_store(tmp_path, monkeypatch):
+def dryrun_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Keep dry-run artifacts inside each test's tmp."""
     root = tmp_path / "store"
     monkeypatch.setattr(
@@ -40,9 +47,13 @@ def dryrun_store(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def config_home(tmp_path, monkeypatch):
+def config_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Isolate pyedit.toml discovery inside each test's tmp, so a
     developer's own config-home file never leaks into a run."""
     home = tmp_path / "config-home"
-    monkeypatch.setattr("pyedit.config.user_config_dir", lambda *a, **k: str(home))
+
+    def user_config_dir(*_args: object, **_kwargs: object) -> str:
+        return str(home)
+
+    monkeypatch.setattr("pyedit.config.user_config_dir", user_config_dir)
     return home

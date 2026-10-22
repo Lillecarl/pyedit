@@ -6,6 +6,8 @@ matching file means the server never starts, so a bogus command
 fails only when something actually matches.
 """
 
+from __future__ import annotations
+
 import shutil
 from pathlib import Path
 
@@ -27,7 +29,7 @@ RUFF = LspTable(
 
 
 @pytest.fixture
-def tree(tmp_path, monkeypatch):
+def tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> EditSession:
     monkeypatch.chdir(tmp_path)
     (tmp_path / "prompt-toolkit").mkdir()
     (tmp_path / "prompt-toolkit" / "vendored.py").write_text(
@@ -39,14 +41,14 @@ def tree(tmp_path, monkeypatch):
     return EditSession(respect_gitignore=False, root=tmp_path)
 
 
-def stage_all(session: EditSession) -> dict:
+def stage_all(session: EditSession) -> dict[Path, str | bytes | None]:
     for name in ("fix.py", "clean.py", "note.txt", "prompt-toolkit/vendored.py"):
         session.write(name, session.read(name))
     return session.staged()
 
 
 @requires_ruff
-def test_pass_fixes_formats_and_reports(tree):
+def test_pass_fixes_formats_and_reports(tree: EditSession) -> None:
     conf = Config(lsp={"ruff": RUFF})
     touched = lsppass.apply(tree, stage_all(tree), conf)
     assert touched == ["fix.py (ruff)", "prompt-toolkit/vendored.py (ruff)"]
@@ -59,16 +61,16 @@ def test_pass_fixes_formats_and_reports(tree):
 
 
 @requires_ruff
-def test_pass_skips_excluded(tree):
+def test_pass_skips_excluded(tree: EditSession) -> None:
     conf = Config(lsp={"ruff": RUFF}, exclude=["prompt-toolkit/**"])
-    before = (tree.root / "prompt-toolkit" / "vendored.py").read_text()
+    before = (Path(tree.root) / "prompt-toolkit" / "vendored.py").read_text()
     touched = lsppass.apply(tree, stage_all(tree), conf)
     assert touched == ["fix.py (ruff)"]
     assert tree.read("prompt-toolkit/vendored.py") == before
     assert tree.read("fix.py") == "import sys\n\nx = 1\nprint(sys.argv, x)\n"
 
 
-def test_no_match_never_starts_the_server(tree):
+def test_no_match_never_starts_the_server(tree: EditSession) -> None:
     conf = Config(
         lsp={
             "bogus": LspTable(
@@ -87,7 +89,7 @@ def test_no_match_never_starts_the_server(tree):
 
 
 @requires_ruff
-def test_missing_binary_is_loud(tree):
+def test_missing_binary_is_loud(tree: EditSession) -> None:
     conf = Config(
         lsp={
             "bogus": LspTable(
@@ -97,13 +99,15 @@ def test_missing_binary_is_loud(tree):
             )
         }
     )
-    with pytest.raises(lsppass.LspPassError, match="lsp.bogus"):
+    with pytest.raises(lsppass.LspPassError, match=r"lsp.bogus"):
         lsppass.apply(tree, stage_all(tree), conf)
     assert tree.read("fix.py") == "import os\nimport sys\nx=1\nprint(sys.argv,x)\n"
 
 
 @requires_ruff
-def test_cli_run_applies_lsp_pass(tmp_path, monkeypatch, capsys):
+def test_cli_run_applies_lsp_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     monkeypatch.chdir(tmp_path)
     before = "import os\nimport sys\nx=1\nprint(sys.argv,x)\n"
     (tmp_path / "a.py").write_text(before)
@@ -122,33 +126,40 @@ def test_cli_run_applies_lsp_pass(tmp_path, monkeypatch, capsys):
 
 
 @requires_ruff
-def test_format_only_table(tree):
+def test_format_only_table(tree: EditSession) -> None:
     conf = Config(
         lsp={"ruff": LspTable(command=["ruff", "server"], suffixes=["py"], format=True)}
     )
-    (tree.root / "messy.py").write_text("x=1\n")
+    (Path(tree.root) / "messy.py").write_text("x=1\n")
     tree.write("messy.py", tree.read("messy.py"))
     assert lsppass.apply(tree, tree.staged(), conf) == ["messy.py (ruff)"]
     assert tree.read("messy.py") == "x = 1\n"
 
 
-def test_pass_forwards_only_titles(tree, monkeypatch):
-    seen = []
+def test_pass_forwards_only_titles(
+    tree: EditSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[tuple[str, tuple[str, ...]]] = []
 
     class FakeLsp:
-        def __init__(self, *args, **kwargs):
+        def __init__(self, *args: object, **kwargs: object) -> None:
             pass
 
-        def __enter__(self):
+        def __enter__(self) -> FakeLsp:
             return self
 
-        def __exit__(self, *args):
+        def __exit__(self, *args: object) -> bool:
             return False
 
-        def code_action(self, path, kind, only_titles=()):
+        def code_action(
+            self,
+            path: str | Path,
+            kind: str,
+            only_titles: list[str] | tuple[str, ...] = (),
+        ) -> None:
             seen.append((kind, tuple(only_titles)))
 
-        def format_file(self, path):
+        def format_file(self, path: str | Path) -> list[Path]:
             return []
 
     monkeypatch.setattr("pyedit.lsp_client.LspSession", FakeLsp)

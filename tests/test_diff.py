@@ -1,16 +1,26 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from pyedit import cli
 from pyedit.diff import unified_diffs
 from pyedit.session import EditSession
 from pyedit.udiff import apply_diff
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
 
-def staged(project, actions):
+    import pytest
+
+
+def staged(project: Path, actions: Callable[[EditSession], object]):
     session = EditSession()
     actions(session)
     return session.staged()
 
 
-def test_create_without_trailing_newline_reparses(project):
+def test_create_without_trailing_newline_reparses(project: Path) -> None:
     # the 0.1.x renderer lost the last line and the no-newline
     # marker on creates like these, which unidiff then refused
     bind = "\n".join(["import argparse", "", "def register(subparsers):", "    pass"])
@@ -25,7 +35,7 @@ def test_create_without_trailing_newline_reparses(project):
     assert replay.staged()[project / "bind_key.py"] == bind
 
 
-def test_symlink_changes_render_as_notes(project):
+def test_symlink_changes_render_as_notes(project: Path) -> None:
     session = EditSession()
     session.symlink("AGENTS.md", "CLAUDE.md")
     rel, text = unified_diffs(session.staged())[0]
@@ -34,7 +44,7 @@ def test_symlink_changes_render_as_notes(project):
     assert "AGENTS.md" in text
 
 
-def test_restaging_identical_bytes_is_a_no_op(project):
+def test_restaging_identical_bytes_is_a_no_op(project: Path) -> None:
     (project / "img.bin").write_bytes(b"raw bytes")
     session = EditSession()
     session.write("img.bin", b"raw bytes")
@@ -43,7 +53,7 @@ def test_restaging_identical_bytes_is_a_no_op(project):
     assert project / "img.bin" not in session.staged()
 
 
-def test_pure_rename_renders_rename_headers(project):
+def test_pure_rename_renders_rename_headers(project: Path) -> None:
     session = EditSession()
     session.rename("src/a.py", "lib/a.py")
     [(rel, text)] = unified_diffs(session.staged())
@@ -54,18 +64,18 @@ def test_pure_rename_renders_rename_headers(project):
     assert "alpha" not in text
 
 
-def test_rename_diff_round_trips_through_the_parser(project):
+def test_rename_diff_round_trips_through_the_parser(project: Path) -> None:
     session = EditSession()
     session.rename("src/a.py", "lib/a.py")
     text = unified_diffs(session.staged())[0][1]
     moved = EditSession()
-    applied, _failures = apply_diff(moved, text)
+    _applied, _failures = apply_diff(moved, text)
     staged = moved.staged()
     assert staged[project / "src" / "a.py"] is None
     assert staged[project / "lib" / "a.py"] == "alpha = 1\nbeta = 2\n"
 
 
-def test_moved_and_edited_file_renders_delete_and_create(project):
+def test_moved_and_edited_file_renders_delete_and_create(project: Path) -> None:
     session = EditSession()
     session.rename("src/a.py", "lib/a.py")
     session.write("lib/a.py", "totally different\n")
@@ -74,7 +84,7 @@ def test_moved_and_edited_file_renders_delete_and_create(project):
     assert any(t.startswith("--- /dev/null") for t in texts)
 
 
-def test_rename_diff_applies_with_git_apply(project):
+def test_rename_diff_applies_with_git_apply(project: Path) -> None:
     import subprocess
 
     session = EditSession()
@@ -93,8 +103,8 @@ def test_rename_diff_applies_with_git_apply(project):
     assert not (project / "src" / "a.py").exists()
 
 
-def test_modified_diff_headers(project):
-    def edit(session):
+def test_modified_diff_headers(project: Path) -> None:
+    def edit(session: EditSession) -> None:
         session.write(project / "src" / "a.py", "alpha = 2\nbeta = 2\n")
 
     results = unified_diffs(staged(project, edit))
@@ -107,8 +117,8 @@ def test_modified_diff_headers(project):
     assert "@@ -1,2 +1,2 @@\n" in diff
 
 
-def test_new_file_diff_is_dev_null(project):
-    def write_new(session):
+def test_new_file_diff_is_dev_null(project: Path) -> None:
+    def write_new(session: EditSession) -> None:
         session.write(project / "src" / "c.py", "fresh = 1\n")
 
     results = unified_diffs(staged(project, write_new))
@@ -119,7 +129,7 @@ def test_new_file_diff_is_dev_null(project):
     assert "+fresh = 1\n" in diff
 
 
-def test_identical_binary_stage_renders_nothing(project):
+def test_identical_binary_stage_renders_nothing(project: Path) -> None:
     # a no-op binary restage is not a change; the NUL sniff keeps
     # the disk side bytes so the comparison can see they are equal
     blob = b"\x00\x01\x02\n"
@@ -134,10 +144,10 @@ def test_identical_binary_stage_renders_nothing(project):
     assert "changed (4 -> 1 bytes)" in session.diff_git()
 
 
-def test_deleted_diff_to_dev_null(project):
+def test_deleted_diff_to_dev_null(project: Path) -> None:
     (project / "src" / "a.py").write_text("alpha = 1\n")
 
-    def delete(session):
+    def delete(session: EditSession) -> None:
         session.delete(project / "src" / "a.py")
 
     results = unified_diffs(staged(project, delete))
@@ -147,27 +157,27 @@ def test_deleted_diff_to_dev_null(project):
     assert "-alpha = 1\n" in diff
 
 
-def test_identical_write_yields_no_entry(project, tmp_path):
+def test_identical_write_yields_no_entry(project: Path, tmp_path: Path) -> None:
     (project / "src" / "a.py").write_text("alpha = 1\n")
 
-    def noop(session):
+    def noop(session: EditSession) -> None:
         session.write(project / "src" / "a.py", "alpha = 1\n")
 
     assert unified_diffs(staged(project, noop)) == []
 
 
-def test_context_lines_respected(project):
+def test_context_lines_respected(project: Path) -> None:
     (project / "src" / "a.py").write_text("1\n2\n3\n4\n5\n6\n7\n8\n9\n")
 
-    def edit(session):
+    def edit(session: EditSession) -> None:
         session.write(project / "src" / "a.py", "1\n2\n3\n4\n5\nX\n7\n8\n9\n")
 
     _, diff = unified_diffs(staged(project, edit), context=2)[0]
     assert "@@ -4,5 +4,5 @@\n" in diff
 
 
-def test_eof_newline_marker_on_added_file(project):
-    def write(session):
+def test_eof_newline_marker_on_added_file(project: Path) -> None:
+    def write(session: EditSession) -> None:
         session.write(project / "fresh.txt", "first")
 
     _, diff = unified_diffs(staged(project, write))[0]
@@ -176,10 +186,10 @@ def test_eof_newline_marker_on_added_file(project):
     assert all(line.endswith("\n") for line in diff.splitlines(keepends=True))
 
 
-def test_eof_newline_marker_on_both_sides_changed(project):
+def test_eof_newline_marker_on_both_sides_changed(project: Path) -> None:
     (project / "src" / "a.py").write_text("x=1")
 
-    def edit(session):
+    def edit(session: EditSession) -> None:
         session.write(project / "src" / "a.py", "x=2")
 
     _, diff = unified_diffs(staged(project, edit))[0]
@@ -187,10 +197,10 @@ def test_eof_newline_marker_on_both_sides_changed(project):
     assert "+x=2\n\\ No newline at end of file\n" in diff
 
 
-def test_eof_newline_marker_when_new_side_gains_newline(project):
+def test_eof_newline_marker_when_new_side_gains_newline(project: Path) -> None:
     (project / "src" / "a.py").write_text("x=1")
 
-    def edit(session):
+    def edit(session: EditSession) -> None:
         session.write(project / "src" / "a.py", "x=1\n")
 
     _, diff = unified_diffs(staged(project, edit))[0]
@@ -199,10 +209,10 @@ def test_eof_newline_marker_when_new_side_gains_newline(project):
     assert diff.count("No newline") == 1
 
 
-def test_eof_newline_marker_when_new_side_loses_newline(project):
+def test_eof_newline_marker_when_new_side_loses_newline(project: Path) -> None:
     (project / "src" / "a.py").write_text("x=1\n")
 
-    def edit(session):
+    def edit(session: EditSession) -> None:
         session.write(project / "src" / "a.py", "x=1")
 
     _, diff = unified_diffs(staged(project, edit))[0]
@@ -211,19 +221,19 @@ def test_eof_newline_marker_when_new_side_loses_newline(project):
     assert diff.count("No newline") == 1
 
 
-def test_eof_state_change_far_from_edit_gets_its_own_hunk(project):
+def test_eof_state_change_far_from_edit_gets_its_own_hunk(project: Path) -> None:
     content = "a\nb\nc\nd\ne\nf\ng\nh\ni\nend\n"
     (project / "src" / "a.py").write_text(content)
 
-    def edit(session):
+    def edit(session: EditSession) -> None:
         session.write(project / "src" / "a.py", content.replace("c\n", "X\n", 1)[:-1])
 
     _, diff = unified_diffs(staged(project, edit))[0]
     assert "-end\n+end\n\\ No newline at end of file\n" in diff
 
 
-def test_multi_file_patch_stays_separated(project):
-    def edits(session):
+def test_multi_file_patch_stays_separated(project: Path) -> None:
+    def edits(session: EditSession) -> None:
         session.write(project / "fresh.txt", "first")
         session.write(project / "src" / "b.py", "gamma = 3\nmore = 4\n")
 
@@ -234,8 +244,8 @@ def test_multi_file_patch_stays_separated(project):
 
 
 def test_cli_patch_without_trailing_newline_renders_git_apply_clean_diff(
-    project, capsys
-):
+    project: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     envelope = "*** Begin Patch\n*** Add File: fresh.txt\n+first\n*** End Patch\n"
     (project / "nl.envelope").write_text(envelope)
     (project / "edit.py").write_text('pyedit.apply_v4a(open("nl.envelope").read())\n')

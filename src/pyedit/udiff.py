@@ -15,6 +15,14 @@ format, one applier, and the error names the other entry point.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from unidiff import Hunk, PatchedFile
+
+    from pyedit.session import EditSession
 
 _LINK_MODE = "120000"
 
@@ -29,7 +37,7 @@ class AppliedFile:
     action: str
 
 
-def _parse(text: str):
+def _parse(text: str) -> list[PatchedFile]:
     """unidiff's PatchedFile objects, which carry what pyedit needs.
 
     Its Line has `line_type` and `value` with the newline kept, and a
@@ -52,7 +60,7 @@ def _parse(text: str):
     """
     import unidiff
 
-    files = []
+    files: list[PatchedFile] = []
     for section in _sections(text):
         try:
             patch = unidiff.PatchSet(section)
@@ -67,9 +75,10 @@ def _parse(text: str):
             # a symlink is a text hunk holding the target, and only
             # the 120000 mode says so. Applying it here would write a
             # regular file with the target as its content.
+            # unidiff sets the modes in PatchedFile.__init__; pyrefly does not infer them.
             if _LINK_MODE in (
-                str(patched.source_mode or ""),
-                str(patched.target_mode or ""),
+                str(patched.source_mode or ""),  # pyrefly: ignore[missing-attribute]
+                str(patched.target_mode or ""),  # pyrefly: ignore[missing-attribute]
             ):
                 raise UnifiedDiffError(
                     f"{patched.path}: a symlink section needs apply_diff_git; "
@@ -107,15 +116,17 @@ def _sections(text: str) -> list[str]:
     # a preamble before the first section (pyedit prints id comments
     # around its diffs) rides along with it; unidiff ignores it
     starts[0] = 0
-    bounds = starts + [len(lines)]
+    bounds = [*starts, len(lines)]
     return [
         "".join(lines[a:b])
-        for a, b in zip(starts, bounds[1:])
+        for a, b in zip(starts, bounds[1:], strict=True)
         if "".join(lines[a:b]).strip()
     ]
 
 
-def apply_diff(session, text: str, strict: bool = True) -> list[AppliedFile]:
+def apply_diff(
+    session: EditSession, text: str, strict: bool = True
+) -> tuple[list[AppliedFile], list[str]]:
     """Parse a unified diff and stage every file on the session.
 
     Fails closed: a file whose hunks do not apply raises and rolls
@@ -148,12 +159,13 @@ def apply_diff(session, text: str, strict: bool = True) -> list[AppliedFile]:
     return applied, failures
 
 
-def _apply_file(session, patched) -> AppliedFile:
+def _apply_file(session: EditSession, patched: PatchedFile) -> AppliedFile:
     source = _strip_prefix(patched.source_file)
     target = _strip_prefix(patched.target_file)
     hunks = list(patched)
 
     if patched.is_removed_file:
+        assert source is not None
         session.delete(source)
         return AppliedFile(path=source, action="deleted")
 
@@ -163,6 +175,7 @@ def _apply_file(session, patched) -> AppliedFile:
         session.write(target, _assemble_new(hunks))
         return AppliedFile(path=target, action="created")
 
+    assert target is not None
     if source != target and not hunks:
         session.rename(source, target)
         return AppliedFile(path=target, action="renamed")
@@ -190,7 +203,7 @@ def _strip_prefix(path: str) -> str | None:
     return path
 
 
-def _assemble_new(hunks) -> str:
+def _assemble_new(hunks: list[Hunk]) -> str:
     text = ""
     new_no_nl = False
     for hunk in hunks:
@@ -202,7 +215,7 @@ def _assemble_new(hunks) -> str:
     return text
 
 
-def _apply_hunks(content: str, hunks) -> str:
+def _apply_hunks(content: str, hunks: list[Hunk]) -> str:
     lines = content.splitlines(keepends=True)
     result: list[str] = []
     cursor = 0
@@ -228,9 +241,7 @@ def _apply_hunks(content: str, hunks) -> str:
         cursor = index + len(old_block)
 
     result.extend(lines[cursor:])
-    body = []
-    for line in result[:-1]:
-        body.append(line if line.endswith("\n") else line + "\n")
+    body = [line if line.endswith("\n") else line + "\n" for line in result[:-1]]
     if result:
         body.append(result[-1])
     if ends_without_newline and body and body[-1].endswith("\n"):
@@ -238,7 +249,7 @@ def _apply_hunks(content: str, hunks) -> str:
     return "".join(body)
 
 
-def _split_hunk(hunk) -> tuple[list[str], list[str], list[tuple[int, int]], bool]:
+def _split_hunk(hunk: Hunk) -> tuple[list[str], list[str], list[tuple[int, int]], bool]:
     """Split hunk lines into (old block, new block, context map, new side
     ends without newline).
 
@@ -272,12 +283,20 @@ def _split_hunk(hunk) -> tuple[list[str], list[str], list[tuple[int, int]], bool
     return old_block, new_block, context, new_no_nl
 
 
+def _same_line(a: str, b: str) -> bool:
+    return a == b
+
+
+def _same_rstripped(a: str, b: str) -> bool:
+    return a.rstrip() == b.rstrip()
+
+
 def _find_block(lines: list[str], block: list[str], hint: int) -> int:
     if not block:
         return min(hint, len(lines))
     stripped = [line.rstrip("\n") for line in lines]
     target = [line.rstrip("\n") for line in block]
-    for compare in (lambda a, b: a == b, lambda a, b: a.rstrip() == b.rstrip()):
+    for compare in (_same_line, _same_rstripped):
         for index in _search_order(len(lines), len(block), hint):
             if all(
                 compare(stripped[index + offset], target[offset])
@@ -287,7 +306,7 @@ def _find_block(lines: list[str], block: list[str], hint: int) -> int:
     raise UnifiedDiffError(f"patch context not found near line {hint + 1}")
 
 
-def _search_order(length: int, size: int, hint: int):
+def _search_order(length: int, size: int, hint: int) -> Iterator[int]:
     # hint, hint-1, hint+1, hint-2, hint+2 ... Walk to both edges:
     # counting candidates instead spends the count on positions
     # outside the file and gives up early on a hint near an edge

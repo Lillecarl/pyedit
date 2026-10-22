@@ -23,11 +23,15 @@ import argparse
 import sys
 import traceback
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pyedit
 from pyedit import config, formatter, runner, store
 from pyedit.lsppass import LspPassError
 from pyedit.skill import render_skill
+
+if TYPE_CHECKING:
+    from pyedit.session import EditSession
 
 EXIT_OK = 0
 EXIT_SCRIPT_ERROR = 1
@@ -282,7 +286,7 @@ def main(argv: list[str] | None = None) -> int:
         revision=args.revision,
     )
 
-    def stage(session):
+    def stage(session: EditSession) -> None:
         if mode == "stored":
             # pyedit's own patch: git wrote it, so git applies it
             runner.replay_stored(session, text)

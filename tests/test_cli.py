@@ -11,7 +11,7 @@ from pyedit import cli
 
 
 @pytest.fixture
-def project(tmp_path, monkeypatch):
+def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "a.py").write_text("alpha = 1\n")
@@ -20,25 +20,27 @@ def project(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def script(project):
+def script(project: Path):
     path = project / "edit.py"
     path.write_text('pyedit.edit("src/a.py", "alpha", "ALPHA")\n')
     return path
 
 
-def run(project, *argv, script=None):
-    argv = [str(a) for a in argv]
+def run(project: Path, *argv: object, script: Path | None = None):
+    args = [str(a) for a in argv]
     if script is not None:
-        argv = ["--script", str(script), *argv]
-    return cli.main(argv)
+        args = ["--script", str(script), *args]
+    return cli.main(args)
 
 
-def replay(project, token, *argv):
+def replay(project: Path, token: object, *argv: object):
     """`pyedit apply ID`: no script runs, libgit2 replays a stored patch."""
     return cli.main(["apply", str(token), *[str(a) for a in argv]])
 
 
-def test_dry_run_prints_diff_and_writes_nothing(project, script, capsys):
+def test_dry_run_prints_diff_and_writes_nothing(
+    project: Path, script: Path, capsys: pytest.CaptureFixture[str]
+):
     before = (project / "src" / "a.py").read_text()
     assert run(project, script=script) == 0
     out = capsys.readouterr().out
@@ -48,7 +50,7 @@ def test_dry_run_prints_diff_and_writes_nothing(project, script, capsys):
 
 
 def test_dry_run_prints_id_comments_and_stores_pure_diff(
-    project, script, capsys, dryrun_store
+    project: Path, script: Path, capsys: pytest.CaptureFixture[str], dryrun_store: Path
 ):
     assert run(project, script=script) == 0
     out, err = capsys.readouterr()
@@ -69,10 +71,14 @@ def test_dry_run_prints_id_comments_and_stores_pure_diff(
     assert f"saved as {token}" in err
 
 
-def test_apply_from_stored_id(project, script, capsys):
+def test_apply_from_stored_id(
+    project: Path, script: Path, capsys: pytest.CaptureFixture[str]
+):
     assert run(project, script=script) == 0
     out = capsys.readouterr().out
-    token = re.search(r"# pyedit dry-run ([0-9a-f]{8})", out).group(1)
+    match = re.search(r"# pyedit dry-run ([0-9a-f]{8})", out)
+    assert match is not None
+    token = match.group(1)
     assert replay(project, token) == 0
     assert (project / "src" / "a.py").read_text() == "ALPHA = 1\n"
     out = capsys.readouterr().out
@@ -86,7 +92,9 @@ def undo_token(out: str) -> str:
     return match.group(1)
 
 
-def test_apply_prints_undo_comment(project, script, capsys, dryrun_store):
+def test_apply_prints_undo_comment(
+    project: Path, script: Path, capsys: pytest.CaptureFixture[str], dryrun_store: Path
+):
     assert run(project, "--apply", script=script) == 0
     out, err = capsys.readouterr()
     lines = out.splitlines()
@@ -102,7 +110,9 @@ def test_apply_prints_undo_comment(project, script, capsys, dryrun_store):
     assert "undo saved as" in err
 
 
-def test_undo_reverts_an_apply(project, script, capsys):
+def test_undo_reverts_an_apply(
+    project: Path, script: Path, capsys: pytest.CaptureFixture[str]
+):
     original = (project / "src" / "a.py").read_text()
     assert run(project, "--apply", script=script) == 0
     out = capsys.readouterr().out
@@ -112,19 +122,25 @@ def test_undo_reverts_an_apply(project, script, capsys):
     assert (project / "src" / "a.py").read_text() == original
 
 
-def test_stored_id_replay_of_create_heavy_diffs(project, capsys):
+def test_stored_id_replay_of_create_heavy_diffs(
+    project: Path, capsys: pytest.CaptureFixture[str]
+):
     script = project / "edit.py"
     body = "\n".join(
         f'pyedit.write("mod{i}.py", "line1\\nline2\\n")' for i in range(10)
     )
     script.write_text(body + "\n")
     assert run(project, script=script) == 0
-    token = re.search(r"dry-run ([0-9a-f]{8})", capsys.readouterr().out).group(1)
+    match = re.search(r"dry-run ([0-9a-f]{8})", capsys.readouterr().out)
+    assert match is not None
+    token = match.group(1)
     assert replay(project, token) == 0
     assert all((project / f"mod{i}.py").exists() for i in range(10))
 
 
-def test_undo_recreates_a_deleted_file(project, capsys):
+def test_undo_recreates_a_deleted_file(
+    project: Path, capsys: pytest.CaptureFixture[str]
+):
     victim = project / "src" / "b.py"
     assert victim.read_text() == "beta = 2\n"
     deleter = project / "del.py"
@@ -136,7 +152,7 @@ def test_undo_recreates_a_deleted_file(project, capsys):
     assert victim.read_text() == "beta = 2\n"
 
 
-def test_undo_removes_a_created_file(project, capsys):
+def test_undo_removes_a_created_file(project: Path, capsys: pytest.CaptureFixture[str]):
     creator = project / "new.py"
     creator.write_text('pyedit.write("src/fresh.txt", "made\\n")\n')
     assert run(project, "--apply", script=creator) == 0
@@ -146,7 +162,7 @@ def test_undo_removes_a_created_file(project, capsys):
     assert not (project / "src" / "fresh.txt").exists()
 
 
-def test_undo_reverses_a_rename(project, capsys):
+def test_undo_reverses_a_rename(project: Path, capsys: pytest.CaptureFixture[str]):
     mover = project / "mv.py"
     mover.write_text('pyedit.rename("src/a.py", "src/renamed.py")\n')
     assert run(project, "--apply", script=mover) == 0
@@ -158,7 +174,9 @@ def test_undo_reverses_a_rename(project, capsys):
     assert not (project / "src" / "renamed.py").exists()
 
 
-def test_stored_dry_run_replays_a_binary_change(project, capsys):
+def test_stored_dry_run_replays_a_binary_change(
+    project: Path, capsys: pytest.CaptureFixture[str]
+):
     (project / "data.bin").write_bytes(b"\x00\x01\x02")
     binary = project / "bin.py"
     binary.write_text('pyedit.write("data.bin", b"\\xff\\xfe")\n')
@@ -169,12 +187,14 @@ def test_stored_dry_run_replays_a_binary_change(project, capsys):
     assert "GIT binary patch" not in out
     assert (project / "data.bin").read_bytes() == b"\x00\x01\x02"
 
-    token = re.search(r"# pyedit dry-run ([0-9a-f]{8})", out).group(1)
+    match = re.search(r"# pyedit dry-run ([0-9a-f]{8})", out)
+    assert match is not None
+    token = match.group(1)
     assert replay(project, token) == 0
     assert (project / "data.bin").read_bytes() == b"\xff\xfe"
 
 
-def test_symlink_retarget_undoes(project, capsys):
+def test_symlink_retarget_undoes(project: Path, capsys: pytest.CaptureFixture[str]):
     (project / "link").symlink_to("src/a.py")
     script = project / "s.py"
     script.write_text('pyedit.symlink("src/b.py", "link", force=True)\n')
@@ -187,7 +207,7 @@ def test_symlink_retarget_undoes(project, capsys):
     assert (project / "link").readlink().name == "a.py"
 
 
-def test_binary_create_undoes(project, capsys):
+def test_binary_create_undoes(project: Path, capsys: pytest.CaptureFixture[str]):
     binary = project / "bin.py"
     binary.write_text('pyedit.write("data.bin", b"\\x00\\x01\\x02")\n')
     assert run(project, "--apply", script=binary) == 0
@@ -202,7 +222,7 @@ def test_binary_create_undoes(project, capsys):
     assert not (project / "data.bin").exists()
 
 
-def test_binary_change_undoes(project, capsys):
+def test_binary_change_undoes(project: Path, capsys: pytest.CaptureFixture[str]):
     (project / "data.bin").write_bytes(b"\x00\x01\x02")
     binary = project / "bin.py"
     binary.write_text('pyedit.write("data.bin", b"\\xff\\xfe")\n')
@@ -214,7 +234,9 @@ def test_binary_change_undoes(project, capsys):
     assert (project / "data.bin").read_bytes() == b"\x00\x01\x02"
 
 
-def test_broken_syntax_warns_on_dry_run(project, capsys):
+def test_broken_syntax_warns_on_dry_run(
+    project: Path, capsys: pytest.CaptureFixture[str]
+):
     broken = project / "bad.py"
     broken.write_text('pyedit.write("src/broken.py", "def (:\\n")\n')
     assert run(project, script=broken) == 0
@@ -232,7 +254,13 @@ def test_broken_syntax_warns_on_dry_run(project, capsys):
     ids=[entry[0] for entry in LANGUAGES],
 )
 def test_broken_syntax_gate_refuses_then_force_applies(
-    name, suffix, correct, broken, names, project, capsys
+    name: str,
+    suffix: str,
+    correct: str,
+    broken: str,
+    names: set[str],
+    project: Path,
+    capsys: pytest.CaptureFixture[str],
 ):
     target = f"src/sample{suffix}"
     script = project / "bad.py"
@@ -253,7 +281,9 @@ def test_broken_syntax_gate_refuses_then_force_applies(
     assert "# pyedit undo" in out, f"{name}: forced write has no undo id"
 
 
-def test_force_applies_broken_syntax_with_undo(project, capsys):
+def test_force_applies_broken_syntax_with_undo(
+    project: Path, capsys: pytest.CaptureFixture[str]
+):
     broken = project / "bad.py"
     broken.write_text('pyedit.write("src/broken.py", "def (:\\n")\n')
     assert run(project, "--force", "--apply", script=broken) == 0
@@ -264,20 +294,26 @@ def test_force_applies_broken_syntax_with_undo(project, capsys):
     assert "# pyedit undo" in out  # the forced write is still revertible
 
 
-def test_patch_formats_are_not_cli_input(project, capsys):
+def test_patch_formats_are_not_cli_input(
+    project: Path, capsys: pytest.CaptureFixture[str]
+):
     """Foreign formats are script APIs. stdin is always a script."""
     for flag in ("-p", "--patch", "-d", "--diff"):
         with pytest.raises(SystemExit):
             run(project, flag, "plan.patch")
 
 
-def test_stdin_is_always_a_script(project, capsys, monkeypatch):
+def test_stdin_is_always_a_script(
+    project: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+):
     monkeypatch.setattr(sys, "stdin", io.StringIO("*** Begin Patch\n"))
     assert run(project) == 1
     assert "edit script failed" in capsys.readouterr().err
 
 
-def test_output_file_keeps_pure_diff(project, script, capsys):
+def test_output_file_keeps_pure_diff(
+    project: Path, script: Path, capsys: pytest.CaptureFixture[str]
+):
     target = project / "changes.diff"
     assert run(project, "--output", target, script=script) == 0
     out, err = capsys.readouterr()
@@ -286,22 +322,28 @@ def test_output_file_keeps_pure_diff(project, script, capsys):
     assert re.search(r"saved as ([0-9a-f]{8})", err)
 
 
-def test_apply_unknown_id_errors(project, capsys):
+def test_apply_unknown_id_errors(project: Path, capsys: pytest.CaptureFixture[str]):
     with pytest.raises(SystemExit, match="no stored dry-run"):
         replay(project, "ffffffff")
 
 
-def test_apply_without_an_id_says_what_to_do(project, capsys):
+def test_apply_without_an_id_says_what_to_do(
+    project: Path, capsys: pytest.CaptureFixture[str]
+):
     with pytest.raises(SystemExit, match="apply needs a stored id"):
         cli.main(["apply"])
 
 
-def test_apply_id_takes_no_script(project, script, capsys):
+def test_apply_id_takes_no_script(
+    project: Path, script: Path, capsys: pytest.CaptureFixture[str]
+):
     with pytest.raises(SystemExit, match="takes no other input"):
         cli.main(["apply", "ffffffff", "--script", str(script)])
 
 
-def test_no_changes_stores_nothing(project, capsys, dryrun_store):
+def test_no_changes_stores_nothing(
+    project: Path, capsys: pytest.CaptureFixture[str], dryrun_store: Path
+):
     quiet = project / "noop.py"
     quiet.write_text("pass\n")
     assert run(project, script=quiet) == 0
@@ -311,21 +353,27 @@ def test_no_changes_stores_nothing(project, capsys, dryrun_store):
     assert not dryrun_store.exists()
 
 
-def test_apply_writes_changes(project, script, capsys):
+def test_apply_writes_changes(
+    project: Path, script: Path, capsys: pytest.CaptureFixture[str]
+):
     assert run(project, "--apply", script=script) == 0
     assert (project / "src" / "a.py").read_text() == "ALPHA = 1\n"
     assert "--- a/src/a.py" in capsys.readouterr().out
 
 
-def test_output_writes_diff_to_file(project, script, capsys):
+def test_output_writes_diff_to_file(
+    project: Path, script: Path, capsys: pytest.CaptureFixture[str]
+):
     target = project / "changes.diff"
     assert run(project, "--output", target, script=script) == 0
-    out, err = capsys.readouterr()
+    out, _ = capsys.readouterr()
     assert out == ""
     assert "--- a/src/a.py" in target.read_text()
 
 
-def test_no_changes_is_quiet_on_stdout(project, capsys):
+def test_no_changes_is_quiet_on_stdout(
+    project: Path, capsys: pytest.CaptureFixture[str]
+):
     quiet = project / "noop.py"
     quiet.write_text("pass\n")
     assert run(project, script=quiet) == 0
@@ -334,7 +382,9 @@ def test_no_changes_is_quiet_on_stdout(project, capsys):
     assert "no changes" in err
 
 
-def test_include_filter_limits_diff_and_apply(project, capsys):
+def test_include_filter_limits_diff_and_apply(
+    project: Path, capsys: pytest.CaptureFixture[str]
+):
     script = project / "edit.py"
     script.write_text(
         'pyedit.edit("src/a.py", "alpha", "ALPHA")\n'
@@ -348,7 +398,9 @@ def test_include_filter_limits_diff_and_apply(project, capsys):
     assert (project / "src" / "b.py").read_text() == "BETA = 2\n"
 
 
-def test_exclude_filter_limits_diff_and_apply(project, capsys):
+def test_exclude_filter_limits_diff_and_apply(
+    project: Path, capsys: pytest.CaptureFixture[str]
+):
     script = project / "edit.py"
     script.write_text(
         'pyedit.edit("src/a.py", "alpha", "ALPHA")\n'
@@ -361,7 +413,9 @@ def test_exclude_filter_limits_diff_and_apply(project, capsys):
     assert (project / "src" / "a.py").read_text() == "alpha = 1\n"
 
 
-def test_failing_script_returns_1_and_writes_nothing(project, capsys):
+def test_failing_script_returns_1_and_writes_nothing(
+    project: Path, capsys: pytest.CaptureFixture[str]
+):
     script = project / "bad.py"
     script.write_text("pyedit.edit('src/a.py', 'missing', 'x')\n")
     before = (project / "src" / "a.py").read_text()
@@ -372,28 +426,30 @@ def test_failing_script_returns_1_and_writes_nothing(project, capsys):
     assert (project / "src" / "a.py").read_text() == before
 
 
-def test_apply_creates_new_file(project, capsys):
+def test_apply_creates_new_file(project: Path, capsys: pytest.CaptureFixture[str]):
     script = project / "edit.py"
     script.write_text('pyedit.write("src/new.py", "fresh = 1\\n")\n')
     assert run(project, "--apply", script=script) == 0
     assert (project / "src" / "new.py").read_text() == "fresh = 1\n"
 
 
-def test_apply_deletes_file(project, capsys):
+def test_apply_deletes_file(project: Path, capsys: pytest.CaptureFixture[str]):
     script = project / "edit.py"
     script.write_text('pyedit.delete("src/a.py")\n')
     assert run(project, "--apply", script=script) == 0
     assert not (project / "src" / "a.py").exists()
 
 
-def test_dry_run_does_not_delete(project, capsys):
+def test_dry_run_does_not_delete(project: Path, capsys: pytest.CaptureFixture[str]):
     script = project / "edit.py"
     script.write_text('pyedit.delete("src/a.py")\n')
     assert run(project, script=script) == 0
     assert (project / "src" / "a.py").exists()
 
 
-def test_script_can_touch_any_path(project, script, capsys):
+def test_script_can_touch_any_path(
+    project: Path, script: Path, capsys: pytest.CaptureFixture[str]
+):
     script.write_text('pyedit.write("outside/the_input.py", "anywhere\\n")\n')
     assert run(project, script=script) == 0
     out = capsys.readouterr().out
@@ -401,7 +457,9 @@ def test_script_can_touch_any_path(project, script, capsys):
     assert not (project / "outside").exists()
 
 
-def test_stdin_script_mode(project, capsys, monkeypatch):
+def test_stdin_script_mode(
+    project: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+):
     monkeypatch.setattr(
         sys,
         "stdin",
@@ -412,7 +470,9 @@ def test_stdin_script_mode(project, capsys, monkeypatch):
     assert (project / "src" / "a.py").read_text() == "alpha = 1\n"
 
 
-def test_ordinary_python_script_is_captured(project, capsys):
+def test_ordinary_python_script_is_captured(
+    project: Path, capsys: pytest.CaptureFixture[str]
+):
     script = project / "edit.py"
     script.write_text(
         "from pathlib import Path\n"
@@ -431,7 +491,9 @@ def test_ordinary_python_script_is_captured(project, capsys):
     assert not (project / "src" / "a.py.bak").exists()
 
 
-def test_ordinary_python_apply_writes(project, capsys):
+def test_ordinary_python_apply_writes(
+    project: Path, capsys: pytest.CaptureFixture[str]
+):
     script = project / "edit.py"
     script.write_text(
         "from pathlib import Path\nPath('src/brand_new/f.txt').write_text('fresh\\n')\n"
@@ -440,7 +502,7 @@ def test_ordinary_python_apply_writes(project, capsys):
     assert (project / "src" / "brand_new" / "f.txt").read_text() == "fresh\n"
 
 
-def test_binary_apply_writes_bytes(project, capsys):
+def test_binary_apply_writes_bytes(project: Path, capsys: pytest.CaptureFixture[str]):
     script = project / "edit.py"
     script.write_text(
         "from pathlib import Path\nPath('src/data.bin').write_bytes(bytes([0, 1, 2]))\n"
@@ -451,7 +513,9 @@ def test_binary_apply_writes_bytes(project, capsys):
     assert "Binary file src/data.bin created (3 bytes)" in out
 
 
-def test_import_and_global_session_are_equivalent(project, capsys):
+def test_import_and_global_session_are_equivalent(
+    project: Path, capsys: pytest.CaptureFixture[str]
+):
     script = project / "edit.py"
     script.write_text(
         "import pyedit\n"
@@ -464,13 +528,13 @@ def test_import_and_global_session_are_equivalent(project, capsys):
     assert "+ALPHA = 1" in out
 
 
-def _script(project, body):
+def _script(project: Path, body: str):
     path = project / "edit.py"
     path.write_text(body)
     return path
 
 
-def test_patch_api_stages_an_update(project, capsys):
+def test_patch_api_stages_an_update(project: Path, capsys: pytest.CaptureFixture[str]):
     script = _script(project, ('pyedit.apply_v4a(open("plan.patch").read())\n'))
     (project / "plan.patch").write_text(
         "*** Begin Patch\n"
@@ -486,7 +550,7 @@ def test_patch_api_stages_an_update(project, capsys):
     assert (project / "src" / "a.py").read_text() == "alpha = 1\n"
 
 
-def test_patch_api_adds_a_file(project, capsys):
+def test_patch_api_adds_a_file(project: Path, capsys: pytest.CaptureFixture[str]):
     script = _script(
         project,
         (
@@ -502,7 +566,7 @@ def test_patch_api_adds_a_file(project, capsys):
     assert not (project / "notes" / "todo.txt").exists()
 
 
-def test_patch_api_apply_writes(project, capsys):
+def test_patch_api_apply_writes(project: Path, capsys: pytest.CaptureFixture[str]):
     script = _script(
         project,
         (
@@ -515,14 +579,14 @@ def test_patch_api_apply_writes(project, capsys):
     assert not (project / "src" / "b.py").exists()
 
 
-def test_symlink_target_is_not_syntax_checked(project):
+def test_symlink_target_is_not_syntax_checked(project: Path):
     script = project / "edit.py"
     script.write_text("pyedit.symlink('not python (', 'broken.py')\n")
     assert run(project, "--apply", script=script) == 0
     assert (project / "broken.py").is_symlink()
 
 
-def test_diff_api_stages_an_update(project, capsys):
+def test_diff_api_stages_an_update(project: Path, capsys: pytest.CaptureFixture[str]):
     (project / "plan.diff").write_text(
         "--- a/src/a.py\n+++ b/src/a.py\n@@ -1 +1 @@\n-alpha = 1\n+alpha = 42\n"
     )
@@ -533,7 +597,7 @@ def test_diff_api_stages_an_update(project, capsys):
     assert (project / "src" / "a.py").read_text() == "alpha = 1\n"
 
 
-def test_diff_api_apply_writes(project, capsys):
+def test_diff_api_apply_writes(project: Path, capsys: pytest.CaptureFixture[str]):
     (project / "plan.diff").write_text(
         "--- /dev/null\n+++ b/src/fresh.txt\n@@ -0,0 +1 @@\n+new\n"
     )
@@ -542,7 +606,7 @@ def test_diff_api_apply_writes(project, capsys):
     assert (project / "src" / "fresh.txt").read_text() == "new\n"
 
 
-def test_file_budget_aborts_run(project, capsys):
+def test_file_budget_aborts_run(project: Path, capsys: pytest.CaptureFixture[str]):
     script = project / "edit.py"
     script.write_text(
         'for i in range(3):\n    pyedit.write(f"src/gen_{i}.py", "x\\n")\n'
@@ -555,7 +619,7 @@ def test_file_budget_aborts_run(project, capsys):
     assert set((project / "src").iterdir()) == before
 
 
-def test_file_budget_zero_disables(project, capsys):
+def test_file_budget_zero_disables(project: Path, capsys: pytest.CaptureFixture[str]):
     script = project / "edit.py"
     script.write_text(
         'for i in range(30):\n    pyedit.write(f"src/gen_{i}.py", "x\\n")\n'
@@ -565,7 +629,7 @@ def test_file_budget_zero_disables(project, capsys):
     assert out.count("+++ b/src/gen_") == 30
 
 
-def test_patch_inline_from_script(project, capsys):
+def test_patch_inline_from_script(project: Path, capsys: pytest.CaptureFixture[str]):
     script = project / "edit.py"
     script.write_text(
         'pyedit.apply_v4a("*** Begin Patch\\n"\n'
@@ -579,7 +643,7 @@ def test_patch_inline_from_script(project, capsys):
     assert "+alpha = 7" in capsys.readouterr().out
 
 
-def test_patch_failure_returns_1(project, capsys):
+def test_patch_failure_returns_1(project: Path, capsys: pytest.CaptureFixture[str]):
     script = _script(
         project,
         (
@@ -596,7 +660,7 @@ def test_patch_failure_returns_1(project, capsys):
     assert "nothing was written" in err
 
 
-def test_skill_prints_markdown(capsys):
+def test_skill_prints_markdown(capsys: pytest.CaptureFixture[str]):
     assert cli.main(["skill"]) == 0
     out = capsys.readouterr().out
     assert out.startswith("---\nname: pyedit\n")
@@ -607,7 +671,7 @@ def test_skill_prints_markdown(capsys):
     assert str(Path(pyedit.skill.__file__).resolve().parent) in out
 
 
-def test_skill_writes_file(project, capsys):
+def test_skill_writes_file(project: Path, capsys: pytest.CaptureFixture[str]):
     target = project / "docs" / "skill.md"
     assert cli.main(["skill", str(target)]) == 0
     assert capsys.readouterr().out == ""
@@ -618,23 +682,35 @@ def test_skill_writes_file(project, capsys):
 
 
 def test_apply_with_commit_scope_reports_the_commit(
-    project, script, capsys, monkeypatch
+    project: Path,
+    script: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ):
     from pyedit import jjrev
 
-    monkeypatch.setattr(jjrev, "find_repo_root", lambda start: project)
-    monkeypatch.setattr(jjrev, "resolve_ids", lambda root, rev: ("aaa", "bbb"))
+    def find_root(start: Path) -> Path:
+        return project
 
-    def fake_export(repo_root, rev, dest):
+    monkeypatch.setattr(jjrev, "find_repo_root", find_root)
+
+    def resolve(root: Path, rev: str) -> tuple[str, str]:
+        return ("aaa", "bbb")
+
+    monkeypatch.setattr(jjrev, "resolve_ids", resolve)
+
+    def fake_export(repo_root: Path, rev: str, dest: Path):
         (dest / "a.py").write_bytes(b"old\n")
         return ["a.py"]
 
     monkeypatch.setattr(jjrev, "export_tree", fake_export)
-    monkeypatch.setattr(
-        jjrev,
-        "create_after",
-        lambda repo_root, rev, message, changes: ("newhex1234567890", "op1", None, []),
-    )
+
+    def fake_create_after(
+        repo_root: Path, rev: str, message: str, changes: dict[str, str | bytes | None]
+    ) -> tuple[str, str, None, list[str]]:
+        return ("newhex1234567890", "op1", None, [])
+
+    monkeypatch.setattr(jjrev, "create_after", fake_create_after)
     script.write_text(
         'with pyedit.commit("made", after="B"):\n    pyedit.write("a.py", "new\\n")\n'
     )
