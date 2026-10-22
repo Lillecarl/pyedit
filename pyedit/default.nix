@@ -67,6 +67,42 @@ let
     grammarDrv = svelteGrammar;
   };
 
+  # tree-sitter-typescript 0.23.2, the latest release, parses TypeScript
+  # 5's `export type * from "m"` as an error
+  # (tree-sitter/tree-sitter-typescript#348). The patch adds the rule
+  # to common/define-grammar.js, so both typescript and tsx are
+  # regenerated; generating needs the javascript grammar the repo's
+  # package.json pins, linked in as node_modules. Drop this when a
+  # release parses it.
+  tsJavascriptSrc = pkgs.fetchFromGitHub {
+    owner = "tree-sitter";
+    repo = "tree-sitter-javascript";
+    rev = "v0.23.1";
+    hash = "sha256-apgWWYD0XOvH5c3BY7kAF7UYtwPJaEvJzC5aWvJ9YQ8=";
+  };
+  patchedTsGrammar =
+    name:
+    (pkgs.tree-sitter-grammars.${name}.override { generate = true; }).overrideAttrs (old: {
+      patches = (old.patches or [ ]) ++ [ ./tree-sitter-typescript-export-type-star.patch ];
+      preBuild = ''
+        export HOME=$TMPDIR
+        mkdir -p ../node_modules
+        ln -s ${tsJavascriptSrc} ../node_modules/tree-sitter-javascript
+      ''
+      + (old.preBuild or "");
+    });
+  patchedTsBinding =
+    name:
+    let
+      grammar = patchedTsGrammar name;
+    in
+    fixup grammar
+      (pkgs.python3Packages.callPackage "${pkgs.path}/pkgs/development/python-modules/tree-sitter-grammars" {
+        inherit name;
+        grammarDrv = grammar;
+      })
+      (lib.replaceStrings [ "-" ] [ "_" ] name);
+
   attrs = {
     pname = "pyedit";
     version = (builtins.fromTOML (builtins.readFile ../pyproject.toml)).project.version;
@@ -118,8 +154,6 @@ let
       # (null excludes it and -r refuses loudly instead)
       "tree-sitter-python"
       "tree-sitter-javascript"
-      "tree-sitter-typescript"
-      "tree-sitter-tsx"
       "tree-sitter-go"
       "tree-sitter-rust"
       "tree-sitter-c"
@@ -136,6 +170,10 @@ let
       "tree-sitter-java"
       "tree-sitter-lua"
       "tree-sitter-zig"
+    ]
+    ++ map patchedTsBinding [
+      "tree-sitter-typescript"
+      "tree-sitter-tsx"
     ]
     ++ [ (fixup svelteGrammar svelteBinding "tree_sitter_svelte") ]
     ++ lib.optionals (pyjj != null) [ pyjj ];

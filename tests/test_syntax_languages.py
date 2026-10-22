@@ -11,6 +11,20 @@ from pyedit.syntax import node_at, outline, problems
 from pyedit.syntax.rules import RULES
 
 
+@pytest.mark.parametrize("suffix", [".ts", ".tsx"])
+@pytest.mark.parametrize(
+    "source",
+    [
+        'export type * from "./mod";\n',
+        'export type * as ns from "./mod";\n',
+    ],
+)
+def test_typescript5_export_type_star(suffix, source, tmp_path):
+    session = EditSession(respect_gitignore=False, root=tmp_path)
+    session.write("sample" + suffix, source)
+    assert problems(session, "sample" + suffix) == []
+
+
 def test_table_covers_every_shipped_suffix():
     covered = {id(RULES[suffix]) for _, suffix, *_ in LANGUAGES}
     assert {id(rules) for rules in RULES.values()} == covered
