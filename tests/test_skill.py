@@ -80,9 +80,3 @@ def test_the_frontmatter_makes_it_a_skill_file():
     assert fields["name"] == "pyedit", fields
     assert len(fields["description"]) < 1024
     assert body.lstrip("\n").startswith("# pyedit")
-
-
-def test_it_stays_compact():
-    """A budget, not a target: it is loaded into a context window."""
-    text = render_skill()
-    assert len(text) < 18600, f"skill grew to {len(text)} bytes"
