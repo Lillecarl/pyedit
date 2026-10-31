@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import contextlib
 import fnmatch
+import os
 import sys
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -20,7 +21,7 @@ from typing import TYPE_CHECKING
 from pyedit.session import EditSession, Symlink, display_path
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable, Iterator
 
     from pyedit.fdin import Payloads
     from pyedit.session import HistoryRecord
@@ -88,6 +89,29 @@ def new_session(opts: Options) -> EditSession:
         find_renames=opts.find_renames,
         root=opts.root,
     )
+
+
+@contextlib.contextmanager
+def working_directory(path: Path | None) -> Iterator[None]:
+    """Run inside `path`: display paths and a script's subprocesses
+    resolve against the cwd, so a run sits in its session root the way
+    the CLI's invocation directory is one. None stays put."""
+    if path is None:
+        yield
+        return
+    previous = Path.cwd()
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        os.chdir(previous)
+
+
+def patch_root(root: Path, paths: Iterable[Path]) -> Path:
+    """The directory a stored patch's paths are relative to: the
+    session root, or the nearest directory above it that also holds a
+    path the script reached outside it."""
+    return Path(os.path.commonpath([root, *(p.parent for p in paths)]))
 
 
 def execute_script(
@@ -214,14 +238,17 @@ def finish(
     # applies store the reverse so an id alone can revert. What is
     # shown is for reading; what is stored is git-canonical and
     # replays through libgit2.
-    stored_text = replayable_patch(staged, context=opts.context)
+    base_dir = patch_root(session.root, staged)
+    stored_text = replayable_patch(staged, context=opts.context, root=base_dir)
     dry_run_id = (
-        store.save(stored_text) if staged and not opts.apply and store_ids else None
+        store.save(stored_text, "dry-run", base_dir)
+        if staged and not opts.apply and store_ids
+        else None
     )
 
     undo_id = None
     if opts.apply and (not problems or opts.force):
-        undo_id = _prepare_undo(staged, opts.context)
+        undo_id = _prepare_undo(staged, opts.context, base_dir)
 
     # an apply of known-broken syntax refuses to write unless
     # --force, in which case the problems are on record anyway
@@ -245,7 +272,9 @@ def finish(
     )
 
 
-def _prepare_undo(staged: dict[Path, str | bytes | None], context: int) -> str | None:
+def _prepare_undo(
+    staged: dict[Path, str | bytes | None], context: int, root: Path
+) -> str | None:
     """Render the reverse of what is about to be applied, and store it.
 
     The undo diff must be rendered before the staged state reaches the
@@ -259,10 +288,10 @@ def _prepare_undo(staged: dict[Path, str | bytes | None], context: int) -> str |
     pre = {path: original(path) for path in staged}
     if not pre:
         return None
-    undo_text = replayable_patch(pre, context=context, base=staged)
+    undo_text = replayable_patch(pre, context=context, base=staged, root=root)
     if not undo_text:
         return None
-    return store.save(undo_text)
+    return store.save(undo_text, "undo", root)
 
 
 def run_revision(

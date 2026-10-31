@@ -210,6 +210,7 @@ def replayable_patch(
     staged: dict[Path, Staged],
     context: int = 3,
     base: dict[Path, Staged] | None = None,
+    root: Path | None = None,
 ) -> str:
     """The whole change set as one git-canonical patch.
 
@@ -217,12 +218,15 @@ def replayable_patch(
     `pyedit.gitpatch` applies it back, so nothing in between parses a
     diff. Unlike `unified_diffs` it is not for reading -- it carries
     base85 payloads and 120000 modes.
+
+    Paths are relative to `root`, which must contain every staged path;
+    without one they are display paths, relative to the cwd.
     """
     before: dict[str, MemValue] = {}
     after: dict[str, MemValue] = {}
     for path, new in sorted(staged.items()):
         old = base.get(path) if base is not None else original(path)
-        rel = display_path(path)
+        rel = display_path(path) if root is None else path.relative_to(root).as_posix()
         before.update(_git_side(rel, old))
         after.update(_git_side(rel, new))
     if before == after:

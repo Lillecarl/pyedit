@@ -120,10 +120,11 @@ def run_edit(
             }
         mode = "stored"
         filename = stored.as_posix()
+        root = _store.root_of(apply_id) or root
 
     from pyedit import watchdog
 
-    with _LOCK:
+    with _LOCK, runner.working_directory(root):
         fuse = watchdog.start(timeout)
         try:
             opts = runner.Options(

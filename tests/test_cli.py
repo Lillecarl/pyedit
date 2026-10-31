@@ -92,6 +92,24 @@ def undo_token(out: str) -> str:
     return match.group(1)
 
 
+def test_apply_id_targets_the_root_it_was_made_in(
+    project: Path,
+    script: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+):
+    assert run(project, script=script) == 0
+    token = re.search(r"dry-run ([0-9a-f]{8})", capsys.readouterr().out)
+    assert token
+    elsewhere = project / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    assert replay(project, token.group(1)) == 0
+    assert "--- a/src/a.py" in capsys.readouterr().out
+    assert (project / "src" / "a.py").read_text() == "ALPHA = 1\n"
+    assert Path.cwd() == elsewhere
+
+
 def test_apply_prints_undo_comment(
     project: Path, script: Path, capsys: pytest.CaptureFixture[str], dryrun_store: Path
 ):

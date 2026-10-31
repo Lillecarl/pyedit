@@ -47,6 +47,42 @@ def test_apply_with_include_matching_nothing_writes_nothing(project: Path):
     assert (project / "src" / "a.py").read_text() == before
 
 
+def test_apply_id_replays_in_a_workdir_that_is_not_the_cwd(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+):
+    sub = project / "src"
+    elsewhere = project / "docs"
+    monkeypatch.chdir(elsewhere)
+    out = run_edit(
+        script='pyedit.edit("a.py", "alpha", "ALPHA")', workdir=str(sub), timeout=0
+    )
+    assert out["ok"] is True, out
+    assert "--- a/a.py" in out["diff"]
+
+    back = run_edit(apply_id=out["dry_run_id"], workdir=str(sub), timeout=0)
+    assert back["ok"] is True, back
+    assert (sub / "a.py").read_text() == "ALPHA = 1\nbeta = 2\n"
+
+    # the id carries its root: no workdir needed to undo
+    undo = run_edit(apply_id=back["undo_id"], timeout=0)
+    assert undo["ok"] is True, undo
+    assert (sub / "a.py").read_text() == "alpha = 1\nbeta = 2\n"
+    assert Path.cwd() == elsewhere
+
+
+def test_apply_id_replays_a_path_outside_the_workdir(project: Path):
+    note = project / "docs" / "note.txt"
+    out = run_edit(
+        script=f"pyedit.edit({str(note)!r}, 'hello', 'HELLO')",
+        workdir=str(project / "src"),
+        timeout=0,
+    )
+    assert out["ok"] is True, out
+    back = run_edit(apply_id=out["dry_run_id"], workdir=str(project / "src"), timeout=0)
+    assert back["ok"] is True, back
+    assert note.read_text() == "HELLO\n"
+
+
 def test_fds_replace_heredocs(project: Path):
     (project / "esc.py").write_text('rx = "\\d+"\n')
     out = run_edit(

@@ -108,8 +108,10 @@ script. Every `--apply` stores the reverse the same way
 Stored patches are git-canonical, so binary and symlink changes replay
 even though the printed diff summarises them. The undo targets disk as
 that run left it: undo the latest apply first, before anything else
-touches the files. Undoing an undo reapplies. Ids live in a temp
-directory the OS reaps; they do not survive a reboot.
+touches the files. Undoing an undo reapplies. An id records the
+directory its paths are relative to, so it replays onto the same
+files from any cwd or `workdir`. Ids live in a temp directory the OS
+reaps; they do not survive a reboot.
 
 ## Configuration
 

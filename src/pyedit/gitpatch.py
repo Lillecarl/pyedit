@@ -24,6 +24,8 @@ from pyedit.memgit import MemGitError, MemoryRepo, MemValue
 from pyedit.session import _MISSING, Symlink
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from pyedit.session import EditSession
 
 _LINK_MODE = 0o120000
@@ -120,7 +122,7 @@ def _session_entry(session: EditSession, path: str) -> MemValue | None:
         return (str(staged), pygit2.enums.FileMode.LINK)
     if staged is not _MISSING:
         return (staged, pygit2.enums.FileMode.BLOB)
-    target = _disk_link_target(path)
+    target = _disk_link_target(session.canon(path))
     if target is not None:
         return (target, pygit2.enums.FileMode.LINK)
     try:
@@ -129,10 +131,7 @@ def _session_entry(session: EditSession, path: str) -> MemValue | None:
         return None
 
 
-def _disk_link_target(path: str) -> str | None:
-    from pathlib import Path
-
+def _disk_link_target(path: Path) -> str | None:
     from pyedit.session import _disk_is_link, _disk_readlink
 
-    p = Path(path)
-    return _disk_readlink(p) if _disk_is_link(p) else None
+    return _disk_readlink(path) if _disk_is_link(path) else None

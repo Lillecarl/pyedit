@@ -285,7 +285,19 @@ def main(argv: list[str] | None = None) -> int:
         find_renames=not args.no_rename_detection,
         revision=args.revision,
     )
+    if mode == "stored":
+        opts.root = store.root_of(args.stored)
+    with runner.working_directory(opts.root):
+        return _run(args, opts, mode, text, filename)
 
+
+def _run(
+    args: argparse.Namespace,
+    opts: runner.Options,
+    mode: str,
+    text: str,
+    filename: str,
+) -> int:
     def stage(session: EditSession) -> None:
         if mode == "stored":
             # pyedit's own patch: git wrote it, so git applies it
