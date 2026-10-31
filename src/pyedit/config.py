@@ -43,13 +43,15 @@ class ConfigError(Exception):
 class LspTable:
     """One [lsp.*] server: the command, the suffixes it acts on, the
     code action kinds in order, title prefixes selecting among
-    alternatives, and whether it formats last."""
+    alternatives, whether it formats last, and its priority: higher
+    runs first, ties keep table order."""
 
     command: list[str] = field(default_factory=list)
     suffixes: list[str] = field(default_factory=list)
     actions: list[str] = field(default_factory=list)
     only_titles: list[str] = field(default_factory=list)
     format: bool = False
+    priority: int = 0
 
 
 @dataclass(frozen=True)
@@ -159,11 +161,13 @@ def _lsp_table(path: Path, name: str, table: Any) -> LspTable:
     where = f"{path}: [lsp.{name}]"
     if not isinstance(table, dict):
         raise ConfigError(f"{where} must be a table")
-    unknown = set(table) - {"command", "suffixes", "actions", "only_titles", "format"}
+    known = {"command", "suffixes", "actions", "only_titles", "format", "priority"}
+    unknown = set(table) - known
     if unknown:
         raise ConfigError(
             f"{where}: unknown key(s) {', '.join(sorted(unknown))}; "
-            "expected 'command', 'suffixes', 'actions', 'only_titles' and 'format'"
+            "expected 'command', 'suffixes', 'actions', 'only_titles', "
+            "'format' and 'priority'"
         )
     suffixes = table.get("suffixes", [])
     if (
@@ -185,6 +189,10 @@ def _lsp_table(path: Path, name: str, table: Any) -> LspTable:
     formatting = table.get("format", False)
     if not isinstance(formatting, bool):
         raise ConfigError(f"{where} needs 'format' as true or false")
+    priority = table.get("priority", 0)
+    # bool is an int subclass: `priority = true` must not read as 1
+    if not isinstance(priority, int) or isinstance(priority, bool):
+        raise ConfigError(f"{where} needs 'priority' as an integer")
     if not actions and not formatting:
         raise ConfigError(f"{where} does nothing: give it actions or format = true")
     return LspTable(
@@ -193,6 +201,7 @@ def _lsp_table(path: Path, name: str, table: Any) -> LspTable:
         actions=list(actions),
         only_titles=list(only_titles),
         format=formatting,
+        priority=priority,
     )
 
 

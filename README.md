@@ -153,6 +153,10 @@ nothing and fails loudly. A server that will not start, or an action
 that fails, fails the run and nothing is written -- the same
 fail-closed contract as `[format]`.
 
+Tables run by `priority`, an integer that defaults to 0: higher runs
+first, and equal priorities keep the order the tables appear in. A
+server that adds imports belongs before one that sorts them.
+
 `exclude` is a list of globs where neither pass runs. Plain patterns
 match the session-root-relative path (`prompt-toolkit/**` spares a
 vendored tree inside the session); patterns starting with `/` or

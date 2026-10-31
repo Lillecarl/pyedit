@@ -16,7 +16,11 @@ suffixes = [".py"]
 actions = ["source.fixAll.ruff", "source.organizeImports.ruff"]
 format = true
 
+# pyrefly first: its "Insert import" can land above
+# `from __future__`, and ruff's organizeImports, running after it,
+# moves the import below (#39)
 [lsp.pyrefly]
+priority = 1
 command = ["pyrefly", "lsp"]
 suffixes = [".py"]
 actions = ["quickfix"]

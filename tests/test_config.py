@@ -193,6 +193,26 @@ def test_lsp_format_must_be_a_bool(project: Path):
         config.load(project)
 
 
+def test_lsp_priority_parses_and_defaults_to_zero(project: Path):
+    write(project / "pyedit.toml", RUFF_LSP)
+    assert config.load(project).lsp["ruff"].priority == 0
+    write(
+        project / "pyedit.toml",
+        RUFF_LSP.replace("[lsp.ruff]\n", "[lsp.ruff]\npriority = -2\n"),
+    )
+    assert config.load(project).lsp["ruff"].priority == -2
+
+
+@pytest.mark.parametrize("value", ["true", '"1"', "1.5"])
+def test_lsp_priority_must_be_an_integer(project: Path, value: str):
+    write(
+        project / "pyedit.toml",
+        RUFF_LSP.replace("[lsp.ruff]\n", f"[lsp.ruff]\npriority = {value}\n"),
+    )
+    with pytest.raises(config.ConfigError, match=r"\[lsp\.ruff\] needs 'priority'"):
+        config.load(project)
+
+
 def test_lsp_only_titles_parses(project: Path):
     write(
         project / "pyedit.toml",

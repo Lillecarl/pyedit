@@ -136,6 +136,43 @@ def test_format_only_table(tree: EditSession) -> None:
     assert tree.read("messy.py") == "x = 1\n"
 
 
+def test_tables_run_by_priority_then_table_order(
+    tree: EditSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    started: list[str] = []
+
+    class FakeLsp:
+        def __init__(self, session: object, command: list[str]) -> None:
+            started.append(command[0])
+
+        def __enter__(self) -> FakeLsp:
+            return self
+
+        def __exit__(self, *args: object) -> bool:
+            return False
+
+        def code_action(self, *args: object, **kwargs: object) -> None:
+            pass
+
+    monkeypatch.setattr("pyedit.lsp_client.LspSession", FakeLsp)
+
+    def table(name: str, priority: int) -> LspTable:
+        return LspTable(
+            command=[name], suffixes=["py"], actions=["quickfix"], priority=priority
+        )
+
+    conf = Config(
+        lsp={
+            "a": table("a", 0),
+            "b": table("b", 0),
+            "low": table("low", -1),
+            "high": table("high", 5),
+        }
+    )
+    lsppass.apply(tree, stage_all(tree), conf)
+    assert started == ["high", "a", "b", "low"]
+
+
 def test_pass_forwards_only_titles(
     tree: EditSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:

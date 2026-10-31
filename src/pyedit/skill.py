@@ -144,7 +144,8 @@ earlier ones per key:
 `[format]` maps a suffix to a formatter: staged text with a
 matching suffix is piped through stdin, stdout re-staged -- the
 diff, the stored patch and undo all show it. `{path}` expands to the
-absolute path. `[lsp.NAME]` servers run code actions then `format = true`
+absolute path. `[lsp.NAME]` servers (`priority`: higher first, ties in
+table order) run code actions then `format = true`
 formatting, over matching staged files before `[format]`;
 `only_titles` keeps actions by title prefix.
 `exclude` globs skip both passes; `/`/`~`-prefixed match absolute

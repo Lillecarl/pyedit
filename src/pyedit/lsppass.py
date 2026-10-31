@@ -1,7 +1,8 @@
 """The configured LSP pass: code actions and formatting from language
 servers, over staged files only.
 
-Runs after the script and before the ``[format]`` pass. Each
+Runs after the script and before the ``[format]`` pass. Tables run
+by ``priority``, highest first; ties keep table order. Each
 ``[lsp.*]`` table starts its server once, applies its actions in
 listed order (then formatting when enabled) to every staged text
 file with a matching suffix, and re-stages results through the
@@ -42,7 +43,9 @@ def apply(
     touched: list[str] = []
     if not config.lsp or not staged:
         return touched
-    for name, table in config.lsp.items():
+    # sorted is stable: equal priorities keep table order
+    ordered = sorted(config.lsp.items(), key=lambda item: -item[1].priority)
+    for name, table in ordered:
         paths = [
             path
             for path in sorted(staged)
