@@ -35,6 +35,15 @@ def test_create_without_trailing_newline_reparses(project: Path) -> None:
     assert replay.staged()[project / "bind_key.py"] == bind
 
 
+def test_text_holding_a_nul_renders_as_a_binary_change(project: Path) -> None:
+    (project / "img.bin").write_text("opened\n")
+    session = EditSession()
+    session.write("img.bin", "\x00\x01\nopened\n")
+    text = "".join(t for _, t in unified_diffs(session.staged()))
+    assert text == "Binary file img.bin changed (7 -> 10 bytes)\n"
+    assert session.diff_git().strip()
+
+
 def test_symlink_changes_render_as_notes(project: Path) -> None:
     session = EditSession()
     session.symlink("AGENTS.md", "CLAUDE.md")

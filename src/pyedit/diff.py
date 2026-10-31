@@ -45,6 +45,13 @@ def _encoded(value: Staged) -> bytes | None:
     return value.encode() if isinstance(value, str) else value
 
 
+def _nul_text(value: Staged) -> bool:
+    """git's rule: a NUL makes content binary, str included. libgit2
+    renders no hunks for binary text, so a str holding a NUL that took
+    the text path would vanish from the diff."""
+    return isinstance(value, str) and "\x00" in value
+
+
 def original(path: Path) -> str | bytes | None:
     if _disk_is_link(path):
         return Symlink(_disk_readlink(path))
@@ -164,7 +171,12 @@ def unified_diffs(
                 else:
                     results.append((rel, symlink_note(rel, old, new)))
             continue
-        if isinstance(new, bytes) or isinstance(old, bytes):
+        if (
+            isinstance(new, bytes)
+            or isinstance(old, bytes)
+            or _nul_text(old)
+            or _nul_text(new)
+        ):
             # _slurp decodes NUL-free files to str: compare encoded
             # bytes, so restaging what is on disk stays a no-op
             old_bytes = old.encode() if isinstance(old, str) else old
