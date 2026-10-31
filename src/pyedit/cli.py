@@ -20,6 +20,7 @@ around it.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import traceback
 from pathlib import Path
@@ -153,6 +154,20 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def write_stdout(text: str) -> None:
+    """Write the result. A reader that closed early (`| head`) is not a
+    failure: the run already did its work, so the rest goes nowhere.
+    stdout's fd points at /dev/null after that, or the interpreter's
+    exit flush raises the same error again."""
+    try:
+        sys.stdout.write(text)
+        sys.stdout.flush()
+    except BrokenPipeError:
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        os.close(devnull)
+
+
 def read_input(args: argparse.Namespace) -> tuple[str, str, str]:
     """Return (input text, mode, filename for tracebacks).
 
@@ -212,7 +227,7 @@ def run_skill(rest: list[str]) -> int:
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(skill)
     else:
-        sys.stdout.write(skill)
+        write_stdout(skill)
     return EXIT_OK
 
 
@@ -369,7 +384,7 @@ def _run(
         marker = ""
 
     if args.output == "-":
-        sys.stdout.write(marker + result.diff + marker)
+        write_stdout(marker + result.diff + marker)
     else:
         out = Path(args.output)
         out.parent.mkdir(parents=True, exist_ok=True)

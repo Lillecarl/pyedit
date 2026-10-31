@@ -122,6 +122,30 @@ def test_script_raising_system_exit_writes_nothing(
     assert (project / "src" / "a.py").read_text() == "alpha = 1\n"
 
 
+def test_closed_stdout_is_not_a_failure(project: Path):
+    import os
+    import subprocess
+
+    (project / "big.txt").write_text("".join(f"{i}\n" for i in range(50000)))
+    (project / "edit.py").write_text("pyedit.edit('big.txt', '\\n', '!\\n')\n")
+    read_end, write_end = os.pipe()
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "pyedit", "--apply", "-s", "edit.py"],
+        stdout=write_end,
+        stderr=subprocess.PIPE,
+        cwd=project,
+    )
+    os.close(write_end)
+    os.read(read_end, 100)
+    os.close(read_end)
+    _, raw_err = proc.communicate(timeout=60)
+    err = raw_err.decode()
+    assert proc.returncode == 0, err
+    assert "Traceback" not in err
+    assert "changes applied" in err
+    assert (project / "big.txt").read_text().startswith("0!\n")
+
+
 def test_apply_prints_undo_comment(
     project: Path, script: Path, capsys: pytest.CaptureFixture[str], dryrun_store: Path
 ):
