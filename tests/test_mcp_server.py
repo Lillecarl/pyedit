@@ -186,6 +186,18 @@ def test_script_errors_carry_a_traceback(project: Path):
     assert "ValueError: boom" in out["error"]
 
 
+def test_script_raising_system_exit_fails_the_run_only(project: Path):
+    out = run_edit(
+        script="pyedit.edit('src/a.py', 'alpha', 'ALPHA')\nraise SystemExit('probe: 42')",
+        workdir=str(project),
+        apply=True,
+        timeout=0,
+    )
+    assert out["ok"] is False
+    assert "SystemExit: probe: 42" in out["error"]
+    assert (project / "src" / "a.py").read_text() == "alpha = 1\nbeta = 2\n"
+
+
 def test_skill_documents_mcp():
     from pyedit.skill import render_skill
 

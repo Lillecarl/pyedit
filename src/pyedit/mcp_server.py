@@ -151,11 +151,14 @@ def run_edit(
                     result = runner.run_revision(opts, revision, stage)
                 except jjrev.JjRevError as err:
                     return {"ok": False, "error": f"pyedit: {err}"}
+                except (Exception, SystemExit):
+                    return {"ok": False, "error": traceback.format_exc(limit=5)}
             else:
                 session = runner.new_session(opts)
                 try:
                     stage(session)
-                except Exception:
+                # SystemExit too: it would end the server, not the run
+                except (Exception, SystemExit):
                     return {"ok": False, "error": traceback.format_exc(limit=5)}
                 try:
                     result = runner.finish(session, opts)

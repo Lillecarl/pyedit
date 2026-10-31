@@ -110,6 +110,18 @@ def test_apply_id_targets_the_root_it_was_made_in(
     assert Path.cwd() == elsewhere
 
 
+def test_script_raising_system_exit_writes_nothing(
+    project: Path, capsys: pytest.CaptureFixture[str]
+):
+    path = project / "exit.py"
+    path.write_text(
+        "pyedit.edit('src/a.py', 'alpha', 'ALPHA')\nraise SystemExit('stop')\n"
+    )
+    assert run(project, "--apply", script=path) == 1
+    assert "edit script failed" in capsys.readouterr().err
+    assert (project / "src" / "a.py").read_text() == "alpha = 1\n"
+
+
 def test_apply_prints_undo_comment(
     project: Path, script: Path, capsys: pytest.CaptureFixture[str], dryrun_store: Path
 ):

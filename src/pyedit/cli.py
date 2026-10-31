@@ -318,7 +318,7 @@ def _run(
         session = runner.new_session(opts)
         try:
             stage(session)
-        except Exception:
+        except (Exception, SystemExit):
             traceback.print_exc()
             if mode == "stored":
                 print(
