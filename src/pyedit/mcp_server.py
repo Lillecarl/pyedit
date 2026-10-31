@@ -220,12 +220,14 @@ def run_edit(
 def create_server():
     """Build the MCP server. Imported lazily: only `pyedit mcp`
     needs the `mcp` package installed."""
+    # by name: v2 has only mcpserver, v1 only fastmcp, so a static
+    # import fails the type check under one of them
+    import importlib
+
     try:
-        from mcp.server.mcpserver import (  # pyrefly: ignore[missing-import] mcp v2 only; v1 is the fallback
-            MCPServer as Server,
-        )
+        Server = importlib.import_module("mcp.server.mcpserver").MCPServer
     except ImportError:
-        from mcp.server.fastmcp import FastMCP as Server
+        Server = importlib.import_module("mcp.server.fastmcp").FastMCP
 
     server = Server("pyedit")
 
