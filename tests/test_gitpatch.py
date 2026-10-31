@@ -11,11 +11,22 @@ from typing import TYPE_CHECKING
 import pytest
 
 from pyedit.diff import file_patch as _git_section
-from pyedit.gitpatch import GitPatchError, apply_patch
+from pyedit.gitpatch import GitPatchError, apply_patch, select_files
 from pyedit.session import EditSession, Symlink
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+def test_select_files_keeps_whole_sections() -> None:
+    text = _git_section("a.txt", "a\n", "A\n") + _git_section(
+        "img.bin", b"\x00old", b"\x00new"
+    )
+    only_bin = select_files(text, lambda path: path == "img.bin")
+    assert only_bin.startswith("diff --git a/img.bin b/img.bin\n")
+    assert "a.txt" not in only_bin
+    assert select_files(text, lambda _path: True) == text
+    assert select_files(text, lambda _path: False) == ""
 
 
 def test_binary_patch_updates_a_file(project: Path) -> None:

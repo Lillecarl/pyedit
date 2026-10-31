@@ -138,6 +138,32 @@ def test_line_counts_skip_headers_only():
     assert line_counts("Binary file x changed (1 -> 2 bytes)\n") == (0, 0)
 
 
+def test_apply_id_in_two_filtered_halves(project: Path):
+    out = run_edit(
+        script='pyedit.edit("src/a.py", "alpha", "ALPHA")\n'
+        'pyedit.edit("src/b.py", "gamma", "GAMMA")',
+        workdir=str(project),
+        timeout=0,
+    )
+    assert out["ok"] is True, out
+    token = out["dry_run_id"]
+
+    first = run_edit(
+        apply_id=token, include=["src/a.py"], workdir=str(project), timeout=0
+    )
+    assert first["ok"] is True, first
+    assert first["files"] == ["src/a.py"]
+    assert (project / "src" / "b.py").read_text() == "gamma = 3\n"
+
+    rest = run_edit(
+        apply_id=token, exclude=["src/a.py"], workdir=str(project), timeout=0
+    )
+    assert rest["ok"] is True, rest
+    assert rest["files"] == ["src/b.py"]
+    assert (project / "src" / "a.py").read_text() == "ALPHA = 1\nbeta = 2\n"
+    assert (project / "src" / "b.py").read_text() == "GAMMA = 3\n"
+
+
 def test_fds_replace_heredocs(project: Path):
     (project / "esc.py").write_text('rx = "\\d+"\n')
     out = run_edit(

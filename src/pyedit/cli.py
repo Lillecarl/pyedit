@@ -342,7 +342,7 @@ def _run(
     def stage(session: EditSession) -> None:
         if mode == "stored":
             # pyedit's own patch: git wrote it, so git applies it
-            runner.replay_stored(session, text)
+            runner.replay_stored(session, text, opts.include, opts.exclude)
         else:
             runner.execute_script(session, text, filename)
 

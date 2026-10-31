@@ -180,7 +180,7 @@ def run_edit(
 
             def stage(session: EditSession) -> None:
                 if mode == "stored":
-                    runner.replay_stored(session, text)
+                    runner.replay_stored(session, text, include, exclude)
                 else:
                     runner.execute_script(session, text, filename, fds)
 

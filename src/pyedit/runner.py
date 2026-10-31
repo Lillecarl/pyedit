@@ -158,11 +158,24 @@ def execute_script(
             pyedit.session = previous
 
 
-def replay_stored(session: EditSession, patch_text: str) -> None:
+def replay_stored(
+    session: EditSession,
+    patch_text: str,
+    include: list[str] | None = None,
+    exclude: list[str] | None = None,
+) -> None:
     """Replay one of pyedit's own canonical patches (a dry-run or
-    undo id). libgit2 wrote it, so libgit2 applies it."""
+    undo id). libgit2 wrote it, so libgit2 applies it.
+
+    include/exclude drop file sections before staging: a file an
+    earlier filtered replay already wrote no longer matches its hunks,
+    so it must not reach libgit2 when the same id finishes the rest."""
     from pyedit import gitpatch as _gitpatch
 
+    if include or exclude:
+        patch_text = _gitpatch.select_files(
+            patch_text, lambda path: allowed(path, include, exclude)
+        )
     _gitpatch.apply_patch(session, patch_text)
 
 

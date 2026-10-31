@@ -18,12 +18,14 @@ not search, and here it does not need to.
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 from pyedit.memgit import MemGitError, MemoryRepo, MemValue
 from pyedit.session import _MISSING, Symlink
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from pyedit.session import EditSession
@@ -63,6 +65,24 @@ def apply_patch(session: EditSession, text: str) -> list[str]:
         session.rollback(mark)
         raise
     return sorted(set(before) | set(result))
+
+
+def select_files(text: str, keep: Callable[[str], bool]) -> str:
+    """The sections of a git patch that touch a path `keep` accepts.
+
+    Splitting at `diff --git` is safe here: hunk lines start with a
+    space, `+`, `-` or a backslash, and a base85 line holds no space.
+    libgit2 names each section's paths, so no header is parsed here.
+    """
+    kept: list[str] = []
+    for section in re.split(r"(?m)^(?=diff --git )", text):
+        if not section.startswith("diff --git "):
+            kept.append(section)
+            continue
+        deltas = _deltas(MemoryRepo(), section)
+        if any(keep(d.old_file.path) or keep(d.new_file.path) for d in deltas):
+            kept.append(section)
+    return "".join(kept)
 
 
 def _decoded(data: bytes) -> str | bytes:

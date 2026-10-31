@@ -110,9 +110,11 @@ comes back as `stdout`.
 Every dry-run with changes stores its patch and prints the id as the
 first and last line of the diff (`# pyedit dry-run ab12cd34`).
 `pyedit apply ab12cd34` stages and writes it without rerunning the
-script. Every `--apply` stores the reverse the same way
-(`# pyedit undo ef01ab23`). After a dry run you approve, apply its
-id; never resend the script with `--apply`/`apply: true`.
+script; with `-i`/`-x` only the matching files, and the same id with
+the opposite filter writes the rest later. Every `--apply` stores the
+reverse the same way (`# pyedit undo ef01ab23`). After a dry run you
+approve, apply its id; never resend the script with
+`--apply`/`apply: true`.
 
 Stored patches are git-canonical, so binary and symlink changes replay
 even though the printed diff summarises them. The undo targets disk as
