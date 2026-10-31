@@ -227,7 +227,7 @@ def finish(
     # --force, in which case the problems are on record anyway
     refused = bool(opts.apply and problems and not opts.force)
     applied = False
-    if opts.apply and not refused:
+    if opts.apply and not refused and staged:
         session.apply(staged)
         applied = True
 

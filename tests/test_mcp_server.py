@@ -32,6 +32,21 @@ def test_dry_run_then_apply_id(project: Path):
     assert "ALPHA = 1" in (project / "src" / "a.py").read_text()
 
 
+def test_apply_with_include_matching_nothing_writes_nothing(project: Path):
+    before = (project / "src" / "a.py").read_text()
+    out = run_edit(
+        script='pyedit.edit("src/a.py", "alpha", "ALPHA")',
+        include=["nothing-matches-this"],
+        apply=True,
+        workdir=str(project),
+        timeout=0,
+    )
+    assert out["ok"] is True, out
+    assert out["files"] == []
+    assert out["applied"] is False
+    assert (project / "src" / "a.py").read_text() == before
+
+
 def test_fds_replace_heredocs(project: Path):
     (project / "esc.py").write_text('rx = "\\d+"\n')
     out = run_edit(

@@ -857,7 +857,8 @@ class EditSession:
 
         `paths` limits the write to those staged paths (the CLI uses it
         for its include/exclude filter)."""
-        targets = sorted((paths or self.staged()).items())
+        # an empty filter selects nothing, never everything
+        targets = sorted((self.staged() if paths is None else paths).items())
         drifted = [
             path
             for path, content in targets
