@@ -27,6 +27,9 @@ if TYPE_CHECKING:
     from pyedit.session import HistoryRecord
 
 DEFAULT_CONTEXT = 3
+# libgit2 cannot anchor a hunk without context: stored patches keep
+# this however few lines the printed diff shows
+STORED_CONTEXT = 3
 DEFAULT_MAX_BYTES = 256 * 1024 * 1024
 DEFAULT_MAX_FILES = 20000
 
@@ -239,7 +242,7 @@ def finish(
     # shown is for reading; what is stored is git-canonical and
     # replays through libgit2.
     base_dir = patch_root(session.root, staged)
-    stored_text = replayable_patch(staged, context=opts.context, root=base_dir)
+    stored_text = replayable_patch(staged, context=STORED_CONTEXT, root=base_dir)
     dry_run_id = (
         store.save(stored_text, "dry-run", base_dir)
         if staged and not opts.apply and store_ids
@@ -248,7 +251,7 @@ def finish(
 
     undo_id = None
     if opts.apply and (not problems or opts.force):
-        undo_id = _prepare_undo(staged, opts.context, base_dir)
+        undo_id = _prepare_undo(staged, base_dir)
 
     # an apply of known-broken syntax refuses to write unless
     # --force, in which case the problems are on record anyway
@@ -272,9 +275,7 @@ def finish(
     )
 
 
-def _prepare_undo(
-    staged: dict[Path, str | bytes | None], context: int, root: Path
-) -> str | None:
+def _prepare_undo(staged: dict[Path, str | bytes | None], root: Path) -> str | None:
     """Render the reverse of what is about to be applied, and store it.
 
     The undo diff must be rendered before the staged state reaches the
@@ -288,7 +289,7 @@ def _prepare_undo(
     pre = {path: original(path) for path in staged}
     if not pre:
         return None
-    undo_text = replayable_patch(pre, context=context, base=staged, root=root)
+    undo_text = replayable_patch(pre, context=STORED_CONTEXT, base=staged, root=root)
     if not undo_text:
         return None
     return store.save(undo_text, "undo", root)

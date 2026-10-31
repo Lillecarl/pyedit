@@ -83,6 +83,23 @@ def test_apply_id_replays_a_path_outside_the_workdir(project: Path):
     assert note.read_text() == "HELLO\n"
 
 
+def test_apply_id_replays_a_dry_run_shown_with_no_context(project: Path):
+    big = project / "big.py"
+    big.write_text("".join(f"line{i} = {i}\n" for i in range(40)))
+    script = (
+        "pyedit.edit('big.py', 'line5 = 5\\nline6 = 6\\n', '')\n"
+        "pyedit.edit('big.py', 'line30 = 30\\n', 'line30 = 300\\nextra = 1\\n')\n"
+        "pyedit.write('new.py', 'x = 1\\n')\n"
+    )
+    out = run_edit(script=script, context=0, workdir=str(project), timeout=0)
+    assert out["ok"] is True, out
+    assert "@@ -6,2 +5,0 @@" in out["diff"]
+    back = run_edit(apply_id=out["dry_run_id"], workdir=str(project), timeout=0)
+    assert back["ok"] is True, back
+    assert "line5" not in big.read_text()
+    assert "line30 = 300\nextra = 1\n" in big.read_text()
+
+
 def test_fds_replace_heredocs(project: Path):
     (project / "esc.py").write_text('rx = "\\d+"\n')
     out = run_edit(
