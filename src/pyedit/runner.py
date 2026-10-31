@@ -48,6 +48,8 @@ class Options:
     respect_gitignore: bool = True
     find_renames: bool = True
     revision: str | None = None
+    # called once, right before the run writes to disk or amends REV
+    before_write: Callable[[], None] | None = None
 
 
 @dataclass
@@ -262,6 +264,8 @@ def finish(
     refused = bool(opts.apply and problems and not opts.force)
     applied = False
     if opts.apply and not refused and staged:
+        if opts.before_write is not None:
+            opts.before_write()
         session.apply(staged)
         applied = True
 
@@ -325,6 +329,8 @@ def run_revision(
             new = _prune_meta(session.meta, old)
             result.meta = {k: (old[k], v) for k, v in new.items()}
             if opts.apply and new and not result.refused:
+                if opts.before_write is not None:
+                    opts.before_write()
                 result.op = jjrev.retitle(repo_root, revision, new)
                 result.applied = True
         return result
@@ -380,6 +386,8 @@ def run_revision(
         result.meta = {k: (old[k], v) for k, v in new.items()}
         if not repo_changes and not new:
             return result
+        if opts.before_write is not None:
+            opts.before_write()
         _new_id, op, cleanup_op, conflicts = jjrev.amend_commit(
             repo_root, revision, repo_changes, new or None
         )

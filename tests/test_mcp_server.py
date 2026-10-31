@@ -1,6 +1,7 @@
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -233,6 +234,63 @@ def test_script_raising_system_exit_fails_the_run_only(project: Path):
     assert out["ok"] is False
     assert "SystemExit: probe: 42" in out["error"]
     assert (project / "src" / "a.py").read_text() == "alpha = 1\nbeta = 2\n"
+
+
+@pytest.fixture
+def child_env(project: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A child process sees none of conftest's monkeypatches: isolate it
+    through the environment it is shipped instead."""
+    (project / "tmp").mkdir()
+    monkeypatch.setenv("TMPDIR", str(project / "tmp"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(project / "state"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(project / "config"))
+    (project / "note.txt").write_text("hello\n")
+    return project
+
+
+def test_child_run_matches_in_process(child_env: Path):
+    from pyedit.mcp_server import run_in_child
+
+    out = run_in_child(
+        script="print('probe', 42)\npyedit.edit('note.txt', 'hello', 'HELLO')",
+        apply=True,
+        timeout=30,
+    )
+    assert out["ok"] is True, out
+    assert out["stdout"] == "probe 42\n"
+    assert out["stat"] == [["note.txt", 1, 1]]
+    assert (child_env / "note.txt").read_text() == "HELLO\n"
+    assert out["undo_id"]
+    assert (child_env / "tmp" / "pyedit-dryruns" / f"{out['undo_id']}.diff").exists()
+
+
+def test_child_timeout_fails_only_that_run(child_env: Path):
+    from pyedit.mcp_server import run_in_child
+
+    out = run_in_child(script="import time\ntime.sleep(30)", timeout=1)
+    assert out["ok"] is False
+    assert "timed out after 1s; thread stacks in" in out["error"]
+    assert "nothing was written" in out["error"]
+    assert list((child_env / "state" / "pyedit" / "dumps").glob("timeout-*.log"))
+    after = run_in_child(script="pyedit.edit('note.txt', 'hello', 'HELLO')", timeout=30)
+    assert after["ok"] is True, after
+
+
+def test_child_stuck_holding_the_gil_is_killed(
+    child_env: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from pyedit import mcp_server
+
+    monkeypatch.setattr(mcp_server, "_GRACE", 1.0)
+
+    # a backtracking C regex holds the GIL, so the child's own watchdog
+    # never runs: only the parent's deadline ends it
+    script = "import re\nre.match(r'(a+)+$', 'a' * 40 + 'b')"
+    started = time.monotonic()
+    out = mcp_server.run_in_child(script=script, timeout=1)
+    assert out["ok"] is False
+    assert "did not stop for the watchdog" in out["error"]
+    assert time.monotonic() - started < 1 + mcp_server._GRACE + 5
 
 
 def test_skill_documents_mcp():

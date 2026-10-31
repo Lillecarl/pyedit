@@ -101,7 +101,9 @@ stay minimal.
 | `-r REV` | `revision` |
 | `-o FILE` | `output` (result has `diff_file`, no `diff`) |
 
-Ids work on both surfaces; prefer the tool.
+Ids work on both surfaces; prefer the tool. Each call runs in its own
+process: a timeout fails that call only, and what the script prints
+comes back as `stdout`.
 
 ## Dry-run ids and undo
 

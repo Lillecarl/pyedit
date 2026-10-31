@@ -10,11 +10,22 @@ The `mcp` package is imported lazily so the CLI never needs it. Both
 its v1 (`FastMCP`) and v2 (`MCPServer`) APIs are accepted: only the
 common subset (`tool`, `run`) is used. stdio only -- stdout carries
 the protocol, so nothing here prints.
+
+Each tool call runs in a fresh process forked from a forkserver
+(`run_in_child`). Python cannot stop a thread stuck in C code -- a
+blocking call, libgit2, a backtracking regex that holds the GIL
+froze every thread when measured -- so a timeout kills that process
+and the server keeps serving. Not a pool: a reused worker would carry
+the VFS patches and cwd of an earlier run.
 """
 
 from __future__ import annotations
 
+import os
+import sys
+import tempfile
 import threading
+import time
 import traceback
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -22,10 +33,30 @@ from typing import TYPE_CHECKING, Any
 from pyedit import runner
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+    from multiprocessing.connection import Connection
+    from multiprocessing.context import ForkServerContext
+
     from pyedit.fdin import Payloads
     from pyedit.session import EditSession
 
 _LOCK = threading.Lock()
+# seconds past the timeout the parent waits for the child's own
+# watchdog to dump stacks and exit, before it kills the child
+_GRACE = 5.0
+_WRITING = "writing"
+# imported once in the forkserver, so a fork starts warm
+_PRELOAD = [
+    "pyedit.mcp_server",
+    "pyedit.runner",
+    "pyedit.session",
+    "pyedit.diff",
+    "pyedit.memgit",
+    "pyedit.gitpatch",
+    "pyedit.syntax",
+    "pygit2",
+]
+_CONTEXT: ForkServerContext | None = None
 
 
 def run_edit(
@@ -42,10 +73,11 @@ def run_edit(
     force: bool = False,
     timeout: float = 300.0,
     output: str | None = None,
+    before_write: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
-    """The single tool's core, without any MCP surface, so tests can
-    call it directly. Always returns a dict; failures are `ok: False`
-    with an `error`, never raised."""
+    """The single tool's core, in this process and without any MCP
+    surface, so tests can call it directly. Always returns a dict;
+    failures are `ok: False` with an `error`, never raised."""
     sources = [
         name
         for name, value in (
@@ -143,6 +175,7 @@ def run_edit(
                 skip_format=(mode != "script"),
                 root=root,
                 revision=revision,
+                before_write=before_write,
             )
 
             def stage(session: EditSession) -> None:
@@ -217,6 +250,131 @@ def run_edit(
     }
 
 
+def _context() -> ForkServerContext:
+    global _CONTEXT
+    if _CONTEXT is None:
+        import multiprocessing
+
+        context = multiprocessing.get_context("forkserver")
+        context.set_forkserver_preload(_PRELOAD)
+        _CONTEXT = context
+    return _CONTEXT
+
+
+def run_in_child(timeout: float = 300.0, **kwargs: Any) -> dict[str, Any]:
+    """`run_edit` in a fresh child process, which a timeout kills.
+
+    The child gets this process's environment and cwd as they are now:
+    a forkserver child would otherwise see them as they were when the
+    forkserver started. What the script prints comes back as `stdout`;
+    in the child, fd 1 would be the MCP protocol stream.
+    """
+    context = _context()
+    fd, stdout_path = tempfile.mkstemp(prefix="pyedit-stdout-")
+    os.close(fd)
+    receive, send = context.Pipe(duplex=False)
+    with _LOCK:
+        proc = context.Process(
+            target=_child_main,
+            args=(send, kwargs, timeout, dict(os.environ), os.getcwd(), stdout_path),
+            daemon=True,
+        )
+        proc.start()
+        send.close()
+        result: dict[str, Any] | None = None
+        writing = False
+        expired = False
+        deadline = time.monotonic() + timeout + _GRACE if timeout > 0 else None
+        while result is None:
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if (remaining is not None and remaining <= 0) or not receive.poll(
+                remaining
+            ):
+                expired = True
+                break
+            try:
+                message = receive.recv()
+            except EOFError:
+                break
+            if message == _WRITING:
+                writing = True
+            else:
+                result = message
+        # EOF arrives before the exit is reaped: an exiting child gets
+        # the grace too, or it reads as one that had to be killed
+        proc.join(0 if expired else _GRACE)
+        killed = proc.is_alive()
+        if killed:
+            proc.kill()
+            proc.join()
+        receive.close()
+    try:
+        printed = Path(stdout_path).read_text(errors="replace")
+    finally:
+        os.unlink(stdout_path)
+    if result is None:
+        result = {
+            "ok": False,
+            "error": _death(proc.pid, proc.exitcode, killed, timeout, writing),
+        }
+    if printed:
+        result["stdout"] = printed
+    return result
+
+
+def _death(
+    pid: int | None, code: int | None, killed: bool, timeout: float, writing: bool
+) -> str:
+    from pyedit import watchdog
+
+    if killed:
+        why = (
+            f"timed out after {timeout}s and did not stop for the watchdog "
+            "(stuck outside Python code), so it was killed; no stack dump"
+        )
+    elif code == 124:
+        dumps = sorted(watchdog.dump_dir().glob(f"timeout-*-{pid}.log"))
+        where = f"; thread stacks in {dumps[-1]}" if dumps else ""
+        why = f"timed out after {timeout}s{where}"
+    else:
+        why = f"its process died with exit code {code}"
+    if writing:
+        return (
+            f"pyedit: the run {why}. It was writing files when it stopped, "
+            "so they may be partial: check them with your VCS"
+        )
+    return f"pyedit: the run {why}; nothing was written"
+
+
+def _child_main(
+    send: Connection,
+    kwargs: dict[str, Any],
+    timeout: float,
+    environ: dict[str, str],
+    cwd: str,
+    stdout_path: str,
+) -> None:
+    os.environ.clear()
+    os.environ.update(environ)
+    # gettempdir caches: the store must follow TMPDIR as shipped
+    tempfile.tempdir = None
+    os.chdir(cwd)
+    fd = os.open(stdout_path, os.O_WRONLY)
+    os.dup2(fd, 1)
+    os.close(fd)
+
+    def writing() -> None:
+        send.send(_WRITING)
+
+    try:
+        result = run_edit(timeout=timeout, before_write=writing, **kwargs)
+    except BaseException:
+        result = {"ok": False, "error": traceback.format_exc(limit=5)}
+    sys.stdout.flush()
+    send.send(result)
+    send.close()
+
+
 def create_server():
     """Build the MCP server. Imported lazily: only `pyedit mcp`
     needs the `mcp` package installed."""
@@ -248,7 +406,7 @@ def create_server():
         output: str | None = None,
     ) -> dict[str, Any]:
         """Run a pyedit edit script. See `pyedit skill` for the session API."""
-        return run_edit(
+        return run_in_child(
             script=script,
             script_file=script_file,
             fds=fds,
