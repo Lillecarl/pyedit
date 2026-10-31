@@ -25,17 +25,27 @@ let
       hash = "sha256-znZ5MViyqium9UK8wyNjVKYV98WIHbJ55B3uWfafWNU=";
     };
   };
+  # a real venv instead of nixpkgs' wrapper: sys.executable sees
+  # pyedit's packages, which `pyedit.lsp(..., python_path=sys.executable)`
+  # relies on, and nothing exports PYTHONPATH to children
+  nixvenvSrc = pkgs.fetchFromGitHub {
+    owner = "nixidae";
+    repo = "nixvenv";
+    rev = "edacb28d8100a9d291732329af7295aab78a0387";
+    hash = "sha256-VnW8LUMXCy3W+w8or/8VX5IyTnBxSJHx1VgVsSkQ2Yo=";
+  };
+  inherit ((import nixvenvSrc { inherit pkgs; }).lib) nixvenv;
+  build =
+    doCheck:
+    pkgs.python3Packages.callPackage ./pyedit {
+      git = pkgs.git;
+      pygls = pyglsFork;
+      inherit pyjj nixvenv doCheck;
+    };
 in
 rec {
-  pyedit = pkgs.python3Packages.callPackage ./pyedit {
-    git = pkgs.git;
-    pygls = pyglsFork;
-    pyjj = pyjj;
-  };
-  pyedit-nocheck = pyedit.overrideAttrs {
-    doCheck = false;
-    doInstallCheck = false;
-  };
+  pyedit = build true;
+  pyedit-nocheck = build false;
 
   shell = pkgs.mkShell {
     packages = [
@@ -45,10 +55,7 @@ rec {
       (pkgs.python3.withPackages (p: [
         p.pytest
         p.hypothesis
-        (pyedit.passthru.library.overrideAttrs {
-          doCheck = false;
-          doInstallCheck = false;
-        })
+        pyedit-nocheck.passthru.library
       ]))
     ];
   };
