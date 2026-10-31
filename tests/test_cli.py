@@ -389,9 +389,14 @@ def test_output_file_keeps_pure_diff(
     target = project / "changes.diff"
     assert run(project, "--output", target, script=script) == 0
     out, err = capsys.readouterr()
-    assert out == ""
     assert "# pyedit" not in target.read_text()
-    assert re.search(r"saved as ([0-9a-f]{8})", err)
+    token = re.search(r"saved as ([0-9a-f]{8})", err)
+    assert token
+    assert out == (
+        f"# pyedit dry-run {token.group(1)} (pyedit apply {token.group(1)})\n"
+        "src/a.py | +1 -1\n"
+        f"# diff in {target}\n"
+    )
 
 
 def test_apply_unknown_id_errors(project: Path, capsys: pytest.CaptureFixture[str]):
@@ -439,7 +444,7 @@ def test_output_writes_diff_to_file(
     target = project / "changes.diff"
     assert run(project, "--output", target, script=script) == 0
     out, _ = capsys.readouterr()
-    assert out == ""
+    assert "--- a/src/a.py" not in out
     assert "--- a/src/a.py" in target.read_text()
 
 

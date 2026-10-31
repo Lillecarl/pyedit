@@ -203,6 +203,25 @@ def unified_diffs(
     return results
 
 
+def line_counts(file_diff: str) -> tuple[int, int]:
+    """Lines added and removed in one file's section of the diff.
+
+    Counting starts after the `+++` header: a removed line that begins
+    with `-- ` renders as `--- `, so the header cannot be told apart by
+    prefix alone. A binary or symlink note counts as 0, 0."""
+    lines = file_diff.splitlines()
+    start = next(
+        (i + 1 for i, line in enumerate(lines) if line.startswith("+++ ")), None
+    )
+    if start is None:
+        return 0, 0
+    body = [line for line in lines[start:] if not line.startswith("@@")]
+    return (
+        sum(1 for line in body if line.startswith("+")),
+        sum(1 for line in body if line.startswith("-")),
+    )
+
+
 NOTE_PREFIXES = ("Symlink ", "Binary file ")
 
 

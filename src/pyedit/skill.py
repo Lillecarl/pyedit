@@ -66,7 +66,7 @@ unrelated modifier (this run writes).
 | `-s, --script FILE` | edit script (default stdin; `-` is stdin) |
 | `-a, --apply` | write to disk (default: dry-run) |
 | `--force` | with `--apply`, write despite syntax problems |
-| `-o, --output FILE` | write the diff to FILE |
+| `-o, --output FILE` | diff to FILE; stdout keeps the id and a per-file `+N -M` stat |
 | `-i, --include GLOB` / `-x, --exclude GLOB` | limit shown and applied paths (repeatable) |
 | `-U, --context N` | diff context lines (default 3) |
 | `--no-gitignore` | let glob discovery see .gitignored paths |
@@ -80,6 +80,10 @@ Exit: 0 ok, 1 input failed (nothing written), 2 usage, 124 timeout
 **The printed diff is a representation, not a patch.** git-style
 headers (`a/`, `b/`, `/dev/null`); binary and symlink changes are
 one-line notes. Replay it by id, never by piping the text back.
+
+Never filter pyedit's output (`| tail`, `| grep`): ids and errors
+are in it. A diff too long to read goes to `-o FILE` (MCP
+`output`); read the file only where the stat looks wrong.
 
 ## MCP server
 
@@ -95,6 +99,7 @@ stay minimal.
 | `apply ID` | `apply_id` (writes) |
 | `-i`/`-x`/`-U`, cwd | same names, `workdir` |
 | `-r REV` | `revision` |
+| `-o FILE` | `output` (result has `diff_file`, no `diff`) |
 
 Ids work on both surfaces; prefer the tool.
 

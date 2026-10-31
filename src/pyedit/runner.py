@@ -54,6 +54,8 @@ class Options:
 class Result:
     diff: str = ""
     files: list[str] = field(default_factory=list)
+    # (path, lines added, lines removed) per file in the diff
+    stat: list[tuple[str, int, int]] = field(default_factory=list)
     dry_run_id: str | None = None
     undo_id: str | None = None
     problems: list[str] = field(default_factory=list)
@@ -177,7 +179,7 @@ def finish(
     allow_meta the run refuses naming that, instead of dropping it
     silently."""
     from pyedit import config, formatter, store
-    from pyedit.diff import replayable_patch, unified_diffs
+    from pyedit.diff import line_counts, replayable_patch, unified_diffs
     from pyedit.syntax import render
 
     if session.meta and not allow_meta:
@@ -235,7 +237,9 @@ def finish(
             for problem in session.check(path)
         )
 
-    diff_text = "".join(diff for _, diff in unified_diffs(staged, context=opts.context))
+    per_file = unified_diffs(staged, context=opts.context)
+    diff_text = "".join(diff for _, diff in per_file)
+    stat = [(rel, *line_counts(diff)) for rel, diff in per_file]
 
     # dry-runs store the patch so an id alone can apply it later;
     # applies store the reverse so an id alone can revert. What is
@@ -264,6 +268,7 @@ def finish(
     return Result(
         diff=diff_text,
         files=[display_path(p) for p in sorted(staged)],
+        stat=stat,
         dry_run_id=dry_run_id,
         undo_id=undo_id,
         problems=problems,

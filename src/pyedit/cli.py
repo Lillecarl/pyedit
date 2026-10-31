@@ -71,7 +71,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--output",
         default="-",
         metavar="FILE",
-        help="write the diff to FILE instead of stdout ('-' is stdout)",
+        help=(
+            "write the diff to FILE; stdout then carries the id and a "
+            "per-file stat ('-' is stdout)"
+        ),
     )
     parser.add_argument(
         "-i",
@@ -320,6 +323,9 @@ def main(argv: list[str] | None = None) -> int:
         find_renames=not args.no_rename_detection,
         revision=args.revision,
     )
+    if args.output != "-":
+        # a replay runs inside its stored root: resolve before moving
+        args.output = str(Path(args.output).absolute())
     if mode == "stored":
         opts.root = store.root_of(args.stored)
     with runner.working_directory(opts.root):
@@ -409,6 +415,12 @@ def _run(
         out = Path(args.output)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(result.diff)
+        if result.stat:
+            write_stdout(
+                marker
+                + "".join(f"{rel} | +{add} -{rem}\n" for rel, add, rem in result.stat)
+                + f"# diff in {out}\n"
+            )
 
     if not result.files and not result.meta and not result.history:
         print("pyedit: no changes", file=sys.stderr)

@@ -100,6 +100,43 @@ def test_apply_id_replays_a_dry_run_shown_with_no_context(project: Path):
     assert "line30 = 300\nextra = 1\n" in big.read_text()
 
 
+def test_output_writes_the_diff_to_a_file(project: Path):
+    out = run_edit(
+        script='pyedit.edit("a.py", "alpha", "ALPHA")\npyedit.write("new.txt", "x\\ny\\n")',
+        output="changes.diff",
+        workdir=str(project / "src"),
+        timeout=0,
+    )
+    assert out["ok"] is True, out
+    assert "diff" not in out
+    assert out["diff_file"] == str(project / "src" / "changes.diff")
+    assert "+ALPHA = 1" in (project / "src" / "changes.diff").read_text()
+    assert out["stat"] == [["a.py", 1, 1], ["new.txt", 2, 0]]
+    assert out["dry_run_id"]
+
+
+def test_refused_apply_honours_output(project: Path):
+    out = run_edit(
+        script='pyedit.write("broken.py", "def f(:\\n")',
+        output="changes.diff",
+        apply=True,
+        workdir=str(project),
+        timeout=0,
+    )
+    assert out["ok"] is False
+    assert "diff" not in out
+    assert "broken.py" in (project / "changes.diff").read_text()
+    assert not (project / "broken.py").exists()
+
+
+def test_line_counts_skip_headers_only():
+    from pyedit.diff import line_counts
+
+    section = "--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n--- removed dashes\n+new\n keep\n"
+    assert line_counts(section) == (1, 1)
+    assert line_counts("Binary file x changed (1 -> 2 bytes)\n") == (0, 0)
+
+
 def test_fds_replace_heredocs(project: Path):
     (project / "esc.py").write_text('rx = "\\d+"\n')
     out = run_edit(

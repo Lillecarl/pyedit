@@ -41,6 +41,7 @@ def run_edit(
     revision: str | None = None,
     force: bool = False,
     timeout: float = 300.0,
+    output: str | None = None,
 ) -> dict[str, Any]:
     """The single tool's core, without any MCP surface, so tests can
     call it directly. Always returns a dict; failures are `ok: False`
@@ -82,6 +83,12 @@ def run_edit(
         root = Path(workdir).expanduser()
         if not root.is_dir():
             return {"ok": False, "error": f"workdir is not a directory: {workdir}"}
+
+    diff_file: Path | None = None
+    if output is not None:
+        diff_file = Path(output).expanduser()
+        if not diff_file.is_absolute():
+            diff_file = (root or Path.cwd()) / diff_file
 
     text: str
     filename: str
@@ -168,17 +175,33 @@ def run_edit(
             if fuse is not None:
                 fuse.set()
 
+    diff = result.diff
+    shown: dict[str, Any] = {"diff": diff}
+    if diff_file is not None:
+        try:
+            diff_file.parent.mkdir(parents=True, exist_ok=True)
+            diff_file.write_text(diff)
+        except OSError as err:
+            return {
+                "ok": False,
+                "error": f"output {diff_file}: {err.strerror or err}; "
+                + ("the run was applied" if result.applied else "nothing was written"),
+                "undo_id": result.undo_id,
+                "dry_run_id": result.dry_run_id,
+            }
+        shown = {"diff_file": str(diff_file)}
     if result.refused:
         return {
             "ok": False,
             "error": "syntax check failed; nothing was written "
             "(fix the files, or run with force)",
-            "diff": result.diff,
+            **shown,
             "problems": result.problems,
         }
     return {
         "ok": True,
-        "diff": result.diff,
+        **shown,
+        "stat": [list(entry) for entry in result.stat],
         "files": result.files,
         "dry_run_id": result.dry_run_id,
         "undo_id": result.undo_id,
@@ -220,6 +243,7 @@ def create_server():
         revision: str | None = None,
         force: bool = False,
         timeout: float = 300.0,
+        output: str | None = None,
     ) -> dict[str, Any]:
         """Run a pyedit edit script. See `pyedit skill` for the session API."""
         return run_edit(
@@ -235,6 +259,7 @@ def create_server():
             revision=revision,
             force=force,
             timeout=timeout,
+            output=output,
         )
 
     return server
