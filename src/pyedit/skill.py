@@ -51,6 +51,7 @@ Bugs: https://github.com/lillecarl/pyedit
     pyedit [OPTIONS]            # edit script on stdin
     pyedit -s SCRIPT [OPTIONS]  # edit script from a file
     pyedit apply ID             # replay a stored dry-run or undo
+    pyedit ids [-n N]           # stored ids as JSON, newest first
     pyedit patterns [LANG]      # pinned tree-sitter query patterns
 
 A Python edit script is the only way to describe an edit. Patches
@@ -108,10 +109,16 @@ script. Every `--apply` stores the reverse the same way
 Stored patches are git-canonical, so binary and symlink changes replay
 even though the printed diff summarises them. The undo targets disk as
 that run left it: undo the latest apply first, before anything else
-touches the files. Undoing an undo reapplies. An id records the
-directory its paths are relative to, so it replays onto the same
-files from any cwd or `workdir`. Ids live in a temp directory the OS
-reaps; they do not survive a reboot.
+touches the files. Undoing an undo reapplies. A lost id: `pyedit ids`
+lists kind, root and files per id.
+
+An undo id is also the exact way back from a temporary change: to see
+a new test fail without its fix, apply a revert, run the test, then
+`pyedit apply UNDO-ID`. Never retype the original text.
+
+An id records the directory its paths are relative to, so it replays
+onto the same files from any cwd or `workdir`. Ids live in a temp
+directory the OS reaps; they do not survive a reboot.
 
 ## Configuration
 

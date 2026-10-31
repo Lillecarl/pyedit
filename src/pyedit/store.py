@@ -10,6 +10,7 @@ sensitive content) and are left for the OS temp cleaner to reap.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import secrets
@@ -56,6 +57,44 @@ def root_of(token: str) -> Path | None:
         return None
     root = meta.get("root") if isinstance(meta, dict) else None
     return Path(root) if isinstance(root, str) else None
+
+
+def listing() -> list[dict[str, object]]:
+    """Every stored id, newest first: id, kind, root, created (epoch
+    seconds) and the paths its patch touches. An id stored without a
+    sidecar has kind and root None."""
+    import pygit2
+
+    entries: list[tuple[float, dict[str, object]]] = []
+    for diff in store_dir().glob("*.diff"):
+        token = diff.stem
+        try:
+            created = diff.stat().st_mtime
+            text = diff.read_text()
+        except OSError:
+            continue
+        meta: dict[str, object] = {}
+        with contextlib.suppress(OSError, ValueError):
+            meta = json.loads((store_dir() / f"{token}.json").read_text())
+        files: list[str] = []
+        with contextlib.suppress(ValueError, pygit2.GitError):
+            deltas = pygit2.Diff.parse_diff(text).deltas
+            files = sorted(
+                {d.new_file.path for d in deltas} | {d.old_file.path for d in deltas}
+            )
+        entries.append(
+            (
+                created,
+                {
+                    "id": token,
+                    "kind": meta.get("kind"),
+                    "root": meta.get("root"),
+                    "created": round(created),
+                    "files": files,
+                },
+            )
+        )
+    return [entry for _, entry in sorted(entries, key=lambda e: e[0], reverse=True)]
 
 
 def resolve(token: str) -> Path | None:

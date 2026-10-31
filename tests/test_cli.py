@@ -146,6 +146,24 @@ def test_closed_stdout_is_not_a_failure(project: Path):
     assert (project / "big.txt").read_text().startswith("0!\n")
 
 
+def test_ids_lists_dry_runs_and_undos_newest_first(
+    project: Path, script: Path, capsys: pytest.CaptureFixture[str]
+):
+    import json
+
+    assert run(project, script=script) == 0
+    assert run(project, "--apply", script=script) == 0
+    capsys.readouterr()
+    assert cli.main(["ids"]) == 0
+    listed = json.loads(capsys.readouterr().out)
+    assert {e["kind"] for e in listed} == {"dry-run", "undo"}
+    assert all(e["files"] == ["src/a.py"] for e in listed)
+    assert all(e["root"] == str(project) for e in listed)
+    assert listed[0]["created"] >= listed[1]["created"]
+    assert cli.main(["ids", "-n", "1"]) == 0
+    assert len(json.loads(capsys.readouterr().out)) == 1
+
+
 def test_apply_prints_undo_comment(
     project: Path, script: Path, capsys: pytest.CaptureFixture[str], dryrun_store: Path
 ):

@@ -264,6 +264,24 @@ def run_patterns(rest: list[str]) -> int:
     return EXIT_OK
 
 
+def run_ids(rest: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="pyedit ids",
+        description="List stored dry-run and undo ids, newest first, as JSON.",
+    )
+    parser.add_argument(
+        "-n", "--limit", type=int, default=20, help="at most this many (0: all)"
+    )
+    args = parser.parse_args(rest)
+    import json
+
+    entries = store.listing()
+    if args.limit > 0:
+        entries = entries[: args.limit]
+    write_stdout(json.dumps(entries, indent=1) + "\n")
+    return EXIT_OK
+
+
 def main(argv: list[str] | None = None) -> int:
     tokens = sys.argv[1:] if argv is None else list(argv)
     if tokens and tokens[0] == "skill":
@@ -272,6 +290,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_mcp(tokens[1:])
     if tokens and tokens[0] == "patterns":
         return run_patterns(tokens[1:])
+    if tokens and tokens[0] == "ids":
+        return run_ids(tokens[1:])
     stored = None
     if tokens and tokens[0] == "apply":
         stored, tokens = apply_id(tokens[1:])
