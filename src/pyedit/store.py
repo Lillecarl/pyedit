@@ -78,10 +78,14 @@ def listing() -> list[dict[str, object]]:
             meta = json.loads((store_dir() / f"{token}.json").read_text())
         files: list[str] = []
         with contextlib.suppress(ValueError, pygit2.GitError):
-            deltas = pygit2.Diff.parse_diff(text).deltas
-            files = sorted(
-                {d.new_file.path for d in deltas} | {d.old_file.path for d in deltas}
-            )
+            # .deltas is a one-shot iterator
+            deltas = list(pygit2.Diff.parse_diff(text).deltas)
+            # libgit2 cannot split `diff --git a/x y b/x y`, so an added or
+            # deleted path with a space has None on its /dev/null side
+            paths = {d.new_file.path for d in deltas} | {
+                d.old_file.path for d in deltas
+            }
+            files = sorted(path for path in paths if path is not None)
         entries.append(
             (
                 created,

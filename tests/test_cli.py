@@ -164,6 +164,20 @@ def test_ids_lists_dry_runs_and_undos_newest_first(
     assert len(json.loads(capsys.readouterr().out)) == 1
 
 
+def test_ids_lists_an_added_path_with_a_space(
+    project: Path, capsys: pytest.CaptureFixture[str]
+):
+    import json
+
+    edit = project / "edit.py"
+    edit.write_text("pyedit.write('new file.txt', 'x\\n')\n")
+    assert run(project, "--apply", script=edit) == 0
+    capsys.readouterr()
+    assert cli.main(["ids"]) == 0
+    listed = json.loads(capsys.readouterr().out)
+    assert [e["files"] for e in listed] == [["new file.txt"]]
+
+
 def test_apply_prints_undo_comment(
     project: Path, script: Path, capsys: pytest.CaptureFixture[str], dryrun_store: Path
 ):
