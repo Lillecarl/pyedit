@@ -392,6 +392,8 @@ def _run(
 
     for problem in result.problems:
         print(f"pyedit: syntax: {problem}", file=sys.stderr)
+    for problem in result.preexisting:
+        print(f"pyedit: syntax, before this edit: {problem}", file=sys.stderr)
 
     # dry-runs print the id so it alone can apply them later;
     # applies print the reverse id so it alone can revert. What is

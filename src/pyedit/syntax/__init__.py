@@ -301,7 +301,11 @@ def problems(session: EditSession, path: str | Path) -> list[SyntaxProblem]:
     content = session.read(path)
     if not isinstance(content, str):
         return []
-    suffix = Path(path).suffix
+    return problems_in(Path(path).suffix, content)
+
+
+def problems_in(suffix: str, content: str) -> list[SyntaxProblem]:
+    """Syntax problems in text that a file with `suffix` would hold."""
     rules = rules_for(suffix)
     if rules is None:
         return []

@@ -797,6 +797,13 @@ class EditSession:
     def staged(self) -> dict[Path, Staged]:
         return dict(self._staged)
 
+    def base(self, path: str | Path) -> Staged:
+        """What the staged change at path is measured against: disk
+        when the path was first staged (under -r, the exported tree).
+        None when no file was there."""
+        p = self.canon(path)
+        return self._base[p] if p in self._base else _disk_snapshot(p)
+
     @property
     def meta(self) -> dict[str, str]:
         """Staged commit metadata: description and/or author for the

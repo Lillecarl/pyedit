@@ -367,6 +367,57 @@ def test_broken_syntax_gate_refuses_then_force_applies(
     assert "# pyedit undo" in out, f"{name}: forced write has no undo id"
 
 
+OLD_ERROR = "x = (\ny = 1\n"
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [("y = 1", "y = 2"), ("x = (", "import os\nx = (")],
+    ids=["other-line", "line-above"],
+)
+def test_apply_writes_past_a_problem_the_file_had(
+    project: Path, capsys: pytest.CaptureFixture[str], old: str, new: str
+):
+    (project / "src" / "old.py").write_text(OLD_ERROR)
+    script = project / "e.py"
+    script.write_text(f"pyedit.edit('src/old.py', {old!r}, {new!r})\n")
+    assert run(project, "--apply", script=script) == 0
+    err = capsys.readouterr().err
+    assert "pyedit: syntax, before this edit: src/old.py:" in err
+    assert "pyedit: syntax: " not in err
+    assert (project / "src" / "old.py").read_text() == OLD_ERROR.replace(old, new)
+
+
+def test_apply_refuses_a_problem_the_edit_added(
+    project: Path, capsys: pytest.CaptureFixture[str]
+):
+    (project / "src" / "old.py").write_text(OLD_ERROR)
+    script = project / "e.py"
+    script.write_text("pyedit.edit('src/old.py', 'x = (', 'def (:\\nx = (')\n")
+    assert run(project, "--apply", script=script) == 1
+    err = capsys.readouterr().err
+    assert "pyedit: syntax: src/old.py:1:" in err
+    assert "nothing was written" in err
+    assert (project / "src" / "old.py").read_text() == OLD_ERROR
+
+
+def test_apply_writes_cpp_the_grammar_rejects(
+    project: Path, capsys: pytest.CaptureFixture[str]
+):
+    # valid C++ that tree-sitter-cpp reports as errors (#40)
+    header = (
+        '#if __has_include("x.hh")\n'
+        "#endif\n"
+        "template struct Reach<Cache, &ns::State::cache>;\n"
+        "int answer = 41;\n"
+    )
+    (project / "src" / "x.hpp").write_text(header)
+    script = project / "e.py"
+    script.write_text("pyedit.edit('src/x.hpp', '41', '42')\n")
+    assert run(project, "--apply", script=script) == 0, capsys.readouterr().err
+    assert (project / "src" / "x.hpp").read_text() == header.replace("41", "42")
+
+
 def test_force_applies_broken_syntax_with_undo(
     project: Path, capsys: pytest.CaptureFixture[str]
 ):

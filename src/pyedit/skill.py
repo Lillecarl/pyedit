@@ -398,7 +398,9 @@ Staged text is parsed before it is shown. Problems print to stderr as
 `pyedit: syntax: FILE:LINE:COL: message` (compile() for Python,
 tree-sitter otherwise) with the source line and a caret. A dry-run
 warns and still shows the diff; `--apply` refuses to write and exits
-1. This is the post-edit verification step -- no `&& python -m
+1. Only problems the edit introduced refuse: ones the file already
+had print as `pyedit: syntax, before this edit:` (MCP
+`preexisting_problems`) and do not block. This is the post-edit verification step -- no `&& python -m
 compile` needed after it. `--force` overrides, keeps the problems on
 record, and the write stays revertible.
 

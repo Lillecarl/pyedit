@@ -14,6 +14,7 @@ import contextlib
 import fnmatch
 import os
 import sys
+from collections import Counter
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
 
     from pyedit.fdin import Payloads
     from pyedit.session import HistoryRecord
+    from pyedit.syntax import SyntaxProblem
 
 DEFAULT_CONTEXT = 3
 # libgit2 cannot anchor a hunk without context: stored patches keep
@@ -60,7 +62,10 @@ class Result:
     stat: list[tuple[str, int, int]] = field(default_factory=list)
     dry_run_id: str | None = None
     undo_id: str | None = None
+    # problems the edit introduced: these refuse an apply
     problems: list[str] = field(default_factory=list)
+    # problems the file already had before the edit
+    preexisting: list[str] = field(default_factory=list)
     formatted: list[str] = field(default_factory=list)
     actions: list[str] = field(default_factory=list)
     applied: bool = False
@@ -195,7 +200,7 @@ def finish(
     silently."""
     from pyedit import config, formatter, store
     from pyedit.diff import line_counts, replayable_patch, unified_diffs
-    from pyedit.syntax import render
+    from pyedit.syntax import problems_in, render
 
     if session.meta and not allow_meta:
         raise MetaWithoutTarget(
@@ -241,16 +246,38 @@ def finish(
     # staged text is parsed: problems surface here, in the same run
     # that shows the diff they would produce
     problems: list[str] = []
+    preexisting: list[str] = []
     for path in sorted(staged):
         value = staged[path]
         if not isinstance(value, str) or isinstance(value, Symlink):
             continue
-        problems.extend(
-            f"{display_path(path)}:"
-            f"{problem.line}:{problem.column}: {problem.message}\n"
-            f"{render(problem, value)}"
-            for problem in session.check(path)
-        )
+        found = session.check(path)
+        if not found:
+            continue
+        # a grammar can reject valid code (tree-sitter-cpp and
+        # `__has_include`, #40): what the file already had is not the
+        # edit's doing. Keyed on the line's text, not its number, so an
+        # edit above a problem does not make it new. compile() stops at
+        # the first error, so a new one below an old one goes unseen.
+        before = session.base(path)
+        known: Counter[tuple[str, str]] = Counter()
+        if isinstance(before, str) and not isinstance(before, Symlink):
+            known.update(
+                _problem_key(problem, before)
+                for problem in problems_in(path.suffix, before)
+            )
+        for problem in found:
+            shown = (
+                f"{display_path(path)}:"
+                f"{problem.line}:{problem.column}: {problem.message}\n"
+                f"{render(problem, value)}"
+            )
+            key = _problem_key(problem, value)
+            if known[key] > 0:
+                known[key] -= 1
+                preexisting.append(shown)
+            else:
+                problems.append(shown)
 
     per_file = unified_diffs(staged, context=opts.context)
     diff_text = "".join(diff for _, diff in per_file)
@@ -289,12 +316,19 @@ def finish(
         dry_run_id=dry_run_id,
         undo_id=undo_id,
         problems=problems,
+        preexisting=preexisting,
         formatted=formatted,
         actions=actions,
         applied=applied,
         refused=refused,
         history=session.history,
     )
+
+
+def _problem_key(problem: SyntaxProblem, text: str) -> tuple[str, str]:
+    lines = text.split("\n")
+    line = lines[problem.line - 1] if 1 <= problem.line <= len(lines) else ""
+    return problem.message, line.strip()
 
 
 def _prepare_undo(staged: dict[Path, str | bytes | None], root: Path) -> str | None:

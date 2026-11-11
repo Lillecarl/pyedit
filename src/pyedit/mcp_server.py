@@ -230,6 +230,7 @@ def run_edit(
             "(fix the files, or run with force)",
             **shown,
             "problems": result.problems,
+            "preexisting_problems": result.preexisting,
         }
     return {
         "ok": True,
@@ -239,6 +240,7 @@ def run_edit(
         "dry_run_id": result.dry_run_id,
         "undo_id": result.undo_id,
         "problems": result.problems,
+        "preexisting_problems": result.preexisting,
         "formatted": result.formatted,
         "actions": result.actions,
         "applied": result.applied,

@@ -244,6 +244,20 @@ def test_apply_with_syntax_problems_refuses(project: Path):
     assert not (project / "broken.py").exists()
 
 
+def test_preexisting_problems_do_not_refuse(project: Path):
+    (project / "old.py").write_text("x = (\ny = 1\n")
+    out = run_edit(
+        script='pyedit.edit("old.py", "y = 1", "y = 2")',
+        workdir=str(project),
+        apply=True,
+        timeout=0,
+    )
+    assert out["ok"] is True, out
+    assert out["problems"] == []
+    assert [p.split(":")[0] for p in out["preexisting_problems"]] == ["old.py"]
+    assert (project / "old.py").read_text() == "x = (\ny = 2\n"
+
+
 def test_script_errors_carry_a_traceback(project: Path):
     out = run_edit(script="raise ValueError('boom')", workdir=str(project), timeout=0)
     assert out["ok"] is False
