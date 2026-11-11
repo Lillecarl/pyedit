@@ -67,6 +67,9 @@ preset = "strict"
 project-includes = ["src", "tests"]
 project-excludes = ["src/pyedit/vendor/**", "src/pyedit/corpus/**"]
 search-path = ["tests"]
+# a soft dependency: Any where absent, checked where a distributor
+# passes it, so a line ignore would be unused in one of the two
+ignore-missing-imports = ["pyjj", "pyjj.*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

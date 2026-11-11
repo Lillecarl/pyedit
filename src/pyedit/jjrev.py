@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 try:
-    import pyjj  # pyrefly: ignore[missing-import] soft dependency, absent from the dev venv
+    import pyjj
 except ImportError:
     pyjj = None
 
