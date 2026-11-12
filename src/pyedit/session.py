@@ -17,14 +17,14 @@ import re
 import stat
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Final, Literal, TypeAlias, TypedDict
+from typing import TYPE_CHECKING, Any, Final, Literal, TypeAlias, TypedDict
 
 from pyedit.gitignore import IgnoreFilter
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
-    from pyedit import syntax
+    from pyedit import astgrep, syntax
     from pyedit.patch import PatchOperation
     from pyedit.rope import Reference
     from pyedit.udiff import AppliedFile
@@ -791,6 +791,37 @@ class EditSession:
         from pyedit import syntax
 
         return syntax.kinds(self, path)
+
+    def find_code(
+        self,
+        paths: str | Path,
+        pattern: str | None = None,
+        *,
+        rule: dict[str, Any] | None = None,
+        lang: str | None = None,
+    ) -> list[astgrep.CodeMatch]:
+        """ast-grep matches in a file or a glob, over staged content."""
+        from pyedit import astgrep
+
+        return astgrep.find_code(self, paths, pattern, rule=rule, lang=lang)
+
+    def rewrite(
+        self,
+        paths: str | Path,
+        pattern: str | None,
+        fix: str | Callable[[astgrep.CodeMatch], str],
+        *,
+        rule: dict[str, Any] | None = None,
+        lang: str | None = None,
+        count: int = -1,
+    ) -> int:
+        """Replace ast-grep matches with a template or a callable's
+        result; stage it. Zero matches raise. Returns the count."""
+        from pyedit import astgrep
+
+        return astgrep.rewrite(
+            self, paths, pattern, fix, rule=rule, lang=lang, count=count
+        )
 
     # --- engine ---
 

@@ -72,6 +72,7 @@ job belong to libgit2. Read it before changing anything structural.
 | `src/pyedit/formatter.py` | `[format]` pass: staged text piped through a formatter, stdout re-staged |
 | `src/pyedit/fdin.py` | `read_fd`: heredoc payloads on numbered FDs, or injected dicts over MCP |
 | `src/pyedit/syntax/` | tree-sitter position queries, outlines, syntax checks |
+| `src/pyedit/astgrep.py` | code patterns through ast-grep-py: `find_code`, `rewrite` |
 | `src/pyedit/rope.py` | Python refactors: rename_symbol, rename_module, references |
 | `src/pyedit/lsp_client.py` | language server bridge (pygls): renames, references, code actions |
 | `src/pyedit/gitignore.py` | .gitignore filtering for discovery |

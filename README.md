@@ -85,6 +85,20 @@ pyedit --apply           # write
 Writes through `pathlib` and `shutil` work too -- the overlay catches
 them either way.
 
+## Code patterns
+
+`pyedit.find_code` and `pyedit.rewrite` match code by example, through
+[ast-grep](https://ast-grep.github.io)'s Python binding:
+
+```
+pyedit.rewrite("src/**/*.py", "print($$$ARGS)", "log.info($$$ARGS)")
+```
+
+The binding takes source text and returns text, so it sees staged
+content, and its rewrites go through the same diff, syntax check and
+undo as every other edit. pyedit never runs the `sg` command: a
+subprocess would read the files from disk, past the overlay.
+
 ## Editing older commits
 
 `pyedit -r REV` reads base file content from a jj revision instead of

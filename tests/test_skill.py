@@ -24,6 +24,7 @@ EXAMPLES = (
     'pyedit.edit_re("src/app.py"',
     "import ast",
     "with pyedit.VFS():",
+    'pyedit.rewrite("src/**/*.py", "print(',
     "with pyedit.lsp(",
     'Path("src/new.py")',
 )

@@ -248,6 +248,14 @@ directory).
                                      span); spans feed splice(); bad patterns
                                      raise QueryError naming row/col
     pyedit.kinds(path)               node kinds + fields per grammar
+    pyedit.find_code(paths, pattern, ast-grep matches (below) in a file
+                rule=None,           or glob: CodeMatch path, kind,
+                lang=None)           text, span (splice-ready), vars
+    pyedit.rewrite(paths, pattern,   replace each match with fix: a
+                fix, rule=None,      template ($A, $$$ARGS) or
+                lang=None,           callable(CodeMatch) -> str; count
+                count=-1)            per file; zero matches raise;
+                                     returns the count
     pyedit.splice(path, spans)       many position splices in one pass;
                                      (start_line, start_col, end_line,
                                      end_col, replacement), lines
@@ -391,6 +399,33 @@ file each over a glob and returns staged and skipped paths;
 `diagnostics_for(path)` reads the latest push diagnostics. Kinds
 pass through verbatim; an action the bridge cannot stage raises,
 naming itself. Servers see staged content.
+
+## Code patterns (ast-grep)
+
+First choice for code shapes, before `query`/`splice`/`edit_re`. A
+pattern is code: `$NAME` binds one node, `$$$NAME` zero or more (its
+value keeps the separators), `$_` matches without binding. Whitespace
+and comments do not count. Runs on staged content.
+
+    n = pyedit.rewrite("src/**/*.py", "print($$$ARGS)", "log.info($$$ARGS)")
+    for hit in pyedit.find_code("web/app.ts", "useState($INIT)"):
+        print(hit.path, hit.start_line, hit.vars["INIT"])
+    pyedit.rewrite("src/**/*.py", "$X == None", "$X is None",
+                   rule={"inside": {"kind": "function_definition", "stopBy": "end"}})
+
+- `rule`: ast-grep's rule object as a dict -- `kind`, `regex`,
+  `inside`, `has`, `precedes`, `follows`, `all`, `any`, `not`;
+  `stopBy: "end"` looks past the nearest node. Rule without pattern ok.
+- The pattern must parse in the file's language; one that does not
+  matches nothing. A fragment needs context:
+  `rule={"pattern": {"context": "class A:\\n  x = 1", "selector": "assignment"}}`.
+- Nested matches: `rewrite` keeps the outer one. A `$NAME` in `fix`
+  the match does not bind stays literal.
+- Globs skip suffixes ast-grep lacks; `lang=` forces one. Languages:
+  Python, JS, TS, TSX, Go, Rust, C, C++, Bash, JSON, YAML, Nix, Ruby,
+  Java, Lua, Zig, CSS, Markdown, HTML, Kotlin, PHP, C#, Swift, Scala,
+  Elixir, Haskell, HCL, Solidity. Not fish, zsh, TOML, Svelte: `query`.
+- Bad rules and languages raise `PatternError`.
 
 ## Syntax awareness
 

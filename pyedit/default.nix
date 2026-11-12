@@ -17,6 +17,7 @@
   pyrefly,
   tree-sitter,
   tree-sitter-grammars,
+  ast-grep-py,
   cacert,
   git,
   pytestCheckHook,
@@ -145,6 +146,7 @@ let
       pygls
       lsprotocol
       tree-sitter
+      ast-grep-py
     ]
     ++ map (name: binding name) [
       # python bindings for every grammar live in the generated
