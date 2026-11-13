@@ -420,6 +420,29 @@ def test_symlink_onto_existing_path_raises(session: EditSession) -> None:
         session.symlink("anchor.md", "docs/anchor.md")
 
 
+def test_edit_through_a_link_changes_the_target(
+    session: EditSession, project: Path
+) -> None:
+    (project / "real.txt").write_text("hello\n")
+    (project / "hop.txt").symlink_to("real.txt")
+    (project / "link.txt").symlink_to("hop.txt")
+    session.edit("link.txt", "hello", "bye")
+    assert session.staged() == {project / "real.txt": "bye\n"}
+    session.apply()
+    assert os.readlink(project / "link.txt") == "hop.txt"
+    assert (project / "real.txt").read_text() == "bye\n"
+
+
+def test_write_through_a_dangling_link_creates_the_target(
+    session: EditSession, project: Path
+) -> None:
+    (project / "link.txt").symlink_to("docs/new.txt")
+    session.write("link.txt", "fresh\n")
+    session.apply()
+    assert (project / "link.txt").is_symlink()
+    assert (project / "docs" / "new.txt").read_text() == "fresh\n"
+
+
 def test_read_of_a_staged_symlink_refuses(session: EditSession) -> None:
     session.symlink("AGENTS.md", "CLAUDE.md")
     with pytest.raises(ValueError, match="symlink"):

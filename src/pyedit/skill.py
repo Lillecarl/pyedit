@@ -485,6 +485,8 @@ Stdlib tools stage like everything else:
   longer unique pattern.
 - Subprocesses and raw file descriptors (`os.open`, `os.fdopen`)
   bypass the overlay.
+- `read`, `write` and every edit through a link on disk act on the
+  file it names, and the diff shows that file.
 - Symlinks are first-class: `rename` moves the link itself,
   `symlink(target, path, force=True)` retargets or replaces. Reads and
   `open()` cannot follow a staged link -- they resolve after apply.

@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING
 import pyedit
 from pyedit import config, formatter, runner, store
 from pyedit.lsppass import LspPassError
+from pyedit.session import DiskChanged
 from pyedit.skill import render_skill
 
 if TYPE_CHECKING:
@@ -377,6 +378,7 @@ def _run(
             result = runner.finish(session, opts)
         except (
             config.ConfigError,
+            DiskChanged,
             formatter.FormatterError,
             LspPassError,
             runner.MetaWithoutTarget,

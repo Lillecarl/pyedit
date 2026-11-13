@@ -54,7 +54,8 @@ def apply_patch(session: EditSession, text: str) -> list[str]:
             if entry.mode == _LINK_MODE:
                 session.symlink(entry.data.decode(), path, force=True)
             else:
-                session.write(path, _decoded(entry.data))
+                # a tree entry: text at a link's path replaces the link
+                session.write(path, _decoded(entry.data), follow=False)
         for path in before:
             if path not in result:
                 session.delete(path)

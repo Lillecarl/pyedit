@@ -75,9 +75,16 @@ def test_staged_text_wins_over_a_symlink_on_disk(project: Path) -> None:
     # it with text: the patch must see the text
     (project / "link").symlink_to("src/a.py")
     session = EditSession()
-    session.write("link", "now text\n")
+    session.write("link", "now text\n", follow=False)
     apply_patch(session, _git_section("link", "now text\n", b"\x00\x01"))
     assert session.staged()[project / "link"] == b"\x00\x01"
+
+
+def test_text_patch_onto_a_link_replaces_the_link(project: Path) -> None:
+    (project / "link").symlink_to("src/a.py")
+    session = EditSession()
+    apply_patch(session, _git_section("link", Symlink("src/a.py"), "text\n"))
+    assert session.staged() == {project / "link": "text\n"}
 
 
 def test_symlink_patch_creates_a_link(project: Path) -> None:

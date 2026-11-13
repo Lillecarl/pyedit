@@ -402,7 +402,7 @@ class EditSession:
     # --- overlay IO ---
 
     def read(self, path: str | Path) -> str | bytes:
-        p = self.canon(path)
+        p = self._through_links(self.canon(path))
         content = self._staged.get(p, _MISSING)
         if (
             isinstance(content, str | bytes)
@@ -429,10 +429,25 @@ class EditSession:
             self._stage(p, content, base=content)
         return content
 
-    def write(self, path: str | Path, content: str | bytes) -> None:
+    def write(
+        self, path: str | Path, content: str | bytes, *, follow: bool = True
+    ) -> None:
+        """Stage content. `follow=False` replaces a link on disk with
+        the content instead of writing the file it names."""
         if not isinstance(content, (str, bytes)):
             raise TypeError(f"write() needs str or bytes, got {type(content).__name__}")
-        self._stage(self.canon(path), content)
+        p = self.canon(path)
+        self._stage(self._through_links(p) if follow else p, content)
+
+    def _through_links(self, p: Path) -> Path:
+        """Content reads and writes through a link on disk land on the
+        file it names, as in an editor. delete, rename and symlink act
+        on the link itself. A staged path is never followed."""
+        for _ in range(40):  # the kernel's MAXSYMLINKS
+            if p in self._staged or not _disk_is_link(p):
+                return p
+            p = self.canon(p.parent / _disk_readlink(p))
+        raise ValueError(f"{p}: too many levels of symbolic links")
 
     def symlink(self, target: str, path: str | Path, force: bool = False) -> None:
         """Stage a symlink at `path` pointing to `target`.

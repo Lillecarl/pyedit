@@ -38,6 +38,35 @@ def replay(project: Path, token: object, *argv: object):
     return cli.main(["apply", str(token), *[str(a) for a in argv]])
 
 
+def test_apply_through_a_link_keeps_the_link(
+    project: Path, capsys: pytest.CaptureFixture[str]
+):
+    (project / "link.py").symlink_to("src/a.py")
+    edit = project / "e.py"
+    edit.write_text('pyedit.edit("link.py", "alpha", "ALPHA")\n')
+    assert run(project, script=edit) == 0
+    assert "+++ b/src/a.py" in capsys.readouterr().out
+    assert run(project, "--apply", script=edit) == 0
+    assert (project / "link.py").is_symlink()
+    assert (project / "src" / "a.py").read_text() == "ALPHA = 1\n"
+
+
+def test_disk_changed_is_an_error_line_not_a_traceback(
+    project: Path, capsys: pytest.CaptureFixture[str]
+):
+    edit = project / "e.py"
+    edit.write_text(
+        'pyedit.edit("src/a.py", "alpha", "ALPHA")\n'
+        "import subprocess\n"
+        'subprocess.run(["sh", "-c", "echo gamma = 3 > src/a.py"], check=True)\n'
+    )
+    assert run(project, "--apply", script=edit) == 1
+    err = capsys.readouterr().err
+    assert "Traceback" not in err
+    assert "pyedit: disk changed after staging" in err
+    assert (project / "src" / "a.py").read_text() == "gamma = 3\n"
+
+
 def test_dry_run_prints_diff_and_writes_nothing(
     project: Path, script: Path, capsys: pytest.CaptureFixture[str]
 ):
