@@ -361,9 +361,7 @@ class EditSession:
         --no-gitignore."""
         rx = glob_re(pattern)
         found: set[Path] = set()
-        for match in glob_module.glob(
-            os.path.join(self._root, pattern), recursive=True
-        ):
+        for match in self._disk_glob(pattern):
             p = self.canon(match)
             if self.staged_content(p) is None:
                 continue
@@ -377,6 +375,39 @@ class EditSession:
             if rx.match(self.relpath(staged_path)):
                 found.add(staged_path)
         return self.filter_ignored(sorted(found))
+
+    def _disk_glob(self, pattern: str) -> Iterable[str]:
+        """Disk paths matching `pattern`, with glob's rules for hidden
+        names and brackets. Never enters a symlinked or gitignored
+        directory: glob follows a link like `result` into a Nix store
+        closure, measured at 789k paths for 2.4k files in one repo."""
+        translate = getattr(glob_module, "translate", None)
+        if translate is None:  # Python < 3.13: correct, but walks it all
+            return glob_module.glob(os.path.join(self._root, pattern), recursive=True)
+        rx = re.compile(translate(pattern, recursive=True, include_hidden=False))
+        # a pattern naming a hidden component may reach into hidden dirs
+        hidden = any(part.startswith(".") for part in pattern.split("/"))
+        ignore = self.ignore_filter if self._respect_gitignore else None
+        matches: list[str] = []
+        stack = [self._root]
+        while stack:
+            directory = stack.pop()
+            try:
+                scanner = _REAL_SCANDIR(directory)
+            except OSError:
+                continue
+            with scanner:
+                for entry in scanner:
+                    path = Path(entry.path)
+                    if entry.is_dir(follow_symlinks=False):
+                        if not (entry.name.startswith(".") and not hidden) and not (
+                            ignore is not None and ignore.ignored(path, is_dir=True)
+                        ):
+                            stack.append(path)
+                        continue
+                    if rx.match(path.relative_to(self._root).as_posix()):
+                        matches.append(entry.path)
+        return matches
 
     # --- staging checkpoints ---
 

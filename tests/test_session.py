@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from pyedit import Symlink
+from pyedit import session as session_module
 from pyedit.session import DiskChanged, EditSession
 
 if TYPE_CHECKING:
@@ -455,6 +456,35 @@ def test_directory_rename_moves_symlinks(session: EditSession, project: Path) ->
     assert session.staged()[project / "renamed" / "link.txt"] == Symlink("note.txt")
     session.apply()
     assert (project / "renamed" / "link.txt").is_symlink()
+
+
+def test_glob_keeps_globs_rules_for_hidden_names(
+    session: EditSession, project: Path
+) -> None:
+    (project / ".hidden").mkdir()
+    (project / ".hidden" / "in.py").write_text("x = 1\n")
+    (project / ".dot.py").write_text("x = 1\n")
+    names = {p.name for p in session.glob("**/*.py")}
+    assert "in.py" not in names and ".dot.py" not in names
+    assert [p.name for p in session.glob(".hidden/*.py")] == ["in.py"]
+
+
+def test_glob_never_walks_an_ignored_directory(
+    session: EditSession, project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (project / ".gitignore").write_text("build/\n")
+    (project / "build").mkdir()
+    (project / "build" / "out.py").write_text("x = 1\n")
+    entered: list[str] = []
+    real = os.scandir
+
+    def watched(path: Path) -> object:
+        entered.append(str(path))
+        return real(path)
+
+    monkeypatch.setattr(session_module, "_REAL_SCANDIR", watched)
+    assert "out.py" not in {p.name for p in session.glob("**/*.py")}
+    assert not any(e.endswith("build") for e in entered)
 
 
 def test_glob_does_not_descend_into_symlinked_dirs(
