@@ -22,6 +22,7 @@ class Row:
     name: str | None
     start_line: int
     end_line: int
+    hash: str | None = None
 
     def contains(self, other: Row) -> bool:
         return (

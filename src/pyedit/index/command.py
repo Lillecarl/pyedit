@@ -1,5 +1,5 @@
-"""`pyedit index`: build, search, duplicates. Results are JSON on
-stdout; warnings and progress go to stderr."""
+"""`pyedit index`: build the index, or ask it in SQL. Results are JSON
+on stdout; warnings and progress go to stderr."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
-from pyedit.index import build, embed, gather, gitstore, similar
+from pyedit.index import build, embed, gather, gitstore, sql
 from pyedit.session import EditSession
 
 
@@ -29,7 +29,7 @@ def _model_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--paths",
         default="**/*",
-        help="glob of files to index (default: all, .gitignore applies)",
+        help="glob of files (default: all, .gitignore applies)",
     )
 
 
@@ -44,37 +44,25 @@ def parser() -> argparse.ArgumentParser:
     built.add_argument(
         "-v", "--verbose", action="store_true", help="progress on stderr"
     )
-    found = verbs.add_parser("search", help="definitions nearest a description")
-    _model_options(found)
-    found.add_argument("query")
-    found.add_argument("-k", type=int, default=10, help="how many (default 10)")
-    copies = verbs.add_parser("duplicates", help="pairs of similar definitions")
-    _model_options(copies)
-    copies.add_argument(
-        "--threshold",
-        type=float,
-        default=0.9,
-        help="cosine at least this (default 0.9)",
+    asked = verbs.add_parser(
+        "sql",
+        help="query the index in SQLite",
+        description=sql.__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    copies.add_argument(
-        "--limit", type=int, default=200, help="at most this many pairs (0: all)"
-    )
+    _model_options(asked)
+    asked.add_argument("query", help="SQL; rows of its last statement are printed")
     return top
-
-
-def _row(row: similar.Row) -> dict[str, int | str | None]:
-    return asdict(row)
-
-
-def _embedder(args: argparse.Namespace) -> embed.Embedder:
-    return embed.hosted(args.model, args.dimensions, args.api_base, args.key_env)
 
 
 def _failures() -> tuple[type[Exception], ...]:
     """Expected failures: each ends the run with one line, not a traceback."""
+    import apsw
+
     found: tuple[type[Exception], ...] = (
         embed.EmbedderMissing,
         gitstore.IndexStoreError,
+        apsw.Error,
     )
     try:
         from aid_models.errors import AidError
@@ -87,14 +75,18 @@ def _failures() -> tuple[type[Exception], ...]:
 def main(argv: list[str]) -> int:
     args = parser().parse_args(argv)
     session = EditSession(root=Path.cwd())
+
+    def embedder() -> embed.Embedder:
+        return embed.hosted(args.model, args.dimensions, args.api_base, args.key_env)
+
     try:
         if args.verb == "build":
-            embedder = _embedder(args)
-            stats = build(session, embedder, pattern=args.paths, verbose=args.verbose)
+            made = embedder()
+            stats = build(session, made, pattern=args.paths, verbose=args.verbose)
             result: object = {
                 **asdict(stats),
-                "tokens": getattr(embedder, "tokens", None),
-                "cost": getattr(embedder, "cost", None),
+                "tokens": getattr(made, "tokens", None),
+                "cost": getattr(made, "cost", None),
             }
         else:
             gathered = gather(session, args.model, args.dimensions, pattern=args.paths)
@@ -104,20 +96,7 @@ def main(argv: list[str]) -> int:
                     "(new or changed since the build); run `pyedit index build`",
                     file=sys.stderr,
                 )
-            if args.verb == "search":
-                (query,) = _embedder(args).embed([embed.QUERY_PREFIX + args.query])
-                result = [
-                    {"score": round(score, 4), **_row(row)}
-                    for score, row in similar.search(gathered.matrix, query, args.k)
-                ]
-            else:
-                pairs = similar.duplicates(gathered.matrix, args.threshold)
-                if args.limit > 0:
-                    pairs = pairs[: args.limit]
-                result = [
-                    {"score": round(score, 4), "a": _row(a), "b": _row(b)}
-                    for score, a, b in pairs
-                ]
+            result = sql.query(sql.connect(session, gathered, embedder), args.query)
     except _failures() as exc:
         print(f"pyedit: index: {exc}", file=sys.stderr)
         return 1

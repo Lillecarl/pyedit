@@ -12,13 +12,15 @@ import pygit2
 import pytest
 
 from pyedit import cli, index
-from pyedit.index import build, embed, gather, gitstore, similar
+from pyedit.index import build, embed, gather, gitstore, similar, sql
 from pyedit.index.chunks import chunks
 from pyedit.session import EditSession
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
+
+    import apsw
 
 DOUBLE = """def {name}(values):
     total = 0
@@ -240,7 +242,46 @@ def test_another_models_vectors_survive_a_build(
     assert len(gitstore.load(repo, Bag.model, Bag.dimensions)) == 3
 
 
-def test_cli_prints_duplicates_as_json(
+def database(tmp_path: Path, repo: pygit2.Repository) -> apsw.Connection:
+    build(session(tmp_path), Bag(), repo=repo)
+    gathered = gather(session(tmp_path), Bag.model, Bag.dimensions, repo=repo)
+    return sql.connect(session(tmp_path), gathered, Bag)
+
+
+def test_sql_clusters_group_every_copy(tmp_path: Path, repo: pygit2.Repository):
+    (tmp_path / "d.py").write_text(DOUBLE.format(name="sum_twice"))
+    db = database(tmp_path, repo)
+    rows = sql.query(
+        db,
+        "SELECT c.cluster, k.name FROM clusters(0.8) c JOIN chunks k ON k.id = c.id "
+        "ORDER BY c.cluster, k.name",
+    )
+    assert rows == [
+        {"cluster": 1, "name": "double_sum"},
+        {"cluster": 1, "name": "sum_twice"},
+        {"cluster": 1, "name": "twice_total"},
+    ]
+
+
+def test_sql_neighbors_search_and_source(tmp_path: Path, repo: pygit2.Repository):
+    db = database(tmp_path, repo)
+    (first,) = sql.query(
+        db,
+        "SELECT k.name FROM neighbors((SELECT id FROM chunks WHERE name = 'double_sum'), 1) n "
+        "JOIN chunks k ON k.id = n.id",
+    )
+    assert first == {"name": "twice_total"}
+    (top,) = sql.query(
+        db,
+        "SELECT k.path, source(k.id) AS text FROM search('print a greeting message', 1) s "
+        "JOIN chunks k ON k.id = s.id",
+    )
+    assert top == {"path": "c.py", "text": GREET.rstrip("\n")}
+    hashes = sql.query(db, "SELECT count(DISTINCT hash) AS n FROM chunks")
+    assert hashes == [{"n": 3}]
+
+
+def test_cli_answers_sql_as_json(
     tmp_path: Path,
     repo: pygit2.Repository,
     monkeypatch: pytest.MonkeyPatch,
@@ -255,9 +296,16 @@ def test_cli_prints_duplicates_as_json(
     model = ["--model", Bag.model, "--dimensions", str(Bag.dimensions)]
     assert cli.main(["index", "build", *model]) == 0
     assert json.loads(capsys.readouterr().out)["embedded"] == 3
-    assert cli.main(["index", "duplicates", "--threshold", "0.8", *model]) == 0
-    (pair,) = json.loads(capsys.readouterr().out)
-    assert (pair["a"]["name"], pair["b"]["name"]) == ("double_sum", "twice_total")
+    query = (
+        "SELECT a.name AS a, b.name AS b FROM pairs(0.8) p "
+        "JOIN chunks a ON a.id = p.a JOIN chunks b ON b.id = p.b"
+    )
+    assert cli.main(["index", "sql", query, *model]) == 0
+    assert json.loads(capsys.readouterr().out) == [
+        {"a": "double_sum", "b": "twice_total"}
+    ]
+    assert cli.main(["index", "sql", "SELECT nope FROM chunks", *model]) == 1
+    assert "no such column: nope" in capsys.readouterr().err
 
 
 def test_cli_without_aid_models_says_so(
@@ -278,5 +326,5 @@ def test_outside_a_repository_the_cli_says_so(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):
     monkeypatch.chdir(tmp_path)
-    assert cli.main(["index", "duplicates"]) == 1
+    assert cli.main(["index", "sql", "SELECT 1"]) == 1
     assert "not inside a git repository" in capsys.readouterr().err

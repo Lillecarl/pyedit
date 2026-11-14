@@ -214,7 +214,14 @@ def gather(
             if c["kind"] not in NOT_DEFINITIONS
         ]
         rows.extend(
-            Row(name, c["kind"], c["name"], c["start_line"], c["end_line"])
+            Row(
+                name,
+                c["kind"],
+                c["name"],
+                c["start_line"],
+                c["end_line"],
+                c.get("hash"),
+            )
             for c in (shard.chunks[row] for row in keep)
         )
         blocks.append(shard.vectors[keep])

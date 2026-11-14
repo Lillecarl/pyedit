@@ -23,6 +23,7 @@ dependencies = [
   "tree-sitter>=0.25",
   "ast-grep-py>=0.50",
   "numpy>=2.0",
+  "apsw>=3.45",
   "tree-sitter-javascript",
   "tree-sitter-python",
   "tree-sitter-typescript",

@@ -106,9 +106,14 @@ stores the vectors in the git ref `refs/pyedit/index`:
 
 ```
 pyedit index build -v
-pyedit index search "parse a revision range"
-pyedit index duplicates --threshold 0.9
+pyedit index sql "SELECT * FROM clusters(0.95) c JOIN chunks k ON k.id = c.id"
+pyedit index sql "SELECT k.path, k.name FROM search('parse a revision range', 5) s JOIN chunks k ON k.id = s.id"
 ```
+
+Questions go to the index as SQL. Each query gets an in-memory SQLite
+database (apsw) with a `chunks` table, and `pairs`, `clusters`,
+`neighbors` and `search` as table-valued functions over the vectors.
+`pyedit index sql --help` lists them.
 
 The vectors of a file are stored under its git blob id. An unchanged
 file reuses them on every branch, and git stores them once. Each

@@ -53,7 +53,7 @@ Bugs: https://github.com/lillecarl/pyedit
     pyedit apply ID             # replay a stored dry-run or undo
     pyedit ids [-n N]           # stored ids as JSON, newest first
     pyedit patterns [LANG]      # pinned tree-sitter query patterns
-    pyedit index VERB           # code index: build, search, duplicates
+    pyedit index VERB           # code index: build, or sql QUERY
 
 A Python edit script is the only way to describe an edit. Patches
 somebody else wrote are staged from inside a script (`apply_v4a`,
@@ -437,26 +437,35 @@ definition is keyed by its text's hash, so a changed file embeds only
 the definitions that changed. Results are
 JSON on stdout. Run from the repository.
 
-| command | |
-|---|---|
-| `pyedit index build [-v]` | embed what the ref lacks; prints counts, tokens, cost |
-| `pyedit index search QUERY [-k N]` | definitions nearest a description |
-| `pyedit index duplicates [--threshold 0.9] [--limit 200]` | similar pairs across the tree, best first |
+    pyedit index build [-v]      embed what the ref lacks; counts, tokens, cost
+    pyedit index sql QUERY       rows of the last statement
 
+| SQL | rows |
+|---|---|
+| `chunks` | id, path, kind, name, start_line, end_line, hash |
+| `pairs(threshold)` | a, b, score: similar chunks, best first |
+| `clusters(threshold)` | cluster, id, score: pairs joined into groups, 1 best |
+| `neighbors(chunk_id, k)` | id, score: nearest to one chunk |
+| `search(text, k)` | id, score: nearest to a description |
+| `source(id)` | the chunk's text, from the working tree |
+
+    SELECT c.cluster, k.path, k.name, k.start_line, c.score
+    FROM clusters(0.95) c JOIN chunks k ON k.id = c.id
+    WHERE k.kind = 'function_definition' ORDER BY c.cluster
+
+- Ids hold for one query. Function arguments go in FROM.
+- Pairs skip spans overlapping in one file and pairs nested in a
+  kept pair. A score is a lead: read both sides (`source`) first.
 - Default model `openrouter/qwen/qwen3-embedding-8b` at 1024
   dimensions, key in `OPENROUTER_API_KEY`; `--model`,
   `--dimensions`, `--api-base`, `--key-env` pick another
-  OpenAI-compatible one. Search and duplicates must name the model
-  the build used.
-- `build` and `search` need aid-models; `duplicates` reads only the
-  ref, so a fetched index (`git fetch origin refs/pyedit/index:refs/pyedit/index`)
-  works without a key.
+  OpenAI-compatible one; `sql` must name the model the build used.
+- `build` and `search()` need aid-models and the key; the rest reads
+  only the ref, so a fetched index works without one
+  (`git fetch origin refs/pyedit/index:refs/pyedit/index`).
 - Files changed since the build have no vectors: stderr says how
-  many; rebuild. `--paths GLOB` limits every verb; `build` keeps
+  many; rebuild. `--paths GLOB` limits both verbs; `build` keeps
   other present files' vectors.
-- `duplicates` skips a pair inside one file whose spans overlap, and
-  a pair nested inside a reported pair. A score is a lead, not proof:
-  read both sides before merging them.
 
 ## Syntax awareness
 

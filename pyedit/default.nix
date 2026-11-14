@@ -13,6 +13,7 @@
   pyjj ? null,
   aid-models ? null,
   numpy,
+  apsw,
   lsprotocol,
   pyright,
   ruff,
@@ -150,6 +151,7 @@ let
       tree-sitter
       ast-grep-py
       numpy
+      apsw
     ]
     ++ map (name: binding name) [
       # python bindings for every grammar live in the generated
