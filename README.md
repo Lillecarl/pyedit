@@ -220,6 +220,5 @@ exclude = ["prompt-toolkit/**"]
 - Live-source dev loop: `nix develop --file . editable` installs
   pyedit as a PEP-660 editable package pointing at `./src`, then
   `pytest tests -q` runs against the live tree.
-- `bin/pyedit` runs the current build in place: how agents, and this
-  repo's own maintenance, are expected to use the tool.
+- `bin/pyedit` runs the current build in place.
 - AGENTS.md carries the module map and the repo's ground rules.

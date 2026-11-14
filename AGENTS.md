@@ -21,26 +21,10 @@ humans. Keep it that way:
 - **Errors are loud and precise.** Every failure says what was
   expected, what happened, and where. Silent fallbacks are bugs.
 
-## Editing this repository: pyedit or nothing
+## Debugging
 
-Every edit to this repository goes through pyedit itself -- that is
-the whole point of this tool, and this rule overrides any harness
-default toward direct file-editing tools. No `edit` tool, no `sed`,
-no `python -c` rewriting, no heredoc `cat`: `bin/pyedit` is the only
-writer. The launcher always runs the current build:
-
-    bin/pyedit -s script.py          dry-run: diff + syntax check
-    bin/pyedit --apply               write
-    bin/pyedit apply <id>            apply a stored dry-run, or undo
-
-An edit script is the only input. A patch somebody else wrote is
-staged from inside a script, with `pyedit.apply_v4a` or
-`pyedit.apply_diff`.
-
-If pyedit cannot perform an edit on its own codebase, that is a bug:
-stop and file an issue instead of working around it with another tool.
-Watchdog timeouts dump all
-thread stacks to `$XDG_STATE_HOME/pyedit/dumps/`.
+Watchdog timeouts dump all thread stacks to
+`$XDG_STATE_HOME/pyedit/dumps/`.
 
 ## Architecture
 
