@@ -53,6 +53,7 @@ Bugs: https://github.com/lillecarl/pyedit
     pyedit apply ID             # replay a stored dry-run or undo
     pyedit ids [-n N]           # stored ids as JSON, newest first
     pyedit patterns [LANG]      # pinned tree-sitter query patterns
+    pyedit index VERB           # code index: build, search, duplicates
 
 A Python edit script is the only way to describe an edit. Patches
 somebody else wrote are staged from inside a script (`apply_v4a`,
@@ -426,6 +427,33 @@ and comments do not count. Runs on staged content.
   Java, Lua, Zig, CSS, Markdown, HTML, Kotlin, PHP, C#, Swift, Scala,
   Elixir, Haskell, HCL, Solidity. Not fish, zsh, TOML, Svelte: `query`.
 - Bad rules and languages raise `PatternError`.
+
+## Code index
+
+Definitions (`outline`, at least 4 lines, nested too) embedded as
+vectors, stored in git ref `refs/pyedit/index` keyed by file blob
+id: unchanged files reuse their vectors on every branch. Results are
+JSON on stdout. Run from the repository.
+
+| command | |
+|---|---|
+| `pyedit index build [-v]` | embed what the ref lacks; prints counts, tokens, cost |
+| `pyedit index search QUERY [-k N]` | definitions nearest a description |
+| `pyedit index duplicates [--threshold 0.9] [--limit 200]` | similar pairs across the tree, best first |
+
+- Default model `openrouter/qwen/qwen3-embedding-8b` at 1024
+  dimensions, key in `OPENROUTER_API_KEY`; `--model`,
+  `--dimensions`, `--api-base`, `--key-env` pick another
+  OpenAI-compatible one. Search and duplicates must name the model
+  the build used.
+- `build` and `search` need aid-models; `duplicates` reads only the
+  ref, so a fetched index (`git fetch origin refs/pyedit/index:refs/pyedit/index`)
+  works without a key.
+- Files changed since the build have no vectors: stderr says how
+  many; rebuild. `--paths GLOB` limits every verb.
+- `duplicates` skips a pair inside one file whose spans overlap, and
+  a pair nested inside a reported pair. A score is a lead, not proof:
+  read both sides before merging them.
 
 ## Syntax awareness
 

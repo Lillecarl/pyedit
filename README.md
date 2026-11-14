@@ -99,6 +99,29 @@ content, and its rewrites go through the same diff, syntax check and
 undo as every other edit. pyedit never runs the `sg` command: a
 subprocess would read the files from disk, past the overlay.
 
+## Code index
+
+`pyedit index` embeds every definition of at least four lines and
+stores the vectors in the git ref `refs/pyedit/index`:
+
+```
+pyedit index build -v
+pyedit index search "parse a revision range"
+pyedit index duplicates --threshold 0.9
+```
+
+The vectors of a file are stored under its git blob id. An unchanged
+file reuses them on every branch, and git stores them once. The ref
+is not a branch, so a normal fetch does not download it. CI can build
+the index with an expensive model, and a user fetches it with
+`git fetch origin refs/pyedit/index:refs/pyedit/index`.
+
+The embeddings come from an OpenAI-compatible API through aid-models
+(the `models/` project in Lillecarl/aid). The default model is
+`openrouter/qwen/qwen3-embedding-8b` at 1024 dimensions, with the key
+in `OPENROUTER_API_KEY`. Search is a brute-force dot product, which
+is exact and fast at the size of one repository.
+
 ## Editing older commits
 
 `pyedit -r REV` reads base file content from a jj revision instead of

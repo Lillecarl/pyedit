@@ -6,6 +6,9 @@
   # here is honest: distributors pass their own build, or null to
   # exclude it deliberately.
   pyjj ? null,
+  # aid-models (Lillecarl/aid, models/package.nix) for `pyedit index
+  # build` and `search`; null leaves them refusing, as with pyjj.
+  aid-models ? null,
 }:
 let
   # pygls from the lillecarl fork until upstream takes the union-hook
@@ -40,7 +43,7 @@ let
     pkgs.python3Packages.callPackage ./pyedit {
       git = pkgs.git;
       pygls = pyglsFork;
-      inherit pyjj nixvenv doCheck;
+      inherit pyjj aid-models nixvenv doCheck;
     };
 in
 rec {

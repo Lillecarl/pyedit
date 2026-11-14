@@ -11,6 +11,8 @@
   mcp,
   pygls,
   pyjj ? null,
+  aid-models ? null,
+  numpy,
   lsprotocol,
   pyright,
   ruff,
@@ -147,6 +149,7 @@ let
       lsprotocol
       tree-sitter
       ast-grep-py
+      numpy
     ]
     ++ map (name: binding name) [
       # python bindings for every grammar live in the generated
@@ -182,7 +185,10 @@ let
       "tree-sitter-tsx"
     ]
     ++ [ (fixup svelteGrammar svelteBinding "tree_sitter_svelte") ]
-    ++ lib.optionals (pyjj != null) [ pyjj ];
+    ++ lib.optionals (pyjj != null) [ pyjj ]
+    # `pyedit index build` and `search` embed through it; null leaves
+    # them out and they refuse loudly. `duplicates` needs only the ref.
+    ++ lib.optionals (aid-models != null) [ aid-models ];
 
     # pygit2 performs TLS setup at import; without certificates to load
     # it fails - same workaround as nixpkgs uses for pygit2's own tests

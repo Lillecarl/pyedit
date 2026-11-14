@@ -296,6 +296,10 @@ def main(argv: list[str] | None = None) -> int:
         return run_patterns(tokens[1:])
     if tokens and tokens[0] == "ids":
         return run_ids(tokens[1:])
+    if tokens and tokens[0] == "index":
+        from pyedit.index import command
+
+        return command.main(tokens[1:])
     stored = None
     if tokens and tokens[0] == "apply":
         stored, tokens = apply_id(tokens[1:])

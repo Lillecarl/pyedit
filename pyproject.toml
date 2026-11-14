@@ -22,6 +22,7 @@ dependencies = [
   "lsprotocol>=2025.0",
   "tree-sitter>=0.25",
   "ast-grep-py>=0.50",
+  "numpy>=2.0",
   "tree-sitter-javascript",
   "tree-sitter-python",
   "tree-sitter-typescript",
@@ -50,6 +51,9 @@ dependencies = [
 # No nixpkgs or PyPI pyjj exists, so installers take it from whoever
 # carries the package: nix closures through the `pyjj` argument.
 jj = ["pyjj>=0.45"]
+# `pyedit index build` and `search` embed through aid-models (the
+# models/ project in Lillecarl/aid); soft like pyjj.
+index = ["aid-models"]
 
 [project.scripts]
 pyedit = "pyedit.cli:main"
@@ -70,7 +74,7 @@ project-excludes = ["src/pyedit/vendor/**", "src/pyedit/corpus/**"]
 search-path = ["tests"]
 # a soft dependency: Any where absent, checked where a distributor
 # passes it, so a line ignore would be unused in one of the two
-ignore-missing-imports = ["pyjj", "pyjj.*"]
+ignore-missing-imports = ["pyjj", "pyjj.*", "aid_models", "aid_models.*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
