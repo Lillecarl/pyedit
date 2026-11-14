@@ -62,21 +62,26 @@ def build(
     repo: pygit2.Repository | None = None,
     verbose: bool = False,
 ) -> BuildStats:
-    """Embed every chunk the index lacks and save the index with exactly
-    the files under `pattern`."""
+    """Embed what the index lacks for the files under `pattern`, and save
+    it with every present file it has vectors for. A file gone from the
+    tree, or changed, loses its old vectors."""
     repo = repo or gitstore.open_repo(session.root)
     existing = gitstore.load(repo, embedder.model, embedder.dimensions)
     stats = BuildStats()
     shards: dict[str, gitstore.Shard] = {}
     todo: dict[str, list[dict[str, object]]] = {}
     texts: list[str] = []
-    for path, key in _files(session, pattern):
-        stats.files += 1
+    wanted = set(session.glob(pattern))
+    for path, key in _files(session, "**/*"):
+        inside = path in wanted
+        stats.files += inside
         if key in shards or key in todo:
             continue
         if key in existing:
             shards[key] = existing[key]
-            stats.reused += 1
+            stats.reused += inside
+            continue
+        if not inside:
             continue
         found = chunks(session, path)
         todo[key] = [

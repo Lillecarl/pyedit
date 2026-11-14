@@ -450,7 +450,8 @@ JSON on stdout. Run from the repository.
   ref, so a fetched index (`git fetch origin refs/pyedit/index:refs/pyedit/index`)
   works without a key.
 - Files changed since the build have no vectors: stderr says how
-  many; rebuild. `--paths GLOB` limits every verb.
+  many; rebuild. `--paths GLOB` limits every verb; `build` keeps
+  other present files' vectors.
 - `duplicates` skips a pair inside one file whose spans overlap, and
   a pair nested inside a reported pair. A score is a lead, not proof:
   read both sides before merging them.

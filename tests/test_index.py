@@ -92,6 +92,20 @@ def test_a_changed_file_alone_is_embedded_and_a_gone_one_pruned(
     assert len(bag.seen) == 1 and "goodbye" in bag.seen[0]
 
 
+def test_a_narrow_build_keeps_the_rest_of_the_tree(
+    tmp_path: Path, repo: pygit2.Repository
+):
+    build(session(tmp_path), Bag(), repo=repo)
+    (tmp_path / "a.py").write_text(DOUBLE.format(name="halved_sum"))
+    (tmp_path / "c.py").write_text(GREET.replace("hello", "goodbye"))
+    bag = Bag()
+    stats = build(session(tmp_path), bag, pattern="c.py", repo=repo)
+    assert (stats.files, stats.embedded, stats.pruned) == (1, 1, 2)
+    gathered = gather(session(tmp_path), Bag.model, Bag.dimensions, repo=repo)
+    assert gathered.stale == ["a.py"]
+    assert sorted({row.path for row in gathered.matrix.rows}) == ["b.py", "c.py"]
+
+
 def test_gather_names_files_the_index_lacks(tmp_path: Path, repo: pygit2.Repository):
     build(session(tmp_path), Bag(), repo=repo)
     (tmp_path / "c.py").write_text(GREET.replace("hello", "goodbye"))
