@@ -1,0 +1,7 @@
+{
+  "name": "pyedit-diffs",
+  "version": "0.1.0",
+  "description": "Draws each pyedit call's diff in the chat, as Claude Code draws its own edits",
+  "license": "Apache-2.0",
+  "types": "./types/index.d.ts"
+}
