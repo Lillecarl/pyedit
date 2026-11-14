@@ -111,7 +111,9 @@ pyedit index duplicates --threshold 0.9
 ```
 
 The vectors of a file are stored under its git blob id. An unchanged
-file reuses them on every branch, and git stores them once. The ref
+file reuses them on every branch, and git stores them once. Each
+definition also carries a hash of its text, so a changed file embeds
+only the definitions that changed. The ref
 is not a branch, so a normal fetch does not download it. CI can build
 the index with an expensive model, and a user fetches it with
 `git fetch origin refs/pyedit/index:refs/pyedit/index`.

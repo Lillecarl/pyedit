@@ -432,7 +432,9 @@ and comments do not count. Runs on staged content.
 
 Definitions (`outline`, at least 4 lines, nested too) embedded as
 vectors, stored in git ref `refs/pyedit/index` keyed by file blob
-id: unchanged files reuse their vectors on every branch. Results are
+id: unchanged files reuse their vectors on every branch, and each
+definition is keyed by its text's hash, so a changed file embeds only
+the definitions that changed. Results are
 JSON on stdout. Run from the repository.
 
 | command | |

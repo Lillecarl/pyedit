@@ -7,12 +7,12 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from pyedit.index import gitstore
-from pyedit.index.chunks import chunks, indexable
+from pyedit.index.chunks import chunks, digest, indexable
 from pyedit.index.similar import Matrix, Row
 
 if TYPE_CHECKING:
@@ -36,7 +36,11 @@ class BuildStats:
     files: int = 0
     reused: int = 0
     embedded: int = 0
+    """Files whose chunks the index did not have as a whole."""
     chunks: int = 0
+    """Chunks sent to the embedder."""
+    reused_chunks: int = 0
+    """Chunks of those files whose hash the index already held."""
     pruned: int = 0
 
 
@@ -71,9 +75,19 @@ def build(
     tree, or changed, loses its old vectors."""
     repo = repo or gitstore.open_repo(session.root)
     existing = gitstore.load(repo, embedder.model, embedder.dimensions)
+    # every vector the index holds, by its chunk's hash: a changed file
+    # embeds only the definitions that changed
+    pool: dict[str, np.ndarray] = {
+        str(meta["hash"]): shard.vectors[row]
+        for shard in existing.values()
+        for row, meta in enumerate(shard.chunks)
+        if "hash" in meta
+    }
     stats = BuildStats()
     shards: dict[str, gitstore.Shard] = {}
-    todo: dict[str, list[dict[str, object]]] = {}
+    todo: dict[str, list[dict[str, Any]]] = {}
+    fresh: dict[str, int] = {}
+    """Chunk hash to its place in `texts`: one embedding per distinct text."""
     texts: list[str] = []
     wanted = set(session.glob(pattern))
     for path, key in _files(session, "**/*"):
@@ -82,22 +96,29 @@ def build(
         if key in shards or key in todo:
             continue
         if key in existing:
-            shards[key] = existing[key]
+            shards[key] = _with_hashes(session, path, existing[key])
             stats.reused += inside
             continue
         if not inside:
             continue
-        found = chunks(session, path)
-        todo[key] = [
-            {
-                "kind": c.kind,
-                "name": c.name,
-                "start_line": c.start_line,
-                "end_line": c.end_line,
-            }
-            for c in found
-        ]
-        texts.extend(c.text for c in found)
+        metas: list[dict[str, Any]] = []
+        for chunk in chunks(session, path):
+            hashed = digest(chunk.text)
+            if hashed in pool or hashed in fresh:
+                stats.reused_chunks += 1
+            else:
+                fresh[hashed] = len(texts)
+                texts.append(chunk.text)
+            metas.append(
+                {
+                    "kind": chunk.kind,
+                    "name": chunk.name,
+                    "start_line": chunk.start_line,
+                    "end_line": chunk.end_line,
+                    "hash": hashed,
+                }
+            )
+        todo[key] = metas
     vectors: list[list[float]] = []
     try:
         for batch in _batches(texts):
@@ -108,21 +129,47 @@ def build(
                     file=sys.stderr,
                 )
     finally:
-        # a failed build saves what it embedded, so the next one resumes
-        offset = 0
+        # a failed build saves every file it has all vectors for, so the
+        # next one resumes
         for key, metas in todo.items():
-            if offset + len(metas) > len(vectors):
-                break
-            rows = np.asarray(vectors[offset : offset + len(metas)], dtype=np.float32)
-            shards[key] = gitstore.Shard(
-                metas, rows.reshape(len(metas), embedder.dimensions)
-            )
-            offset += len(metas)
-            stats.embedded += 1
-        stats.chunks = offset
+            rows: list[np.ndarray | list[float]] = []
+            for meta in metas:
+                hashed = meta["hash"]
+                if hashed in pool:
+                    rows.append(pool[hashed])
+                elif fresh[hashed] < len(vectors):
+                    rows.append(vectors[fresh[hashed]])
+                else:
+                    break
+            else:
+                matrix = np.asarray(rows, dtype=np.float32)
+                shards[key] = gitstore.Shard(
+                    metas, matrix.reshape(len(metas), embedder.dimensions)
+                )
+                stats.embedded += 1
+        stats.chunks = len(vectors)
         stats.pruned = len(set(existing) - set(shards))
         gitstore.save(repo, embedder.model, embedder.dimensions, shards)
     return stats
+
+
+def _with_hashes(
+    session: EditSession, path: Path, shard: gitstore.Shard
+) -> gitstore.Shard:
+    """A shard saved before chunks carried hashes, with them: the file is
+    unchanged, so chunking it again names the same chunks in order."""
+    if all("hash" in meta for meta in shard.chunks):
+        return shard
+    found = chunks(session, path)
+    if [(c.start_line, c.end_line) for c in found] != [
+        (m["start_line"], m["end_line"]) for m in shard.chunks
+    ]:
+        return shard
+    metas = [
+        {**meta, "hash": digest(chunk.text)}
+        for meta, chunk in zip(shard.chunks, found, strict=True)
+    ]
+    return gitstore.Shard(metas, shard.vectors)
 
 
 def _batches(texts: list[str]) -> Iterator[list[str]]:

@@ -135,6 +135,49 @@ def test_batches_stop_at_the_character_budget(monkeypatch: pytest.MonkeyPatch):
     ]
 
 
+def test_a_changed_file_embeds_only_its_changed_definitions(
+    tmp_path: Path, repo: pygit2.Repository
+):
+    (tmp_path / "d.py").write_text(DOUBLE.format(name="sum_up") + "\n" + GREET)
+    build(session(tmp_path), Bag(), repo=repo)
+    (tmp_path / "d.py").write_text(
+        DOUBLE.format(name="sum_up") + "\n" + GREET.replace("hello", "hi")
+    )
+    bag = Bag()
+    stats = build(session(tmp_path), bag, repo=repo)
+    assert (stats.embedded, stats.chunks, stats.reused_chunks) == (1, 1, 1)
+    assert len(bag.seen) == 1 and '"hi"' in bag.seen[0]
+
+
+def test_a_definition_in_two_files_is_embedded_once(
+    tmp_path: Path, repo: pygit2.Repository
+):
+    (tmp_path / "d.py").write_text(GREET + "\nX = 1\n")
+    bag = Bag()
+    stats = build(session(tmp_path), bag, repo=repo)
+    assert (stats.embedded, stats.chunks, stats.reused_chunks) == (4, 3, 1)
+    assert bag.seen.count(GREET.rstrip("\n")) == 1
+
+
+def test_shards_without_hashes_gain_them_without_embedding(
+    tmp_path: Path, repo: pygit2.Repository
+):
+    build(session(tmp_path), Bag(), repo=repo)
+    bare = {
+        key: gitstore.Shard(
+            [{k: v for k, v in m.items() if k != "hash"} for m in shard.chunks],
+            shard.vectors,
+        )
+        for key, shard in gitstore.load(repo, Bag.model, Bag.dimensions).items()
+    }
+    gitstore.save(repo, Bag.model, Bag.dimensions, bare)
+    bag = Bag()
+    build(session(tmp_path), bag, repo=repo)
+    assert bag.seen == []
+    shards = gitstore.load(repo, Bag.model, Bag.dimensions).values()
+    assert all("hash" in meta for shard in shards for meta in shard.chunks)
+
+
 def test_gather_names_files_the_index_lacks(tmp_path: Path, repo: pygit2.Repository):
     build(session(tmp_path), Bag(), repo=repo)
     (tmp_path / "c.py").write_text(GREET.replace("hello", "goodbye"))

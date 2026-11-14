@@ -1,11 +1,12 @@
 """Where the index lives: one commit with no history on `refs/pyedit/index`.
 
-    v1/<model>/<dimensions>/<key[:2]>/<key>.json   the chunks: kind, name, lines
+    v1/<model>/<dimensions>/<key[:2]>/<key>.json   the chunks: kind, name, lines, hash
     v1/<model>/<dimensions>/<key[:2]>/<key>.f16    their vectors, little-endian float16 rows
 
 A key is a file's git blob id plus its suffix. An unchanged file has the
 same key on every branch, so its vectors are computed once and git stores
-them once. A ref outside refs/heads is not fetched by default: only who
+them once. A chunk's hash lets a changed file keep the vectors of its
+unchanged definitions. A ref outside refs/heads is not fetched by default: only who
 asks for the index downloads it (`git fetch origin refs/pyedit/index`).
 Each save replaces the commit, so vectors of files no longer present
 become garbage git collects. Other models' trees are kept.

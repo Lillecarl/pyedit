@@ -3,6 +3,7 @@ enough to say something."""
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -26,6 +27,11 @@ class Chunk:
     start_line: int
     end_line: int
     text: str
+
+
+def digest(text: str) -> str:
+    """A chunk's identity in the index: equal text, equal vector."""
+    return hashlib.blake2b(text.encode("utf-8"), digest_size=16).hexdigest()
 
 
 def indexable(path: str | Path) -> bool:
