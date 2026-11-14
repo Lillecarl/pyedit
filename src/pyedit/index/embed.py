@@ -38,6 +38,8 @@ class Hosted:
     dimensions: int = DEFAULT_DIMENSIONS
     api_base: str = DEFAULT_API_BASE
     key_env: str = DEFAULT_KEY_ENV
+    # 429s and 5xx back off 0.5 s, doubling: about two minutes in all
+    max_retries: int = 8
     tokens: int = 0
     cost: float | None = None
 
@@ -54,6 +56,7 @@ class Hosted:
             self.model,
             Provider(self.api_base, self.key_env),
             dimensions=self.dimensions,
+            settings={"max_retries": self.max_retries},
         )
         try:
             got = await client.embed(texts)

@@ -25,6 +25,10 @@ if TYPE_CHECKING:
     from pyedit.session import EditSession
 
 BATCH = 256
+# characters per request: a provider quota counts tokens per request and
+# per second (Nebius serving qwen3-embedding-8b answered 429 to 256
+# chunks at once), and a token is about four characters
+BATCH_CHARS = 100_000
 
 
 @dataclass
@@ -95,25 +99,44 @@ def build(
         ]
         texts.extend(c.text for c in found)
     vectors: list[list[float]] = []
-    for start in range(0, len(texts), BATCH):
-        vectors.extend(embedder.embed(texts[start : start + BATCH]))
-        if verbose:
-            print(
-                f"pyedit: index: embedded {len(vectors)}/{len(texts)} chunks",
-                file=sys.stderr,
+    try:
+        for batch in _batches(texts):
+            vectors.extend(embedder.embed(batch))
+            if verbose:
+                print(
+                    f"pyedit: index: embedded {len(vectors)}/{len(texts)} chunks",
+                    file=sys.stderr,
+                )
+    finally:
+        # a failed build saves what it embedded, so the next one resumes
+        offset = 0
+        for key, metas in todo.items():
+            if offset + len(metas) > len(vectors):
+                break
+            rows = np.asarray(vectors[offset : offset + len(metas)], dtype=np.float32)
+            shards[key] = gitstore.Shard(
+                metas, rows.reshape(len(metas), embedder.dimensions)
             )
-    offset = 0
-    for key, metas in todo.items():
-        rows = np.asarray(vectors[offset : offset + len(metas)], dtype=np.float32)
-        shards[key] = gitstore.Shard(
-            metas, rows.reshape(len(metas), embedder.dimensions)
-        )
-        offset += len(metas)
-    stats.embedded = len(todo)
-    stats.chunks = len(texts)
-    stats.pruned = len(set(existing) - set(shards))
-    gitstore.save(repo, embedder.model, embedder.dimensions, shards)
+            offset += len(metas)
+            stats.embedded += 1
+        stats.chunks = offset
+        stats.pruned = len(set(existing) - set(shards))
+        gitstore.save(repo, embedder.model, embedder.dimensions, shards)
     return stats
+
+
+def _batches(texts: list[str]) -> Iterator[list[str]]:
+    batch: list[str] = []
+    size = 0
+    for text in texts:
+        if batch and (len(batch) == BATCH or size + len(text) > BATCH_CHARS):
+            yield batch
+            batch = []
+            size = 0
+        batch.append(text)
+        size += len(text)
+    if batch:
+        yield batch
 
 
 def gather(

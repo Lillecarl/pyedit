@@ -6,12 +6,12 @@ import json
 import re
 import sys
 import zlib
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 import pygit2
 import pytest
 
-from pyedit import cli
+from pyedit import cli, index
 from pyedit.index import build, embed, gather, gitstore, similar
 from pyedit.session import EditSession
 
@@ -104,6 +104,35 @@ def test_a_narrow_build_keeps_the_rest_of_the_tree(
     gathered = gather(session(tmp_path), Bag.model, Bag.dimensions, repo=repo)
     assert gathered.stale == ["a.py"]
     assert sorted({row.path for row in gathered.matrix.rows}) == ["b.py", "c.py"]
+
+
+def test_a_failed_build_keeps_what_it_embedded(
+    tmp_path: Path, repo: pygit2.Repository, monkeypatch: pytest.MonkeyPatch
+):
+    class Quota(Bag):
+        @override
+        def embed(self, texts: Sequence[str]) -> list[list[float]]:
+            if self.seen:
+                raise RuntimeError("429")
+            return super().embed(texts)
+
+    monkeypatch.setattr(index, "BATCH", 1)
+    with pytest.raises(RuntimeError, match="429"):
+        build(session(tmp_path), Quota(), repo=repo)
+    assert len(gitstore.load(repo, Bag.model, Bag.dimensions)) == 1
+    bag = Bag()
+    stats = build(session(tmp_path), bag, repo=repo)
+    assert (stats.reused, stats.embedded, len(bag.seen)) == (1, 2, 2)
+
+
+def test_batches_stop_at_the_character_budget(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(index, "BATCH_CHARS", 10)
+    assert list(index._batches(["aaaa", "bbbb", "cccc", "d" * 20, "e"])) == [
+        ["aaaa", "bbbb"],
+        ["cccc"],
+        ["d" * 20],
+        ["e"],
+    ]
 
 
 def test_gather_names_files_the_index_lacks(tmp_path: Path, repo: pygit2.Repository):
