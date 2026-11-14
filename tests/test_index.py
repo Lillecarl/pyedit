@@ -13,6 +13,7 @@ import pytest
 
 from pyedit import cli, index
 from pyedit.index import build, embed, gather, gitstore, similar
+from pyedit.index.chunks import chunks
 from pyedit.session import EditSession
 
 if TYPE_CHECKING:
@@ -176,6 +177,13 @@ def test_shards_without_hashes_gain_them_without_embedding(
     assert bag.seen == []
     shards = gitstore.load(repo, Bag.model, Bag.dimensions).values()
     assert all("hash" in meta for shard in shards for meta in shard.chunks)
+
+
+def test_call_site_arguments_are_not_chunks(tmp_path: Path):
+    (tmp_path / "d.py").write_text(
+        "run(\n    stores=[\n        1,\n        2,\n    ],\n)\n"
+    )
+    assert chunks(session(tmp_path), "d.py") == []
 
 
 def test_gather_names_files_the_index_lacks(tmp_path: Path, repo: pygit2.Repository):

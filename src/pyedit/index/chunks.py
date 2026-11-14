@@ -18,6 +18,9 @@ MIN_LINES = 4
 MAX_CHARS = 16_000
 # outline titles their keys and headings too, which are not code
 DATA_SUFFIXES = frozenset({".json", ".yaml", ".yml", ".toml", ".md"})
+# outline titles these by name, but they are call sites, not definitions:
+# in nixidae every long `stores=[...]` argument paired with its twin
+NOT_DEFINITIONS = frozenset({"keyword_argument"})
 
 
 @dataclass(frozen=True)
@@ -52,4 +55,5 @@ def chunks(session: EditSession, path: str | Path) -> list[Chunk]:
         )
         for node in syntax.outline(session, path)
         if node.end_line - node.start_line + 1 >= MIN_LINES
+        and node.kind not in NOT_DEFINITIONS
     ]

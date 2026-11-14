@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from pyedit.index import gitstore
-from pyedit.index.chunks import chunks, digest, indexable
+from pyedit.index.chunks import NOT_DEFINITIONS, chunks, digest, indexable
 from pyedit.index.similar import Matrix, Row
 
 if TYPE_CHECKING:
@@ -207,10 +207,16 @@ def gather(
             stale.append(session.relpath(path))
             continue
         name = session.relpath(path)
+        # an index built before a kind left the chunker still holds it
+        keep = [
+            row
+            for row, c in enumerate(shard.chunks)
+            if c["kind"] not in NOT_DEFINITIONS
+        ]
         rows.extend(
             Row(name, c["kind"], c["name"], c["start_line"], c["end_line"])
-            for c in shard.chunks
+            for c in (shard.chunks[row] for row in keep)
         )
-        blocks.append(shard.vectors)
+        blocks.append(shard.vectors[keep])
     vectors = np.concatenate(blocks) if blocks else np.zeros((0, dimensions))
     return Gathered(Matrix.of(rows, vectors), stale)
