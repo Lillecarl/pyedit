@@ -213,6 +213,25 @@ they remain editable, diffable and applicable.
 exclude = ["prompt-toolkit/**"]
 ```
 
+## Claude Code mod
+
+The package ships a Claude Code mod at
+`share/claude-code/plugins/pyedit-diffs`; the source is in `plugin/`.
+It draws each call of the MCP `run` tool as Claude Code draws its own
+edits: a status line, then one box per file with the highlighted diff.
+
+- The status line shows a dry run with the id to apply, an applied run
+  with its undo id, or the error.
+- Press a box's header to fold or unfold that file's diff.
+- The folded transcript shows at most 30 lines of each file, cut at
+  hunk boundaries. ctrl+o shows the whole diff and the raw result.
+
+It matches the tool as `mcp__pyedit__run` and as
+`mcp__plugin_<name>_pyedit__run`, so the server must be named
+`pyedit`. To try it from a checkout, run
+`claude --plugin-dir plugin`. `claude plugin test plugin` runs its
+tests.
+
 ## Development
 
 - Build and test: `nix build --file . pyedit` (runs pytest via

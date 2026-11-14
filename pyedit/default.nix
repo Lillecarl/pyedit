@@ -133,6 +133,8 @@ let
           "dist"
           "result"
           "result-"
+          # the Claude Code mod: the package copies it in, the library needs none of it
+          "plugin"
         ];
     };
 
@@ -245,4 +247,11 @@ runCommand "pyedit-${attrs.version}"
     mkdir -p $out/bin
     ln -s ${venv}/bin/pyedit $out/bin/pyedit
     $out/bin/pyedit skill $out/share/skills/pyedit/pyedit/SKILL.md
+    plugin=$out/share/claude-code/plugins/pyedit-diffs
+    mkdir -p $(dirname $plugin)
+    cp -r ${lib.cleanSource ../plugin} $plugin
+    chmod -R u+w $plugin
+    # tests, and the editor types Claude Code writes into a loaded mod
+    find $plugin -name '*.test.ts' -delete
+    rm -rf $plugin/.claude-plugin/types $plugin/tsconfig.json
   ''
