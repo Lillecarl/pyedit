@@ -454,6 +454,8 @@ JSON on stdout. Run from the repository.
     WHERE k.kind = 'function_definition' ORDER BY c.cluster
 
 - Ids hold for one query. Function arguments go in FROM.
+- Every Nix chunk is kind `binding`: filter Nix on name (the
+  attrpath), path and span instead.
 - Pairs skip spans overlapping in one file and pairs nested in a
   kept pair. A score is a lead: read both sides (`source`) first.
 - Default model `openrouter/qwen/qwen3-embedding-8b` at 1024
