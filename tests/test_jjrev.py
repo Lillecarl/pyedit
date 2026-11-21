@@ -203,12 +203,33 @@ class FakeTx:
         # binding restores everything when paths is None; a commit
         # object into records under its own id
         recorded = into if isinstance(into, str) else into.id.hex()
+        source_name = (
+            from_revision if isinstance(from_revision, str) else from_revision.id.hex()
+        )
         self.restored.append(
-            (list(paths) if paths is not None else None, recorded, from_revision)
+            (list(paths) if paths is not None else None, recorded, source_name)
         )
         self.repo.last_paths = list(paths) if paths is not None else None
-        source = self.repo.resolve(from_revision)
+        source = (
+            from_revision
+            if not isinstance(from_revision, str)
+            else self.repo.resolve(from_revision)
+        )
         target = into if not isinstance(into, str) else self.repo.resolve(into)
+        if into == "@":
+            # commits are immutable: a rewrite of @ is a new commit, and
+            # an object held from before (the vehicle) keeps its bytes
+            self.repo.by_cid[target.id.hex()] = target
+            target = FakeCommit(
+                files=dict(target._files),
+                execs=target._execs,
+                links=target._links,
+                cid=target.id.hex() + "-rw",
+                description=target.description,
+                author=target.author,
+                parents=target.parent_ids,
+            )
+            self.repo.commits["@"] = target
         names = paths if paths is not None else list(source._files)
         for rel in names:
             if rel in source._files:
@@ -251,6 +272,15 @@ class FakeAtomic:
         if self.repo.checkout_bytes is not None:
             for rel in self.repo.last_paths or []:
                 (Path(self.repo.root) / rel).write_bytes(self.repo.checkout_bytes)
+        else:
+            # jj writes the moved @ out: the touched paths take its tree
+            at = self.repo.resolve("@")
+            for rel in self.repo.last_paths or []:
+                path = Path(self.repo.root) / rel
+                if rel in at._files:
+                    path.write_bytes(at.read_file(rel))
+                else:
+                    path.unlink(missing_ok=True)
         return False
 
 
@@ -406,10 +436,14 @@ def test_amend_moves_changes_and_restores_wc(
     new_id, op, cleanup, conflicts = jjrev.amend_commit(
         tmp_path, "@-", {"a.py": b"new\n"}
     )
-    assert (new_id, op, cleanup, conflicts) == ("target", "op999", "op999", [])
+    assert (new_id, op, cleanup, conflicts) == ("target", "op999", None, [])
+    assert len(repo.atomics) == 1
     assert repo.atomics[0].allow_conflicts is True
-    assert repo.atomics[0].tx.restored == [(["a.py"], "@-", "@")]
-    assert repo.atomics[1].tx.restored == [(["a.py"], "@", "at")]
+    # @ goes back first, so REV's rewrite rebases the pre-run @
+    assert repo.atomics[0].tx.restored == [
+        (["a.py"], "@", "at"),
+        (["a.py"], "@-", "at-snap"),
+    ]
     assert repo.resolve("@-").read_file("a.py") == b"new\n"
     assert repo.resolve("@").read_file("a.py") == b"old\n"
     assert (tmp_path / "a.py").read_bytes() == b"old\n"
@@ -435,8 +469,11 @@ def test_amend_adds_and_deletes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     _new_id, op, cleanup, conflicts = jjrev.amend_commit(
         tmp_path, "@-", {"fresh.py": b"hi\n", "gone.py": None}
     )
-    assert (op, cleanup, conflicts) == ("op999", "op999", [])
-    assert repo.atomics[0].tx.restored == [(["fresh.py", "gone.py"], "@-", "@")]
+    assert (op, cleanup, conflicts) == ("op999", None, [])
+    assert repo.atomics[0].tx.restored == [
+        (["fresh.py", "gone.py"], "@", "at"),
+        (["fresh.py", "gone.py"], "@-", "at-snap"),
+    ]
     target = repo.resolve("@-")
     assert target.read_file("fresh.py") == b"hi\n"
     with pytest.raises(FakeError):
@@ -591,6 +628,41 @@ def test_rebased_checkout_is_left_alone(
     assert (tmp_path / "a.py").read_bytes() == b"rebased\n"
 
 
+def test_descendant_at_inherits_the_amend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Lillecarl/pyedit#47: @ is an empty child of
+    # REV, so the rebase carries the staged bytes into it. They are
+    # the inherited change, not leftover vehicle: no cleanup may lift
+    # them back out, and the files keep them
+    repo = fake_moving_repo(tmp_path, monkeypatch, b"old\n", b"new\n")
+    _new_id, op, cleanup, conflicts = jjrev.amend_commit(
+        tmp_path, "@-", {"a.py": b"new\n"}
+    )
+    assert (op, cleanup, conflicts) == ("op999", None, [])
+    assert len(repo.atomics) == 1
+    assert repo.resolve("@").read_file("a.py") == b"new\n"
+    assert (tmp_path / "a.py").read_bytes() == b"new\n"
+
+
+def test_conflicted_rebased_at_keeps_markers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # the rebase conflicts in @: checkout wrote markers, the path reads
+    # as unreadable, and the run reports the conflict instead of failing
+    repo = fake_moving_repo(tmp_path, monkeypatch, b"old\n", b"unused\n")
+    assert repo.at_new is not None
+    repo.at_new._files["a.py"] = FakeError("unresolved conflict")
+    repo.at_new.has_conflict = True
+    repo.checkout_bytes = b"<<<<<<< markers\n"
+    repo.conflicted = [repo.at_new]
+    _new_id, _op, cleanup, conflicts = jjrev.amend_commit(
+        tmp_path, "@-", {"a.py": b"new\n"}
+    )
+    assert cleanup is None and conflicts == ["at-new (no description)"]
+    assert (tmp_path / "a.py").read_bytes() == b"<<<<<<< markers\n"
+
+
 def test_rebased_mismatch_is_loud(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # something else wrote the copy in the window: the amend stands,
     # and the mismatch names the op that holds it
@@ -621,8 +693,8 @@ def test_divergent_tip_content_stays_out_of_target(
     _new_id, op, cleanup, conflicts = jjrev.amend_commit(
         tmp_path, "@-", {"a.py": b"mine\n"}
     )
-    assert (op, cleanup, conflicts) == ("op999", "op999", [])
-    assert len(repo.atomics) == 2
+    assert (op, cleanup, conflicts) == ("op999", None, [])
+    assert len(repo.atomics) == 1
     assert repo.resolve("@-").read_file("a.py") == b"mine\n"
     assert repo.resolve("@").read_file("a.py") == b"tip\n"
     assert (tmp_path / "a.py").read_bytes() == b"tip\n"
@@ -656,8 +728,7 @@ def test_amend_applies_tree_and_meta_in_one_block(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     # description and author land in the same transaction as the
-    # tree restore: one op holds the whole amend (the second atomic
-    # is the pre-existing working-copy cleanup, not a second amend)
+    # tree restores: one op holds the whole amend
     repo = fake_repo(tmp_path, monkeypatch)
     target = repo.resolve("@-")
     target.description = "old subject"
@@ -665,9 +736,12 @@ def test_amend_applies_tree_and_meta_in_one_block(
     _new_id, op, cleanup, conflicts = jjrev.amend_commit(
         tmp_path, "@-", {"a.py": b"new\n"}, meta
     )
-    assert (op, cleanup, conflicts) == ("op999", "op999", [])
-    assert len(repo.atomics) == 2
-    assert repo.atomics[0].tx.restored == [(["a.py"], "@-", "@")]
+    assert (op, cleanup, conflicts) == ("op999", None, [])
+    assert len(repo.atomics) == 1
+    assert repo.atomics[0].tx.restored == [
+        (["a.py"], "@", "at"),
+        (["a.py"], "@-", "at-snap"),
+    ]
     assert repo.atomics[0].tx.described == [("target", "new subject")]
     assert repo.atomics[0].tx.raw.rewrites == ["target"]
     assert repo.resolve("@-").read_file("a.py") == b"new\n"

@@ -193,14 +193,14 @@ def amend_commit(
     whole amend and its restore undoes both together.
 
     The working copy carries the new content just long enough for the
-    entry snapshot to take it into @; two restores then move exact
-    bytes, never a merge: first the staged bytes into REV (a squash
-    would fold divergent tip content in instead), then the touched
-    paths in @ back to what they held, so the copy is clean again.
-    The second restore runs only when the rebase left @ holding the
-    staged bytes; when it left markers or descendant content there,
-    the files stay exactly as checkout wrote them. `cleanup` names
-    the second transaction when one ran; `conflicts` names the
+    entry snapshot to take it into @. Two restores in the same
+    transaction then move exact bytes, never a merge: first the
+    touched paths in @ back to what they held, then the vehicle's
+    bytes into REV (a squash would fold divergent tip content in
+    instead). jj rebases the pre-run @ onto the new REV, so a
+    descendant @ inherits the change and checkout writes it out; the
+    files are verified against that @. `cleanup` is always None, kept
+    for the shape `create_after` shares; `conflicts` names the
     commits that carry markers, to resolve where they were created.
     The working copy must start clean on every touched path, or the
     run refuses naming them.
@@ -233,7 +233,12 @@ def amend_commit(
     try:
         with repo.atomic(f"pyedit -r {rev}", allow_conflicts=True) as tx:
             if changes:
-                written = tx.restore(sorted(changes), into=rev, from_revision="@")
+                # the entry snapshot took the vehicle into @: put @ back
+                # first, so the rewrite of REV rebases the pre-run @ and
+                # jj merges the change into it as for any descendant
+                vehicle = repo.resolve("@")
+                tx.restore(sorted(changes), into="@", from_revision=wc_hex)
+                written = tx.restore(sorted(changes), into=rev, from_revision=vehicle)
             else:
                 # metadata-only: the pre-block commit is the state the
                 # transaction started from, which is what a rewrite
@@ -243,8 +248,8 @@ def amend_commit(
         op = repo.operation_id
     except Exception as err:
         raise JjRevError(f"amending {rev!r} failed: {err}") from err
-    cleanup = _reconcile_wc(repo_root, repo, rev, op, wc_hex, saved, changes)
-    return _hex(written), op, cleanup, _conflict_names(repo)
+    _verify_rebased(repo_root, repo.resolve("@"), saved, rev, op)
+    return _hex(written), op, None, _conflict_names(repo)
 
 
 def create_after(
@@ -655,6 +660,10 @@ def _verify_rebased(
             try:
                 want = _tree_state(at_commit, rel)
             except JjRevError:
+                if at_commit.has_conflict:
+                    # checkout wrote jj's markers; the caller names
+                    # the conflicted commits
+                    continue
                 raise JjRevError(
                     f"working copy at {rel} is unreadable in rebased @; "
                     f"the amend stands at op {op}, restore one side"
