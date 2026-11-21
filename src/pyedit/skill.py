@@ -455,7 +455,15 @@ JSON on stdout. Run from the repository.
 
 - Ids hold for one query. Function arguments go in FROM.
 - Every Nix chunk is kind `binding`: filter Nix on name (the
-  attrpath), path and span instead.
+  attrpath), path and span instead. Data bindings (`description`,
+  `spec`, `metadata`, `labels`, ...) pair as noise; a span cap
+  (~200 lines) keeps outer blocks from hiding the copies inside:
+
+      SELECT p.score, a.path ap, a.name an, b.path bp, b.name bn
+      FROM pairs(0.95) p JOIN chunks a ON a.id = p.a
+        JOIN chunks b ON b.id = p.b
+      WHERE a.name NOT LIKE '%.description'
+        AND a.end_line - a.start_line BETWEEN 7 AND 199
 - Pairs skip spans overlapping in one file and pairs nested in a
   kept pair. A score is a lead: read both sides (`source`) first.
 - Default model `openrouter/qwen/qwen3-embedding-8b` at 1024
