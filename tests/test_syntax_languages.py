@@ -56,6 +56,68 @@ def test_svelte_embedded_languages(
     )
 
 
+CPP_FUNCTIONS = """\
+namespace desk {
+Window::Window() {}
+Window::~Window() {}
+const Page& Window::page() const { return page_; }
+Page* Window::Find(int id) { return nullptr; }
+bool operator==(const Page& a, const Page& b) { return true; }
+Page& Get() { return Window::instance().page(); }
+}
+"""
+
+
+@pytest.mark.parametrize("suffix", [".cc", ".h"])
+def test_cpp_functions_defined_outside_their_class(suffix: str, tmp_path: Path) -> None:
+    session = EditSession(respect_gitignore=False, root=tmp_path)
+    session.write("sample" + suffix, CPP_FUNCTIONS)
+    assert problems(session, "sample" + suffix) == []
+    assert [entry.name for entry in outline(session, "sample" + suffix)] == [
+        "desk",
+        "Window::Window",
+        "Window::~Window",
+        "Window::page",
+        "Window::Find",
+        "operator==",
+        "Get",
+    ]
+
+
+def test_a_cpp_header_parses_clean(tmp_path: Path) -> None:
+    session = EditSession(respect_gitignore=False, root=tmp_path)
+    session.write(
+        "sample.h",
+        "class Desk final : public Base {\n public:\n  int a() override;\n};\n",
+    )
+    assert problems(session, "sample.h") == []
+
+
+def test_rust_paths_and_struct_literals_are_noise(tmp_path: Path) -> None:
+    session = EditSession(respect_gitignore=False, root=tmp_path)
+    session.write(
+        "sample.rs",
+        "use std::time::Duration;\n\nfn alpha() -> Beta {\n"
+        "    Beta {\n        gamma: std::cmp::max(1, 2),\n    }\n}\n",
+    )
+    assert [entry.name for entry in outline(session, "sample.rs")] == ["alpha"]
+
+
+@pytest.mark.parametrize("suffix", [".js", ".ts", ".tsx"])
+def test_a_function_in_a_constant_is_a_definition(suffix: str, tmp_path: Path) -> None:
+    session = EditSession(respect_gitignore=False, root=tmp_path)
+    session.write(
+        "sample" + suffix,
+        "export const alpha = (x) => x + 1;\n"
+        "const beta = function () {\n  return 1;\n};\n"
+        "const noise = alpha(2);\n",
+    )
+    assert [entry.name for entry in outline(session, "sample" + suffix)] == [
+        "alpha",
+        "beta",
+    ]
+
+
 def test_table_covers_every_shipped_suffix() -> None:
     covered = {id(RULES[suffix]) for _, suffix, *_ in LANGUAGES}
     assert {id(rules) for rules in RULES.values()} == covered

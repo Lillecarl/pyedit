@@ -98,15 +98,18 @@ class LanguageRules:
 
 
 _PLAIN = [
-    (
-        "tree_sitter_javascript",
-        (".js", ".jsx", ".mjs", ".cjs"),
-        ("variable_declarator", "command"),
-    ),
-    ("tree_sitter_typescript", (".ts", ".mts", ".cts"), ("variable_declarator",)),
-    ("tree_sitter_tsx", (".tsx",), ("variable_declarator",)),
     ("tree_sitter_go", (".go",), ("parameter_declaration", "field_declaration")),
-    ("tree_sitter_rust", (".rs",), ("field_declaration",)),
+    (
+        "tree_sitter_rust",
+        (".rs",),
+        (
+            "field_declaration",
+            "field_pattern",
+            "scoped_identifier",
+            "scoped_type_identifier",
+            "struct_expression",
+        ),
+    ),
     ("tree_sitter_bash", (".sh", ".bash", ".zsh"), ("command",)),
     ("tree_sitter_fish", (".fish",), ("command",)),
     ("tree_sitter_json", (".json",), ()),
@@ -122,12 +125,14 @@ _PLAIN = [
 def _rules_by_suffix() -> dict[str, LanguageRules]:
     from pyedit.syntax.c import C, Cpp
     from pyedit.syntax.css import Css
+    from pyedit.syntax.ecma import JavaScript, Tsx, TypeScript
     from pyedit.syntax.markdown import Markdown
     from pyedit.syntax.nix import Nix
     from pyedit.syntax.python import Python
     from pyedit.syntax.svelte import Svelte
 
-    special = (*_PLAIN, C, Cpp, Css, Markdown, Python, Nix, Svelte)
+    ecma = (JavaScript, TypeScript, Tsx)
+    special = (*_PLAIN, *ecma, C, Cpp, Css, Markdown, Python, Nix, Svelte)
     table: dict[str, LanguageRules] = {}
     for entry in special:
         rules = entry() if isinstance(entry, type) else LanguageRules(*entry)
