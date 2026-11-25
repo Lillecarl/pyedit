@@ -20,7 +20,15 @@ MAX_CHARS = 16_000
 DATA_SUFFIXES = frozenset({".json", ".yaml", ".yml", ".toml", ".md"})
 # outline titles these by name, but they are call sites, not definitions:
 # in nixidae every long `stores=[...]` argument paired with its twin
-NOT_DEFINITIONS = frozenset({"keyword_argument"})
+CALL_SITES = frozenset({"keyword_argument"})
+# wrappers whose definitions are chunks of their own, include guards among
+# them: every `namespace foo` and `mod tests` would pair with its twins
+WRAPPERS = frozenset({"mod_item", "namespace_definition", "preproc_ifdef"})
+# a part of a definition that is a chunk already, or no code
+PARTS = frozenset(
+    {"enum_body", "enum_variant", "property_signature", "variable_assignment"}
+)
+NOT_DEFINITIONS = CALL_SITES | WRAPPERS | PARTS
 
 
 @dataclass(frozen=True)

@@ -83,6 +83,40 @@ def test_build_embeds_definitions_and_reuses_them(
     assert (stats.reused, stats.embedded, again.seen) == (3, 0, [])
 
 
+WRAPPED_CPP = """#ifndef DESK_H_
+#define DESK_H_
+namespace desk {
+int Window::Twice(int value) {
+  int total = value;
+  return total * 2;
+}
+}  // namespace desk
+#endif
+"""
+WRAPPED_RUST = """mod tests {
+    enum Step {
+        Moved {
+            x: i32,
+            y: i32,
+        },
+    }
+
+    fn twice(value: i32) -> i32 {
+        let total = value;
+        total * 2
+    }
+}
+"""
+
+
+def test_wrappers_and_parts_are_no_chunks(tmp_path: Path):
+    (tmp_path / "a.h").write_text(WRAPPED_CPP)
+    (tmp_path / "b.rs").write_text(WRAPPED_RUST)
+    here = session(tmp_path)
+    assert [chunk.name for chunk in chunks(here, "a.h")] == ["Window::Twice"]
+    assert [chunk.name for chunk in chunks(here, "b.rs")] == ["Step", "twice"]
+
+
 def test_a_changed_file_alone_is_embedded_and_a_gone_one_pruned(
     tmp_path: Path, repo: pygit2.Repository
 ):
