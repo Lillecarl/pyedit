@@ -127,6 +127,64 @@ def test_cpp_function_and_class_names(session: EditSession) -> None:
     assert [hit.text for hit in classes] == ["Beta"]
 
 
+def test_cpp_methods_outside_their_class(session: EditSession) -> None:
+    name, text = sample_text("cpp")
+    session.write(
+        name,
+        text
+        + "int Beta::delta() {\n    return 1;\n}\n"
+        + "Beta& Beta::self() {\n    return *this;\n}\n",
+    )
+    values = query(
+        session,
+        name,
+        "(function_definition declarator: (function_declarator "
+        "declarator: (qualified_identifier) @n))",
+    )
+    assert [hit.text for hit in values] == ["Beta::delta"]
+    references = query(
+        session,
+        name,
+        "(function_definition declarator: (reference_declarator "
+        "(function_declarator declarator: (qualified_identifier) @n)))",
+    )
+    assert [hit.text for hit in references] == ["Beta::self"]
+
+
+def test_rust_methods_by_impl(session: EditSession) -> None:
+    name, text = sample_text("rust")
+    session.write(name, text + "impl Drop for Beta {\n    fn drop(&mut self) {}\n}\n")
+    methods = query(
+        session,
+        name,
+        "(impl_item type: (_) @t body: (declaration_list "
+        "(function_item name: (identifier) @n)))",
+    )
+    assert [hit.text for hit in methods if hit.capture == "n"] == ["gamma", "drop"]
+    traits = query(
+        session,
+        name,
+        "(impl_item trait: (_) @trait type: (_) @type)",
+    )
+    assert [hit.text for hit in traits] == ["Drop", "Beta"]
+
+
+def test_typescript_functions_in_constants(session: EditSession) -> None:
+    name, text = sample_text("typescript")
+    session.write(
+        name,
+        text + "export const delta = (x: number) => x;\nexport type Eps = { a: 1 };\n",
+    )
+    arrows = query(
+        session,
+        name,
+        "(variable_declarator name: (identifier) @n value: (arrow_function))",
+    )
+    assert [hit.text for hit in arrows] == ["delta"]
+    types = query(session, name, "(type_alias_declaration name: (type_identifier) @n)")
+    assert [hit.text for hit in types] == ["Eps"]
+
+
 def test_java_method_and_class_names(session: EditSession) -> None:
     name, text = sample_text("java")
     session.write(name, text)

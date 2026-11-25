@@ -27,6 +27,14 @@ PATTERNS = {
             "test_typescript_method_names",
             "(method_definition name: (property_identifier) @n)",
         ),
+        (
+            "test_typescript_functions_in_constants",
+            "(variable_declarator name: (identifier) @n value: (arrow_function))",
+        ),
+        (
+            "test_typescript_functions_in_constants",
+            "(type_alias_declaration name: (type_identifier) @n)",
+        ),
     ],
     "go": [
         (
@@ -47,6 +55,11 @@ PATTERNS = {
             "test_rust_function_and_struct_names",
             "(struct_item name: (type_identifier) @n)",
         ),
+        (
+            "test_rust_methods_by_impl",
+            "(impl_item type: (_) @t body: (declaration_list (function_item name: (identifier) @n)))",
+        ),
+        ("test_rust_methods_by_impl", "(impl_item trait: (_) @trait type: (_) @type)"),
     ],
     "c": [
         (
@@ -62,6 +75,14 @@ PATTERNS = {
         (
             "test_cpp_function_and_class_names",
             "(class_specifier name: (type_identifier) @n)",
+        ),
+        (
+            "test_cpp_methods_outside_their_class",
+            "(function_definition declarator: (function_declarator declarator: (qualified_identifier) @n))",
+        ),
+        (
+            "test_cpp_methods_outside_their_class",
+            "(function_definition declarator: (reference_declarator (function_declarator declarator: (qualified_identifier) @n)))",
         ),
     ],
     "java": [
