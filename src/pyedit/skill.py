@@ -466,6 +466,23 @@ JSON on stdout. Run from the repository.
         JOIN chunks b ON b.id = p.b
       WHERE a.name NOT LIKE '%.description'
         AND a.end_line - a.start_line BETWEEN 7 AND 199
+- Rust functions are kind `function_item`, C++ `function_definition`,
+  TypeScript `variable_declarator` (`const f = () =>`) or
+  `function_declaration`; methods `method_definition`. Copies worth
+  extracting, largest first (types and tests pair as noise; Rust unit
+  tests share their file, so filter those by reading):
+
+      SELECT c.cluster, count(*) copies, min(k.name) name,
+             max(k.end_line - k.start_line + 1) lines
+      FROM clusters(0.95) c JOIN chunks k ON k.id = c.id
+      WHERE k.kind IN ('function_item', 'function_definition',
+                       'function_declaration', 'variable_declarator')
+        AND k.path NOT LIKE '%test%'
+      GROUP BY c.cluster HAVING copies > 1 ORDER BY copies * lines DESC
+
+  Then list one: `SELECT k.path, k.name, k.start_line FROM clusters(0.95) c
+  JOIN chunks k ON k.id = c.id WHERE c.cluster = N`. C++ pairs two
+  sides of one interface (`FooToMojo`, `FooFromMojo`): no copies.
 - Pairs skip spans overlapping in one file and pairs nested in a
   kept pair. A score is a lead: read both sides (`source`) first.
 - Default model `openrouter/qwen/qwen3-embedding-8b` at 1024
