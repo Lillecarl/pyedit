@@ -5,13 +5,14 @@ gathers the current files' vectors for `similar.search` and
 
 from __future__ import annotations
 
+import itertools
 import sys
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from pyedit.index import gitstore
+from pyedit.index import embed, gitstore
 from pyedit.index.chunks import NOT_DEFINITIONS, chunks, digest, indexable
 from pyedit.index.similar import Matrix, Row
 
@@ -29,6 +30,7 @@ BATCH = 256
 # per second (Nebius serving qwen3-embedding-8b answered 429 to 256
 # chunks at once), and a token is about four characters
 BATCH_CHARS = 100_000
+CONCURRENCY = 4
 
 
 @dataclass
@@ -69,6 +71,7 @@ def build(
     pattern: str = "**/*",
     repo: pygit2.Repository | None = None,
     verbose: bool = False,
+    concurrency: int = CONCURRENCY,
 ) -> BuildStats:
     """Embed what the index lacks for the files under `pattern`, and save
     it with every present file it has vectors for. A file gone from the
@@ -119,15 +122,21 @@ def build(
                 }
             )
         todo[key] = metas
-    vectors: list[list[float]] = []
+    batches = list(_batches(texts))
+    starts = list(itertools.accumulate((len(b) for b in batches), initial=0))
+    vectors: dict[int, list[float]] = {}
+
+    def done(place: int, found: list[list[float]]) -> None:
+        vectors.update(enumerate(found, start=starts[place]))
+        if verbose:
+            print(
+                f"pyedit: index: embedded {len(vectors)}/{len(texts)} chunks",
+                file=sys.stderr,
+            )
+
     try:
-        for batch in _batches(texts):
-            vectors.extend(embedder.embed(batch))
-            if verbose:
-                print(
-                    f"pyedit: index: embedded {len(vectors)}/{len(texts)} chunks",
-                    file=sys.stderr,
-                )
+        if batches:
+            embed.embed_batches(embedder, batches, done, concurrency)
     finally:
         # a failed build saves every file it has all vectors for, so the
         # next one resumes
@@ -137,7 +146,7 @@ def build(
                 hashed = meta["hash"]
                 if hashed in pool:
                     rows.append(pool[hashed])
-                elif fresh[hashed] < len(vectors):
+                elif fresh[hashed] in vectors:
                     rows.append(vectors[fresh[hashed]])
                 else:
                     break

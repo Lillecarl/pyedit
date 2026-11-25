@@ -6,8 +6,10 @@ import json
 import re
 import sys
 import zlib
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, override
 
+import anyio
 import pygit2
 import pytest
 
@@ -17,10 +19,12 @@ from pyedit.index.chunks import chunks
 from pyedit.session import EditSession
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import AsyncIterator, Sequence
     from pathlib import Path
 
     import apsw
+
+    from pyedit.index.embed import Embed
 
 DOUBLE = """def {name}(values):
     total = 0
@@ -44,8 +48,14 @@ class Bag:
 
     def __init__(self) -> None:
         self.seen: list[str] = []
+        self.connections = 0
 
-    def embed(self, texts: Sequence[str]) -> list[list[float]]:
+    @asynccontextmanager
+    async def connect(self) -> AsyncIterator[Embed]:
+        self.connections += 1
+        yield self.embed
+
+    async def embed(self, texts: Sequence[str]) -> list[list[float]]:
         self.seen.extend(texts)
         vectors = []
         for text in texts:
@@ -148,10 +158,10 @@ def test_a_failed_build_keeps_what_it_embedded(
 ):
     class Quota(Bag):
         @override
-        def embed(self, texts: Sequence[str]) -> list[list[float]]:
+        async def embed(self, texts: Sequence[str]) -> list[list[float]]:
             if self.seen:
                 raise RuntimeError("429")
-            return super().embed(texts)
+            return await super().embed(texts)
 
     monkeypatch.setattr(index, "BATCH", 1)
     with pytest.raises(RuntimeError, match="429"):
@@ -160,6 +170,60 @@ def test_a_failed_build_keeps_what_it_embedded(
     bag = Bag()
     stats = build(session(tmp_path), bag, repo=repo)
     assert (stats.reused, stats.embedded, len(bag.seen)) == (1, 2, 2)
+
+
+def test_batches_run_at_once_up_to_the_limit_and_keep_their_place(
+    tmp_path: Path, repo: pygit2.Repository, monkeypatch: pytest.MonkeyPatch
+):
+    class Slow(Bag):
+        running = 0
+        peak = 0
+
+        @override
+        async def embed(self, texts: Sequence[str]) -> list[list[float]]:
+            self.running += 1
+            self.peak = max(self.peak, self.running)
+            # the first batch finishes last
+            await anyio.sleep(0.2 if not self.seen else 0.01)
+            self.running -= 1
+            return await super().embed(texts)
+
+    monkeypatch.setattr(index, "BATCH", 1)
+    for number in range(4):
+        (tmp_path / f"m{number}.py").write_text(
+            GREET.replace("greeting", f"word{number}")
+        )
+    slow = Slow()
+    build(session(tmp_path), slow, repo=repo, concurrency=3)
+    assert (slow.peak, slow.connections, len(slow.seen)) == (3, 1, 7)
+    built = gather(session(tmp_path), Bag.model, Bag.dimensions, repo=repo)
+    for row, vector in zip(built.matrix.rows, built.matrix.vectors, strict=True):
+        (expected,) = embed.embed_once(Bag(), [source(tmp_path, row)])
+        norm = sum(value * value for value in expected) ** 0.5
+        assert vector.tolist() == pytest.approx([v / norm for v in expected])
+
+
+def test_the_first_failure_is_raised_and_cancels_the_rest():
+    class Refused(Bag):
+        @override
+        async def embed(self, texts: Sequence[str]) -> list[list[float]]:
+            if texts == ["bad"]:
+                raise RuntimeError("429")
+            await anyio.sleep_forever()
+            raise AssertionError
+
+    heard: list[int] = []
+    with pytest.raises(RuntimeError, match="429"):
+        embed.embed_batches(
+            Refused(), [["good"], ["bad"]], lambda place, _: heard.append(place), 2
+        )
+    assert heard == []
+
+
+def source(root: Path, row: similar.Row) -> str:
+    """The text of `row`, whose definition fills its lines."""
+    lines = (root / row.path).read_text().splitlines()
+    return "\n".join(lines[row.start_line - 1 : row.end_line])
 
 
 def test_batches_stop_at_the_character_budget(monkeypatch: pytest.MonkeyPatch):
@@ -258,7 +322,7 @@ def test_search_ranks_the_described_definition_first(
 ):
     build(session(tmp_path), Bag(), repo=repo)
     matrix = gather(session(tmp_path), Bag.model, Bag.dimensions, repo=repo).matrix
-    (query,) = Bag().embed(["print a greeting message for a person"])
+    (query,) = embed.embed_once(Bag(), ["print a greeting message for a person"])
     (score, top), *_ = similar.search(matrix, query, 3)
     assert (top.path, top.name) == ("c.py", "greet")
     assert score > 0

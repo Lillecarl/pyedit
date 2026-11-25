@@ -8,6 +8,7 @@
   rope,
   pygit2,
   unidiff,
+  anyio,
   mcp,
   pygls,
   pyjj ? null,
@@ -147,6 +148,7 @@ let
       rope
       pygit2
       unidiff
+      anyio
       mcp
       pygls
       lsprotocol

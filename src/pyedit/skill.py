@@ -438,6 +438,8 @@ the definitions that changed. Results are
 JSON on stdout. Run from the repository.
 
     pyedit index build [-v]      embed what the ref lacks; counts, tokens, cost
+                                 (--concurrency N requests at once, default 4;
+                                 Ctrl-C saves the finished files)
     pyedit index sql QUERY       rows of the last statement
 
 | SQL | rows |

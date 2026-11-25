@@ -82,13 +82,13 @@ def connect(
     held: list[Embedder] = []
 
     def search(text: str, k: int = 10) -> list[tuple[int, float]]:
-        from pyedit.index.embed import QUERY_PREFIX
+        from pyedit.index.embed import QUERY_PREFIX, embed_once
 
         if embedder is None:
             raise ValueError("search needs an embedder: aid-models and an API key")
         if not held:
             held.append(embedder())
-        (vector,) = held[0].embed([QUERY_PREFIX + text])
+        (vector,) = embed_once(held[0], [QUERY_PREFIX + text])
         return [
             (ids[row], score)
             for score, row in similar.search(gathered.matrix, vector, k)

@@ -9,7 +9,7 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
-from pyedit.index import build, embed, gather, gitstore, sql
+from pyedit.index import CONCURRENCY, build, embed, gather, gitstore, sql
 from pyedit.session import EditSession
 
 
@@ -33,6 +33,13 @@ def _model_options(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _at_least_one(text: str) -> int:
+    number = int(text)
+    if number < 1:
+        raise argparse.ArgumentTypeError(f"{text} is not at least 1")
+    return number
+
+
 def parser() -> argparse.ArgumentParser:
     top = argparse.ArgumentParser(
         prog="pyedit index",
@@ -43,6 +50,13 @@ def parser() -> argparse.ArgumentParser:
     _model_options(built)
     built.add_argument(
         "-v", "--verbose", action="store_true", help="progress on stderr"
+    )
+    built.add_argument(
+        "--concurrency",
+        type=_at_least_one,
+        default=CONCURRENCY,
+        metavar="N",
+        help=f"requests at once (default {CONCURRENCY})",
     )
     asked = verbs.add_parser(
         "sql",
@@ -82,7 +96,13 @@ def main(argv: list[str]) -> int:
     try:
         if args.verb == "build":
             made = embedder()
-            stats = build(session, made, pattern=args.paths, verbose=args.verbose)
+            stats = build(
+                session,
+                made,
+                pattern=args.paths,
+                verbose=args.verbose,
+                concurrency=args.concurrency,
+            )
             result: object = {
                 **asdict(stats),
                 "tokens": getattr(made, "tokens", None),
