@@ -450,6 +450,7 @@ JSON on stdout. Run from the repository.
 | `neighbors(chunk_id, k)` | id, score: nearest to one chunk |
 | `search(text, k)` | id, score: nearest to a description |
 | `source(id)` | the chunk's text, from the working tree |
+| `ratio(a, b)` | difflib text similarity of two chunks, 0..1 |
 
     SELECT c.cluster, k.path, k.name, k.start_line, c.score
     FROM clusters(0.95) c JOIN chunks k ON k.id = c.id
@@ -483,6 +484,9 @@ JSON on stdout. Run from the repository.
   Then list one: `SELECT k.path, k.name, k.start_line FROM clusters(0.95) c
   JOIN chunks k ON k.id = c.id WHERE c.cluster = N`. C++ pairs two
   sides of one interface (`FooToMojo`, `FooFromMojo`): no copies.
+- Boilerplate pairs score ~1.0 too. Rank real copies by text:
+  `ratio(p.a, p.b) * (a.end_line - a.start_line + 1) AS weight`,
+  `ORDER BY weight DESC`. It reads both texts: filter first.
 - Pairs skip spans overlapping in one file and pairs nested in a
   kept pair. A score is a lead: read both sides (`source`) first.
 - Default model `openrouter/qwen/qwen3-embedding-8b` at 1024

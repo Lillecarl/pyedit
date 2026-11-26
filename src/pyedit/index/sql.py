@@ -7,6 +7,7 @@
     neighbors(chunk, k)    -> id, score         nearest chunks to one chunk
     search(text, k)        -> id, score         nearest chunks to a description (embeds it)
     source(id)                                  the chunk's text from the working tree
+    ratio(a, b)                                 difflib text similarity of two chunks, 0..1
 
 An id holds for one query only. Table-valued functions take their
 arguments in the FROM clause: `SELECT * FROM pairs(0.95)`.
@@ -14,6 +15,7 @@ arguments in the FROM clause: `SELECT * FROM pairs(0.95)`.
 
 from __future__ import annotations
 
+import difflib
 import itertools
 from typing import TYPE_CHECKING, Any
 
@@ -107,17 +109,29 @@ def connect(
         )
         apsw.ext.make_virtual_module(db, name, function)
 
-    def source(*args: apsw.SQLiteValue) -> apsw.SQLiteValue:
-        (chunk,) = args
+    def text(chunk: apsw.SQLiteValue) -> str | None:
         if not isinstance(chunk, int) or not 0 <= chunk < len(rows):
             return None
         row = rows[chunk]
-        text = session.read(row.path)
-        if isinstance(text, bytes):
+        content = session.read(row.path)
+        if isinstance(content, bytes):
             return None
-        return "\n".join(text.split("\n")[row.start_line - 1 : row.end_line])
+        return "\n".join(content.split("\n")[row.start_line - 1 : row.end_line])
+
+    def source(*args: apsw.SQLiteValue) -> apsw.SQLiteValue:
+        (chunk,) = args
+        return text(chunk)
+
+    def ratio(*args: apsw.SQLiteValue) -> apsw.SQLiteValue:
+        a, b = (text(chunk) for chunk in args)
+        if a is None or b is None:
+            return None
+        # autojunk off: it drops lines repeated across boilerplate,
+        # which are the lines the comparison is about
+        return difflib.SequenceMatcher(None, a, b, autojunk=False).ratio()
 
     db.create_scalar_function("source", source, 1, deterministic=True)
+    db.create_scalar_function("ratio", ratio, 2, deterministic=True)
     return db
 
 

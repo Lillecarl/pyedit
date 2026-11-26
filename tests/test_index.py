@@ -361,6 +361,23 @@ def test_sql_clusters_group_every_copy(tmp_path: Path, repo: pygit2.Repository):
     ]
 
 
+def test_sql_ratio_compares_chunk_texts(tmp_path: Path, repo: pygit2.Repository):
+    # a copy of double_sum under another name ranks above a different
+    # function, whatever the embedding score says
+    (tmp_path / "d.py").write_text(DOUBLE.format(name="sum_twice"))
+    db = database(tmp_path, repo)
+    rows = sql.query(
+        db,
+        "SELECT b.name, ratio(a.id, b.id) AS r FROM chunks a, chunks b "
+        "WHERE a.name = 'double_sum' AND b.name IN ('sum_twice', 'greet') "
+        "ORDER BY r DESC",
+    )
+    assert [row["name"] for row in rows] == ["sum_twice", "greet"]
+    assert rows[0]["r"] > 0.9 > rows[1]["r"]
+    assert sql.query(db, "SELECT ratio(0, 0) AS r") == [{"r": 1.0}]
+    assert sql.query(db, "SELECT ratio(0, 999) AS r") == [{"r": None}]
+
+
 def test_sql_neighbors_search_and_source(tmp_path: Path, repo: pygit2.Repository):
     db = database(tmp_path, repo)
     (first,) = sql.query(
