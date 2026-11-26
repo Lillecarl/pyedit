@@ -43,6 +43,11 @@ class JjRevError(Exception):
     Nothing was written."""
 
 
+class JjRevWritten(JjRevError):
+    """The rewrite landed, but the working copy does not match the
+    rebased @. The message names the op that holds the rewrite."""
+
+
 def have_pyjj() -> bool:
     """Whether pyjj made it into the runtime closure."""
     return pyjj is not None
@@ -510,17 +515,19 @@ def _verify_rebased(
     rev: str,
     op: str,
 ) -> None:
-    """The working copy after jj checked out the rebased descendants.
+    """The working copy after jj checked out the rebased @.
 
-    Our squash moved @, so jj wrote its new tree out itself: every
-    touched path must already match it. Restoring our saved bytes
-    here would dirty the copy, so a mismatch names itself with the op
-    that holds the amend instead of passing silently.
+    The transaction moved @, so jj wrote its new tree out itself:
+    every touched path must already match it. A mismatch raises
+    JjRevWritten naming the op that holds the rewrite, instead of
+    passing silently.
     """
     try:
         at_files = set(at_commit.list_files(None))
     except Exception as err:
-        raise JjRevError(f"cannot list rebased @: {err}") from err
+        raise JjRevWritten(
+            f"cannot list rebased @: {err}; the rewrite stands at op {op}"
+        ) from err
     for rel in saved:
         now = _wc_state(repo_root / rel)
         if rel in at_files:
@@ -531,14 +538,14 @@ def _verify_rebased(
                     # checkout wrote jj's markers; the caller names
                     # the conflicted commits
                     continue
-                raise JjRevError(
+                raise JjRevWritten(
                     f"working copy at {rel} is unreadable in rebased @; "
-                    f"the amend stands at op {op}, restore one side"
+                    f"the rewrite stands at op {op}, restore one side"
                 ) from None
         else:
             want = ("absent", None)
         if (now[0], now[1]) != (want[0], want[1]):
-            raise JjRevError(
+            raise JjRevWritten(
                 f"working copy at {rel} does not match rebased @; "
-                f"the amend stands at op {op}, restore one side"
+                f"the rewrite stands at op {op}, restore one side"
             )

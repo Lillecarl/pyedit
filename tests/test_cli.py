@@ -889,3 +889,29 @@ def test_apply_with_commit_scope_reports_the_commit(
     err = capsys.readouterr().err
     assert "pyedit: committed newhex123456 'made'" in err
     assert "pyedit: no changes" not in err
+
+
+@pytest.mark.parametrize(
+    ("error", "written"),
+    [("JjRevError", False), ("JjRevWritten", True)],
+)
+def test_revision_error_says_nothing_was_written_only_when_true(
+    project: Path,
+    script: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    error: str,
+    written: bool,
+):
+    # a JjRevWritten error comes after the rewrite landed: telling the
+    # caller nothing was written would hide the op that holds it
+    from pyedit import jjrev, runner
+
+    def fail(*_args: object) -> runner.Result:
+        raise getattr(jjrev, error)("boom; the rewrite stands at op op1")
+
+    monkeypatch.setattr(runner, "run_revision", fail)
+    assert run(project, "-r", "@-", "--apply", script=script) == 1
+    err = capsys.readouterr().err
+    assert "pyedit: boom" in err
+    assert ("nothing was written" in err) is not written

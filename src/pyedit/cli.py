@@ -358,7 +358,8 @@ def _run(
             result = runner.run_revision(opts, opts.revision, stage)
         except jjrev.JjRevError as exc:
             print(f"pyedit: {exc}", file=sys.stderr)
-            print("pyedit: nothing was written", file=sys.stderr)
+            if not isinstance(exc, jjrev.JjRevWritten):
+                print("pyedit: nothing was written", file=sys.stderr)
             return EXIT_SCRIPT_ERROR
     else:
         session = runner.new_session(opts)
