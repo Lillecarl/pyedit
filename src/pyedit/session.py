@@ -47,7 +47,6 @@ class HistoryRecord(TypedDict):
     id: str
     subject: str
     op: str
-    cleanup_op: str | None
     conflicts: list[str]
 
 
@@ -890,7 +889,7 @@ class EditSession:
     @property
     def history(self) -> list[HistoryRecord]:
         """Commits a scope wrote past this session: one record per
-        commit with its id, subject, op, cleanup op and conflicts."""
+        commit with its id, subject, op and conflicts."""
         return list(self._history)
 
     def describe(self, message: str) -> None:

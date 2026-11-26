@@ -313,9 +313,9 @@ def test_commit_scope_records_history_not_parent(
 
     def fake_create(
         repo_root: Path, rev: str, message: str, changes: dict[str, object]
-    ) -> tuple[str, str, str | None, list[str]]:
+    ) -> tuple[str, str, list[str]]:
         created.update(message=message, changes=changes)
-        return ("newhex123456", "op1", None, [])
+        return ("newhex123456", "op1", [])
 
     _commit_fakes(monkeypatch, fake_create)
     with pyedit.commit("inserted subject", after="B"):
@@ -327,7 +327,6 @@ def test_commit_scope_records_history_not_parent(
             "id": "newhex123456",
             "subject": "inserted subject",
             "op": "op1",
-            "cleanup_op": None,
             "conflicts": [],
         }
     ]
@@ -340,7 +339,7 @@ def test_commit_scope_empty_refuses(
 ) -> None:
     def fake_create(
         repo_root: Path, rev: str, message: str, changes: dict[str, object]
-    ) -> tuple[str, str, str | None, list[str]]:
+    ) -> tuple[str, str, list[str]]:
         if not changes:
             raise JjRevError("nothing to commit: the scope staged no changes")
         raise AssertionError("create_after ran with no changes")
@@ -374,8 +373,8 @@ def test_nested_commit_scopes_record_in_order(
 ) -> None:
     def fake_create(
         repo_root: Path, rev: str, message: str, changes: dict[str, object]
-    ) -> tuple[str, str, str | None, list[str]]:
-        return (f"{message}-id", "op", None, [])
+    ) -> tuple[str, str, list[str]]:
+        return (f"{message}-id", "op", [])
 
     _commit_fakes(monkeypatch, fake_create)
     with pyedit.commit("outer", after="B"):
@@ -399,8 +398,8 @@ def test_commit_scope_machinery_bypasses_the_overlay(
 
     def fake_create(
         repo_root: Path, rev: str, message: str, changes: dict[str, object]
-    ) -> tuple[str, str, str | None, list[str]]:
-        return ("newhex123456", "op1", None, [])
+    ) -> tuple[str, str, list[str]]:
+        return ("newhex123456", "op1", [])
 
     _commit_fakes(monkeypatch, fake_create)
     restore = vfs.install(root)
@@ -417,8 +416,8 @@ def test_commit_scope_inside_vfs_survives_merge(
 ) -> None:
     def fake_create(
         repo_root: Path, rev: str, message: str, changes: dict[str, object]
-    ) -> tuple[str, str, str | None, list[str]]:
-        return (f"{message}-id", "op", None, [])
+    ) -> tuple[str, str, list[str]]:
+        return (f"{message}-id", "op", [])
 
     _commit_fakes(monkeypatch, fake_create)
     with VFS():

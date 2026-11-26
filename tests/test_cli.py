@@ -878,8 +878,8 @@ def test_apply_with_commit_scope_reports_the_commit(
 
     def fake_create_after(
         repo_root: Path, rev: str, message: str, changes: dict[str, str | bytes | None]
-    ) -> tuple[str, str, None, list[str]]:
-        return ("newhex1234567890", "op1", None, [])
+    ) -> tuple[str, str, list[str]]:
+        return ("newhex1234567890", "op1", [])
 
     monkeypatch.setattr(jjrev, "create_after", fake_create_after)
     script.write_text(

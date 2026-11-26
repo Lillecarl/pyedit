@@ -71,13 +71,12 @@ class Result:
     applied: bool = False
     refused: bool = False
     op: str | None = None
-    cleanup_op: str | None = None
     conflicts: list[str] = field(default_factory=list)
     # staged commit metadata as key -> (old, new): description
     # and/or author on -r runs, empty otherwise
     meta: dict[str, tuple[str | None, str | None]] = field(default_factory=dict)
     # commits a scope wrote past the session (pyedit.commit):
-    # id, subject, op, cleanup op and conflicts per commit
+    # id, subject, op and conflicts per commit
     history: list[HistoryRecord] = field(default_factory=list)
 
 
@@ -435,12 +434,11 @@ def run_revision(
             return result
         if opts.before_write is not None:
             opts.before_write()
-        _new_id, op, cleanup_op, conflicts = jjrev.amend_commit(
+        _new_id, op, conflicts = jjrev.amend_commit(
             repo_root, revision, repo_changes, new or None
         )
         result.applied = True
         result.op = op
-        result.cleanup_op = cleanup_op
         result.conflicts = conflicts
         return result
 

@@ -193,7 +193,7 @@ class CommitScope:
                     path.relative_to(scope.root).as_posix(): content
                     for path, content in scope.staged().items()
                 }
-                new_hex, op, cleanup_op, conflicts = jjrev.create_after(
+                new_hex, op, conflicts = jjrev.create_after(
                     self._repo_root, self._base_hex, self._message, changes
                 )
             finally:
@@ -205,7 +205,6 @@ class CommitScope:
                 "id": new_hex,
                 "subject": subject[0] if subject else "(no description)",
                 "op": op,
-                "cleanup_op": cleanup_op,
                 "conflicts": list(conflicts),
             }
         )

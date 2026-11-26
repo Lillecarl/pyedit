@@ -151,8 +151,8 @@ def amend_commit(
     rev: str,
     changes: Mapping[str, bytes | str | None],
     meta: dict[str, str] | None = None,
-) -> tuple[str, str, str | None, list[str]]:
-    """Rewrite REV with new contents; return (new id, op, cleanup, conflicts).
+) -> tuple[str, str, list[str]]:
+    """Rewrite REV with new contents; return (new id, op, conflicts).
 
     `changes` maps repo-relative posix paths to staged values: bytes
     or str for file content, None for deletion, a Symlink for a new
@@ -171,9 +171,8 @@ def amend_commit(
     bytes into REV (a squash would fold divergent tip content in
     instead). jj rebases the pre-run @ onto the new REV, so a
     descendant @ inherits the change and checkout writes it out; the
-    files are verified against that @. `cleanup` is always None, kept
-    for the shape `create_after` shares; `conflicts` names the
-    commits that carry markers, to resolve where they were created.
+    files are verified against that @. `conflicts` names the commits
+    that carry markers, to resolve where they were created.
     The working copy must start clean on every touched path, or the
     run refuses naming them.
     """
@@ -221,13 +220,13 @@ def amend_commit(
     except Exception as err:
         raise JjRevError(f"amending {rev!r} failed: {err}") from err
     _verify_rebased(repo_root, repo.resolve("@"), saved, rev, op)
-    return _hex(written), op, None, _conflict_names(repo)
+    return _hex(written), op, _conflict_names(repo)
 
 
 def create_after(
     repo_root: Path, rev: str, message: str, changes: Mapping[str, bytes | str | None]
-) -> tuple[str, str, str | None, list[str]]:
-    """A new commit after REV carrying `changes`; return (id, op, cleanup,
+) -> tuple[str, str, list[str]]:
+    """A new commit after REV carrying `changes`; return (id, op,
     conflicts). REV's children reparent onto it, so the stack keeps its
     shape with the new commit in the middle.
 
@@ -302,7 +301,7 @@ def create_after(
     except Exception as err:
         raise JjRevError(f"committing after {rev!r} failed: {err}") from err
     _verify_rebased(repo_root, repo.resolve("@"), saved, rev, op)
-    return new_hex, op, None, _conflict_names(repo)
+    return new_hex, op, _conflict_names(repo)
 
 
 def _check_clean(

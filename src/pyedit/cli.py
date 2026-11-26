@@ -439,11 +439,6 @@ def _run(
             f"with: pyjj op restore {result.op})",
             file=sys.stderr,
         )
-        if result.cleanup_op is not None:
-            print(
-                f"pyedit: working-copy cleanup (op {result.cleanup_op})",
-                file=sys.stderr,
-            )
         for entry in result.conflicts:
             print(f"pyedit: conflict in {entry}; resolve it there", file=sys.stderr)
     elif opts.revision is not None:
@@ -474,11 +469,6 @@ def _run(
             f"(op {entry['op']}; restore with: pyjj op restore {entry['op']})",
             file=sys.stderr,
         )
-        if entry["cleanup_op"] is not None:
-            print(
-                f"pyedit: working-copy cleanup (op {entry['cleanup_op']})",
-                file=sys.stderr,
-            )
         for conflict in entry["conflicts"]:
             print(
                 f"pyedit: conflict in {conflict}; resolve it there",

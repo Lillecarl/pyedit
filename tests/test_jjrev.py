@@ -461,10 +461,8 @@ def test_amend_moves_changes_and_restores_wc(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     repo = fake_repo(tmp_path, monkeypatch)
-    new_id, op, cleanup, conflicts = jjrev.amend_commit(
-        tmp_path, "@-", {"a.py": b"new\n"}
-    )
-    assert (new_id, op, cleanup, conflicts) == ("target", "op999", None, [])
+    new_id, op, conflicts = jjrev.amend_commit(tmp_path, "@-", {"a.py": b"new\n"})
+    assert (new_id, op, conflicts) == ("target", "op999", [])
     assert len(repo.atomics) == 1
     assert repo.atomics[0].allow_conflicts is True
     # @ goes back first, so REV's rewrite rebases the pre-run @
@@ -494,10 +492,10 @@ def test_amend_adds_and_deletes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     repo.commits["@"] = FakeCommit(
         files={"a.py": b"old\n", "gone.py": b"bye\n"}, cid="at"
     )
-    _new_id, op, cleanup, conflicts = jjrev.amend_commit(
+    _new_id, op, conflicts = jjrev.amend_commit(
         tmp_path, "@-", {"fresh.py": b"hi\n", "gone.py": None}
     )
-    assert (op, cleanup, conflicts) == ("op999", None, [])
+    assert (op, conflicts) == ("op999", [])
     assert repo.atomics[0].tx.restored == [
         (["fresh.py", "gone.py"], "@", "at"),
         (["fresh.py", "gone.py"], "@-", "at-snap"),
@@ -581,10 +579,10 @@ def test_revision_flow_exports_and_amends(
         rev: str,
         changes: dict[str, str | bytes | None],
         meta: dict[str, str] | None = None,
-    ) -> tuple[str, str, None, list[str]]:
+    ) -> tuple[str, str, list[str]]:
         amended.update(changes)
         amended["meta"] = meta
-        return ("newid", "op1", None, [])
+        return ("newid", "op1", [])
 
     monkeypatch.setattr(jjrev, "amend_commit", fake_amend)
     (tmp_path / "a.py").write_text("old\n")
@@ -597,7 +595,7 @@ def test_revision_flow_exports_and_amends(
     result = runner.run_revision(opts, "@-", stage)
     assert amended == {"a.py": "new\n", "meta": None}
     assert result.applied is True and result.op == "op1"
-    assert result.cleanup_op is None and result.conflicts == []
+    assert result.conflicts == []
     assert result.files == ["a.py"]
 
 
@@ -648,10 +646,8 @@ def test_rebased_checkout_is_left_alone(
     # no cleanup transaction
     repo = fake_moving_repo(tmp_path, monkeypatch, b"old\n", b"rebased\n")
     repo.checkout_bytes = b"rebased\n"
-    _new_id, op, cleanup, conflicts = jjrev.amend_commit(
-        tmp_path, "@-", {"a.py": b"new\n"}
-    )
-    assert (op, cleanup, conflicts) == ("op999", None, [])
+    _new_id, op, conflicts = jjrev.amend_commit(tmp_path, "@-", {"a.py": b"new\n"})
+    assert (op, conflicts) == ("op999", [])
     assert len(repo.atomics) == 1
     assert (tmp_path / "a.py").read_bytes() == b"rebased\n"
 
@@ -664,10 +660,8 @@ def test_descendant_at_inherits_the_amend(
     # the inherited change, not leftover vehicle: no cleanup may lift
     # them back out, and the files keep them
     repo = fake_moving_repo(tmp_path, monkeypatch, b"old\n", b"new\n")
-    _new_id, op, cleanup, conflicts = jjrev.amend_commit(
-        tmp_path, "@-", {"a.py": b"new\n"}
-    )
-    assert (op, cleanup, conflicts) == ("op999", None, [])
+    _new_id, op, conflicts = jjrev.amend_commit(tmp_path, "@-", {"a.py": b"new\n"})
+    assert (op, conflicts) == ("op999", [])
     assert len(repo.atomics) == 1
     assert repo.resolve("@").read_file("a.py") == b"new\n"
     assert (tmp_path / "a.py").read_bytes() == b"new\n"
@@ -684,10 +678,8 @@ def test_conflicted_rebased_at_keeps_markers(
     repo.at_new.has_conflict = True
     repo.checkout_bytes = b"<<<<<<< markers\n"
     repo.conflicted = [repo.at_new]
-    _new_id, _op, cleanup, conflicts = jjrev.amend_commit(
-        tmp_path, "@-", {"a.py": b"new\n"}
-    )
-    assert cleanup is None and conflicts == ["at-new (no description)"]
+    _new_id, _op, conflicts = jjrev.amend_commit(tmp_path, "@-", {"a.py": b"new\n"})
+    assert conflicts == ["at-new (no description)"]
     assert (tmp_path / "a.py").read_bytes() == b"<<<<<<< markers\n"
 
 
@@ -718,10 +710,8 @@ def test_divergent_tip_content_stays_out_of_target(
 
     module.open = fake_open
     monkeypatch.setattr(jjrev, "pyjj", module)
-    _new_id, op, cleanup, conflicts = jjrev.amend_commit(
-        tmp_path, "@-", {"a.py": b"mine\n"}
-    )
-    assert (op, cleanup, conflicts) == ("op999", None, [])
+    _new_id, op, conflicts = jjrev.amend_commit(tmp_path, "@-", {"a.py": b"mine\n"})
+    assert (op, conflicts) == ("op999", [])
     assert len(repo.atomics) == 1
     assert repo.resolve("@-").read_file("a.py") == b"mine\n"
     assert repo.resolve("@").read_file("a.py") == b"tip\n"
@@ -731,7 +721,7 @@ def test_divergent_tip_content_stays_out_of_target(
 def test_conflicts_are_reported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     repo = fake_repo(tmp_path, monkeypatch)
     repo.conflicted = [FakeCommit(cid="cccc", description="C: line\nbody")]
-    _, _, _, conflicts = jjrev.amend_commit(tmp_path, "@-", {"a.py": b"new\n"})
+    _, _, conflicts = jjrev.amend_commit(tmp_path, "@-", {"a.py": b"new\n"})
     assert conflicts == ["cccc C: line"]
 
 
@@ -761,10 +751,10 @@ def test_amend_applies_tree_and_meta_in_one_block(
     target = repo.resolve("@-")
     target.description = "old subject"
     meta = {"description": "new subject", "author": "New Name <new@example.com>"}
-    _new_id, op, cleanup, conflicts = jjrev.amend_commit(
+    _new_id, op, conflicts = jjrev.amend_commit(
         tmp_path, "@-", {"a.py": b"new\n"}, meta
     )
-    assert (op, cleanup, conflicts) == ("op999", None, [])
+    assert (op, conflicts) == ("op999", [])
     assert len(repo.atomics) == 1
     assert repo.atomics[0].tx.restored == [
         (["a.py"], "@", "at"),
@@ -783,10 +773,10 @@ def test_amend_meta_only_skips_the_tree_restore(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     repo = fake_repo(tmp_path, monkeypatch)
-    _new_id, op, cleanup, conflicts = jjrev.amend_commit(
+    _new_id, op, conflicts = jjrev.amend_commit(
         tmp_path, "@-", {}, {"description": "reworded"}
     )
-    assert (op, cleanup, conflicts) == ("op999", None, [])
+    assert (op, conflicts) == ("op999", [])
     assert len(repo.atomics) == 1
     assert repo.atomics[0].tx.restored == []
     assert repo.resolve("@-").description == "reworded"
@@ -863,10 +853,10 @@ def test_run_revision_applies_and_prunes_meta(
         rev: str,
         changes: dict[str, str | bytes | None],
         meta: dict[str, str] | None = None,
-    ) -> tuple[str, str, None, list[str]]:
+    ) -> tuple[str, str, list[str]]:
         amended["changes"] = changes
         amended["meta"] = meta
-        return ("newid", "op1", None, [])
+        return ("newid", "op1", [])
 
     monkeypatch.setattr(jjrev, "amend_commit", fake_amend)
     (tmp_path / "a.py").write_text("old\n")
@@ -961,11 +951,11 @@ def test_create_after_inserts_with_full_tree_and_reparents(
     # over it, and every child of REV moves onto it keeping its
     # other parents: merges stay merges
     repo = _commit_stack(tmp_path, monkeypatch)
-    new_hex, op, cleanup, conflicts = jjrev.create_after(
+    new_hex, op, conflicts = jjrev.create_after(
         tmp_path, "B", "inserted", {"a.py": b"a2\n"}
     )
     assert new_hex == "new-1"
-    assert (op, cleanup, conflicts) == ("op999", None, [])
+    assert (op, conflicts) == ("op999", [])
     assert len(repo.atomics) == 1
     tx = repo.atomics[0].tx
     # @ goes back first, then the new commit takes REV's tree and the
@@ -999,10 +989,10 @@ def test_create_after_without_children_skips_surgery(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     repo = fake_repo(tmp_path, monkeypatch)
-    new_hex, op, cleanup, conflicts = jjrev.create_after(
+    new_hex, op, conflicts = jjrev.create_after(
         tmp_path, "@-", "inserted", {"a.py": b"x\n"}
     )
-    assert (op, cleanup, conflicts) == ("op999", None, [])
+    assert (op, conflicts) == ("op999", [])
     assert repo.atomics[0].tx.rebased == []
     assert repo.checked == []
     assert repo.resolve(new_hex).read_file("a.py") == b"x\n"
