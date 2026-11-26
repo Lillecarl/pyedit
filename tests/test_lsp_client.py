@@ -30,7 +30,7 @@ from pyedit.lsp_client import (
 from pyedit.session import EditSession
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Iterable, Iterator
     from pathlib import Path
 
     from pyedit.lsp_client import _FeedWriter
@@ -751,6 +751,52 @@ def test_quickfix_expands_to_diagnostic_ranges(stub_project: EditSession) -> Non
         staged = handle.code_action("a.py", "quickfix")
     assert staged == [stub_project.root / "a.py"]
     assert stub_project.read("a.py") == "import json\n\n" + body
+
+
+def _insert_imports(uri: str, lines: Iterable[str]) -> list[types.CodeAction]:
+    """One "Insert import" quickfix per import line, all at the top."""
+    return [
+        types.CodeAction(
+            title=f"Insert import: `{line}`",
+            kind="quickfix",
+            edit=types.WorkspaceEdit(
+                changes={
+                    uri: [types.TextEdit(range=rng(0, 0, 0, 0), new_text=line + "\n")]
+                }
+            ),
+        )
+        for line in lines
+    ]
+
+
+@pytest.mark.parametrize(
+    ("offered", "staged_line"),
+    [
+        # pyrefly's prefix matches: only `import json` names `json`
+        (["import json", "import jsonschema", "import jsonpath_ng"], "import json"),
+        # one import per module holding the name, `__unknown__`
+        # included: staging them all wrote one line each; a batch run
+        # cannot choose, so it stages none
+        (["from __unknown__ import json", "from pyedit.cli import json"], None),
+    ],
+)
+def test_quickfix_narrows_alternatives_to_the_diagnosed_name(
+    stub_project: EditSession, offered: list[str], staged_line: str | None
+) -> None:
+    stub = Stub()
+    body = "print(json.dumps(1))\n"
+    (stub_project.root / "a.py").write_text(body)
+    stub_project.write("a.py", body)
+    _push_unknown_name(stub)
+    uri = (stub_project.root / "a.py").as_uri()
+    stub.answers[("codeAction", uri, ("quickfix",))] = []
+    stub.ranged[("codeAction", uri, ("quickfix",), (0, 6, 0, 10))] = _insert_imports(
+        uri, offered
+    )
+    with LspSession(stub_project, [], in_memory=stub.run) as handle:
+        handle.code_action("a.py", "quickfix", only_titles=("Insert import",))
+    want = body if staged_line is None else staged_line + "\n" + body
+    assert stub_project.read("a.py") == want
 
 
 def test_quickfix_dedupes_identical_edits(stub_project: EditSession) -> None:

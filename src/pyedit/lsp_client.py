@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import threading
 from collections.abc import Callable, Coroutine
 from contextlib import suppress
@@ -120,6 +121,23 @@ def _kinds(kind: str | list[str]) -> list[str]:
     if not kinds or any(not k for k in kinds):
         raise ValueError("kind needs at least one non-empty LSP kind")
     return kinds
+
+
+def _selectable(
+    actions: Sequence[types.CodeAction | types.Command] | None,
+    only_titles: tuple[str, ...],
+) -> list[types.CodeAction | types.Command]:
+    """The actions a batch run may stage: not disabled, and titled
+    with one of `only_titles`' prefixes when it names any."""
+    kept: list[types.CodeAction | types.Command] = []
+    for action in actions or []:
+        if getattr(action, "disabled", None):
+            continue
+        title = getattr(action, "title", "") or ""
+        if only_titles and not title.startswith(only_titles):
+            continue
+        kept.append(action)
+    return kept
 
 
 def _edit_fingerprint(uri: str, edit: types.TextEdit) -> _Fingerprint:
@@ -764,12 +782,7 @@ class LspSession:
         Disabled actions stay out, and `only_titles` keeps only
         actions whose title starts with one of its prefixes."""
         changed: list[Path] = []
-        for action in actions or []:
-            if getattr(action, "disabled", None):
-                continue
-            title = getattr(action, "title", "") or ""
-            if only_titles and not title.startswith(only_titles):
-                continue
+        for action in _selectable(actions, only_titles):
             edit = await self._resolve_action(action)
             for path, edits in _edit_documents(edit).items():
                 # _edit_documents keys by path; the changes map keys by
@@ -802,6 +815,14 @@ class LspSession:
         push diagnostics supply those ranges. Each round re-syncs
         first, so answers compute on the previous round's result.
         Servers that never push simply yield no rounds.
+
+        Every action one diagnostic gets is an alternative fix for
+        it. pyrefly offers prefix matches (`import jsonschema` for
+        `json`) and one "Insert import" per module that has the name,
+        `__unknown__` included. Several candidates narrow to those
+        whose inserted text names the diagnosed identifier as a whole
+        word; a batch run cannot choose among more than one, so such
+        a round stages none.
         """
         changed: list[Path] = []
         diags = sorted(
@@ -826,12 +847,53 @@ class LspSession:
                     ),
                 ),
             )
+            candidates = _selectable(actions, only_titles)
+            if len(candidates) > 1:
+                candidates = await self._naming(session, path, diag, candidates)
+                if len(candidates) != 1:
+                    continue
             for staged in await self._stage_actions(
-                session, actions, applied, only_titles
+                session, candidates, applied, only_titles
             ):
                 if staged not in changed:
                     changed.append(staged)
         return changed
+
+    async def _naming(
+        self,
+        session: EditSession,
+        path: Path,
+        diag: types.Diagnostic,
+        candidates: list[types.CodeAction | types.Command],
+    ) -> list[types.CodeAction | types.Command]:
+        """The candidates whose inserted text names the identifier
+        `diag` covers, as a whole word. A range that is not one
+        identifier on one line keeps none: nothing to narrow by."""
+        content = session.read(path)
+        start, end = diag.range.start, diag.range.end
+        if not isinstance(content, str) or start.line != end.line:
+            return []
+        lines = content.split("\n")
+        if start.line >= len(lines):
+            return []
+        line = lines[start.line]
+        name = line[
+            _units_to_column(line, start.character, self._encoding) : _units_to_column(
+                line, end.character, self._encoding
+            )
+        ]
+        if not name.isidentifier():
+            return []
+        word = re.compile(rf"(?<!\w){re.escape(name)}(?!\w)")
+        kept: list[types.CodeAction | types.Command] = []
+        for action in candidates:
+            edit = await self._resolve_action(action)
+            inserted = "".join(
+                e.new_text for edits in _edit_documents(edit).values() for e in edits
+            )
+            if word.search(inserted):
+                kept.append(action)
+        return kept
 
     async def _code_action_all(
         self,
