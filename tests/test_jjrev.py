@@ -148,6 +148,10 @@ class FakeRawTx:
         self.rewrites.append(commit.id.hex())
         return FakeBuilder(commit)
 
+    def revset(self, _settings, rev: str):
+        """Ids, the way the binding's Transaction.revset answers."""
+        return [commit.id for commit in self.repo.revset(rev)]
+
     def check_rewritable(self, _settings, ids: Iterable[FakeId]):
         self.repo.checked.extend(commit_id.hex() for commit_id in ids)
         blocked = self.repo.unrewritable & {commit_id.hex() for commit_id in ids}
@@ -161,6 +165,7 @@ class FakeTx:
         self.restored = []
         self.described = []
         self.news = []
+        self.rebased = []
         self.raw = FakeRawTx(repo)
 
     @property
@@ -186,10 +191,31 @@ class FakeTx:
         if isinstance(parents, str):
             parents = [parents]
         self.news.append((list(parents), message, edit))
-        child = FakeCommit(cid=f"new-{len(self.news)}", description=message or "")
+        child = FakeCommit(
+            cid=f"new-{len(self.news)}",
+            description=message or "",
+            parents=[self.repo.resolve(parent).id for parent in parents],
+        )
         # reachable the way a post-block resolution finds it
         self.repo.by_cid[child.id.hex()] = child
+        self.repo.created.append(child)
         return child
+
+    def rebase(self, revisions: Iterable[FakeCommit], after: str):
+        """`rebase -r X -A REV`: REV's other children move onto X,
+        keeping their other parents. Parents only: merging content is
+        jj's half, covered live."""
+        moved = [commit.id.hex() for commit in revisions]
+        self.rebased.append((moved, after))
+        anchor = self.repo.resolve(after).id.hex()
+        for kid in self.repo.revset(f"{anchor}+"):
+            if kid.id.hex() in moved:
+                continue
+            kid._parents = [
+                FakeId(moved[0]) if parent.hex() == anchor else parent
+                for parent in kid.parent_ids
+            ]
+        return list(revisions)
 
     def restore(
         self,
@@ -303,6 +329,8 @@ class FakeRepo:
         self._repo = object()
         # ids the guard was asked about; hexes it must refuse
         self.checked = []
+        # commits the block's new() wrote, visible to children queries
+        self.created = []
         self.unrewritable = set()
 
     @property
@@ -329,7 +357,7 @@ class FakeRepo:
         base = rev[:-1]
         return [
             commit
-            for commit in self.commits.values()
+            for commit in list(self.commits.values()) + self.created
             if base in [parent.hex() for parent in commit.parent_ids]
         ]
 
@@ -937,19 +965,23 @@ def test_create_after_inserts_with_full_tree_and_reparents(
         tmp_path, "B", "inserted", {"a.py": b"a2\n"}
     )
     assert new_hex == "new-1"
-    # no cleanup transaction: @ was reparented, so its staged bytes
-    # arrived through the rebase, not as leftover vehicle, and the
-    # files stay as checkout wrote them
     assert (op, cleanup, conflicts) == ("op999", None, [])
     assert len(repo.atomics) == 1
     tx = repo.atomics[0].tx
-    assert tx.news == [(["B"], "inserted", False)]
-    assert tx.restored[0] == (None, "new-1", "B")
-    assert tx.restored[1] == (["a.py"], "new-1", "@")
-    # post-snapshot ids: the explicit snapshot folded the vehicle
-    # into @ before anything resolved the block's inputs
-    assert repo.checked == ["atat-snap", "mmmm"]
-    assert tx.raw.rewrites == ["atat-snap", "mmmm"]
+    # @ goes back first, then the new commit takes REV's tree and the
+    # vehicle's bytes
+    assert tx.restored == [
+        (["a.py"], "@", "atat"),
+        (None, "new-1", "bbbb"),
+        (["a.py"], "new-1", "atat-snap"),
+    ]
+    assert tx.news == [(["bbbb"], "inserted", False)]
+    # the children are the transaction's: @ already rewritten
+    assert repo.checked == ["atat-snap-rw", "mmmm"]
+    # rebase -A merges content into the children; set_parents kept
+    # their trees, which reverted the insert
+    assert tx.rebased == [(["new-1"], "bbbb")]
+    assert tx.raw.rewrites == []
     inserted = repo.resolve(new_hex)
     assert inserted.description == "inserted"
     assert inserted.read_file("a.py") == b"a2\n"
@@ -957,9 +989,10 @@ def test_create_after_inserts_with_full_tree_and_reparents(
     assert inserted.read_file("b.py") == b"b\n"
     assert [p.hex() for p in repo.resolve("@").parent_ids] == ["new-1"]
     assert [p.hex() for p in repo.resolve("M").parent_ids] == ["new-1", "aaaa"]
-    assert repo.resolve("@").read_file("a.py") == b"a2\n"
     assert repo.resolve("B").read_file("a.py") == b"b1\n"
-    assert (tmp_path / "a.py").read_bytes() == b"a2\n"
+    # the fake rebase moves parents only: @ keeps its pre-run bytes
+    # here, and the files match it
+    assert (tmp_path / "a.py").read_bytes() == repo.resolve("@").read_file("a.py")
 
 
 def test_create_after_without_children_skips_surgery(
@@ -969,8 +1002,8 @@ def test_create_after_without_children_skips_surgery(
     new_hex, op, cleanup, conflicts = jjrev.create_after(
         tmp_path, "@-", "inserted", {"a.py": b"x\n"}
     )
-    assert (op, cleanup, conflicts) == ("op999", "op999", [])
-    assert repo.atomics[0].tx.raw.rewrites == []
+    assert (op, cleanup, conflicts) == ("op999", None, [])
+    assert repo.atomics[0].tx.rebased == []
     assert repo.checked == []
     assert repo.resolve(new_hex).read_file("a.py") == b"x\n"
     assert (tmp_path / "a.py").read_bytes() == b"old\n"

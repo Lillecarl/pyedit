@@ -130,39 +130,6 @@ def export_tree(repo_root: Path, rev: str, dest: Path) -> list[str]:
     return exported
 
 
-def _tree_state_opt(commit: Any, rel: str) -> tuple[str, bytes | str | None]:
-    """_tree_state, with absence as a value instead of a refusal."""
-    try:
-        return _tree_state(commit, rel)
-    except JjRevError:
-        return ("absent", None)
-
-
-def _matches_saved(commit: Any, saved: dict[str, _WcState]) -> bool:
-    """Every touched path in the commit holds its pre-run content."""
-    for rel, (kind, payload, _mode) in saved.items():
-        if _tree_state_opt(commit, rel) != (kind, payload):
-            return False
-    return True
-
-
-def _matches_staged(commit: Any, changes: Mapping[str, bytes | str | None]) -> bool:
-    """Every touched path in the commit holds the staged bytes."""
-    for rel, new in changes.items():
-        if isinstance(new, Symlink):
-            want = ("link", str(new))
-        elif new is None:
-            want = ("absent", None)
-        else:
-            want = (
-                "file",
-                new.encode("utf-8") if isinstance(new, str) else new,
-            )
-        if _tree_state_opt(commit, rel) != want:
-            return False
-    return True
-
-
 def _conflict_names(repo: Any) -> list[str]:
     """Short id plus subject for every commit carrying markers."""
     names = []
@@ -297,40 +264,40 @@ def create_after(
     saved = _check_clean(repo_root, at, changes)
     for rel, new in changes.items():
         _write_wc(repo_root, base, rel, new)
-    # The cleanup restores the working copy from the commit holding
-    # the pre-run content, which only the pre-snapshot id names: the
-    # snapshot below folds the vehicle into @ under a new id.
     wc_hex = _hex(at)
-    # Fold the vehicle before resolving anything the block
-    # rewrites: the entry snapshot replaces @ when dirty, so
-    # pre-snapshot objects (notably @ itself as a child) would
-    # address a commit the block no longer holds. The block's own
-    # entry snapshot is then a clean no-op.
-    repo.snapshot()
-    try:
-        base = repo.resolve(rev)
-        at = repo.resolve("@")
-        kids = repo.revset(f"{_hex(base)}+")
-    except Exception as err:
-        raise JjRevError(f"cannot resolve {rev!r}: {err}") from err
     base_hex = _hex(base)
-    # whether the surgery moves @ itself: its rebased content then
-    # carries the change through history, and no cleanup may lift
-    # it back out as leftover vehicle
-    reparented = _hex(at) in {kid.id.hex() for kid in kids}
     try:
         with repo.atomic(f"pyedit commit after {rev}", allow_conflicts=True) as tx:
-            new = tx.new([rev], message=message, edit=False)
-            new = tx.restore(None, into=new, from_revision=rev)
-            new = tx.restore(sorted(changes), into=new, from_revision="@")
-            _reparent(tx, repo, base_hex, new, kids)
+            # as in amend_commit: @ goes back to its pre-run bytes
+            # before anything rebases it
+            vehicle = repo.resolve("@")
+            tx.restore(sorted(changes), into="@", from_revision=wc_hex)
+            new = tx.new([base_hex], message=message, edit=False)
+            new = tx.restore(None, into=new, from_revision=base_hex)
+            new = tx.restore(sorted(changes), into=new, from_revision=vehicle)
+            new_hex = _hex(new)
+            raw = tx.transaction
+            # the transaction's ids, not the repo's: the @ restore
+            # above already rewrote a child that is @
+            kids = [
+                kid
+                for kid in raw.revset(repo.settings, f"{base_hex}+")
+                if kid.hex() != new_hex
+            ]
+            if kids:
+                # move_commits rewrites the children without the
+                # wrapper's guard, so jj's own check runs first
+                raw.check_rewritable(repo.settings, kids)
+                # rebase -A, not set_parents: set_parents keeps each
+                # child's tree, which then reverts the inserted change
+                tx.rebase([new], after=base_hex)
+                (moved,) = raw.revset(repo.settings, f"{base_hex}+")
+                new_hex = moved.hex()
         op = repo.operation_id
     except Exception as err:
         raise JjRevError(f"committing after {rev!r} failed: {err}") from err
-    cleanup = _reconcile_wc(
-        repo_root, repo, rev, op, wc_hex, saved, changes, reparented
-    )
-    return _hex(new), op, cleanup, _conflict_names(repo)
+    _verify_rebased(repo_root, repo.resolve("@"), saved, rev, op)
+    return new_hex, op, None, _conflict_names(repo)
 
 
 def _check_clean(
@@ -367,80 +334,6 @@ def _check_clean(
             + "; commit or shelve them first, nothing was written"
         )
     return saved
-
-
-def _reconcile_wc(
-    repo_root: Path,
-    repo: Any,
-    rev: str,
-    op: str,
-    wc_hex: str,
-    saved: dict[str, _WcState],
-    changes: Mapping[str, bytes | str | None],
-    reparented: bool = False,
-) -> str | None:
-    """The working copy after the transaction; return the cleanup op.
-
-    The entry snapshot took the vehicle files into @ and the block
-    rebased it: when @ still holds the pre-run content the vehicle
-    files go back byte-identical; when it holds the staged bytes a
-    second transaction moves them back out; otherwise jj checked out
-    rebased descendants itself, and the files stay as checkout wrote
-    them, verified against the rebased commit. When the block
-    reparented @ itself the staged match means the rebase carried
-    the change, not leftover vehicle, so no cleanup lifts it out:
-    the files stay as checkout wrote them, verified.
-    """
-    current = repo.resolve("@")
-    if _matches_saved(current, saved):
-        _restore_wc(repo_root, saved)
-        _verify_wc(repo_root, saved)
-        return None
-    if _matches_staged(current, changes) and not reparented:
-        # the rebased tip still holds the staged bytes: the entry
-        # snapshot committed them there and the rebase kept them, so
-        # move them back out, leaving the copy as found
-        try:
-            with repo.atomic(
-                f"pyedit working-copy cleanup after {rev}",
-                allow_conflicts=True,
-            ) as tx:
-                tx.restore(sorted(changes), into="@", from_revision=wc_hex)
-            cleanup = repo.operation_id
-        except Exception as err:
-            raise JjRevError(f"cleaning up after {rev!r}: {err}") from err
-        _restore_wc(repo_root, saved)
-        _verify_wc(repo_root, saved)
-        return cleanup
-    _verify_rebased(repo_root, current, saved, rev, op)
-    return None
-
-
-def _reparent(tx: Any, repo: Any, base_hex: str, new: Any, kids: Any) -> None:
-    """Move REV's children onto the inserted commit, in the open block.
-
-    Each child keeps every parent but REV, which the new commit
-    replaces: merges stay merges. `new` is the restore's own return,
-    already the transaction's state, so no resolution can land on a
-    commit the block replaced. jj's own guard refuses public
-    children first; the exit's rebase carries the grandchildren.
-    """
-    if not kids:
-        return
-    raw = tx.transaction
-    raw.check_rewritable(repo.settings, [kid.id for kid in kids])
-    inner = getattr(repo, "_repo", None)
-    if inner is None:
-        raise JjRevError(
-            "pyjj no longer exposes the readonly repo; "
-            "reparenting needs a pyjj verb for it"
-        )
-    new_id = new.id
-    for kid in kids:
-        parents = [
-            new_id if parent.hex() == base_hex else parent for parent in kid.parent_ids
-        ]
-        raw.rewrite_commit(repo.settings, kid).set_parents(parents).write(inner)
 
 
 def target_meta(repo_root: Path, rev: str) -> dict[str, str]:
@@ -610,32 +503,6 @@ def _write_wc(repo_root: Path, target: Any, rel: str, new: bytes | str | None) -
         path.chmod(0o644)
 
 
-def _restore_wc(repo_root: Path, saved: dict[str, _WcState]) -> None:
-    """Put the working copy back byte- and mode-identical."""
-    for rel, (kind, payload, mode) in saved.items():
-        path = repo_root / rel
-        if kind == "absent":
-            if os.path.islink(path):
-                os.unlink(path)
-            else:
-                path.unlink(missing_ok=True)
-        elif kind == "link":
-            if os.path.lexists(path):
-                if os.path.islink(path):
-                    os.unlink(path)
-                else:
-                    path.unlink()
-            path.parent.mkdir(parents=True, exist_ok=True)
-            assert isinstance(payload, str)
-            os.symlink(payload, path)
-        else:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            assert isinstance(payload, bytes)
-            path.write_bytes(payload)
-            if mode is not None:
-                os.chmod(path, mode)
-
-
 def _verify_rebased(
     repo_root: Path,
     at_commit: Any,
@@ -674,16 +541,4 @@ def _verify_rebased(
             raise JjRevError(
                 f"working copy at {rel} does not match rebased @; "
                 f"the amend stands at op {op}, restore one side"
-            )
-
-
-def _verify_wc(repo_root: Path, saved: dict[str, _WcState]) -> None:
-    """The restore really landed; a crash or concurrent edit in the
-    window names itself instead of passing silently."""
-    for rel, (kind, payload, mode) in saved.items():
-        now = _wc_state(repo_root / rel)
-        if (now[0], now[1]) != (kind, payload) or (mode is not None and now[2] != mode):
-            raise JjRevError(
-                f"working copy at {rel} no longer matches; the amend "
-                "stands in history, restore one side before continuing"
             )
